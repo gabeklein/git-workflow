@@ -1,0 +1,110 @@
+{
+  "name": "worktree-compare",
+  "displayName": "Worktree Compare",
+  "description": "Auto-discover git worktrees and compare Working Tree against their base ref — GitLens-style, editable diffs.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "worktree",
+    "diff",
+    "compare",
+    "claude"
+  ],
+  "activationEvents": [
+    "onView:worktreeCompare.worktrees"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Worktree Compare",
+      "properties": {
+        "worktreeCompare.watchFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            ".claude/worktrees"
+          ],
+          "description": "Workspace-relative folders to scan for git worktrees. Each direct child directory that is a git worktree is listed."
+        },
+        "worktreeCompare.defaultBaseRef": {
+          "type": "string",
+          "default": "main",
+          "description": "Default base ref to compare a worktree against when no upstream or other base is resolved."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "worktreeCompare",
+          "title": "Worktree Compare",
+          "icon": "media/worktree.svg"
+        }
+      ]
+    },
+    "views": {
+      "worktreeCompare": [
+        {
+          "id": "worktreeCompare.worktrees",
+          "name": "Worktrees"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "worktreeCompare.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "Worktree Compare"
+      },
+      {
+        "command": "worktreeCompare.openWorktree",
+        "title": "Reveal Worktree in Explorer",
+        "category": "Worktree Compare"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "worktreeCompare.refresh",
+          "when": "view == worktreeCompare.worktrees",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "worktreeCompare.openWorktree",
+          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
+          "group": "inline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.25.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.7.0"
+  }
+}
