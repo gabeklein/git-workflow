@@ -4,8 +4,24 @@ import {
   resolveWatchRoots,
   type DiscoveredWorktree,
 } from '../discovery/scanner';
+import {
+  compareWorkingTreeToBase,
+  listCommitFiles,
+  type CompareResult,
+} from '../git/compare';
+import { resolveBaseRef } from '../git/worktree';
+import {
+  CommitItem,
+  CompareRootItem,
+  FileItem,
+  MessageItem,
+  SectionItem,
+  type TreeNode,
+  WorktreeItem,
+} from './nodes';
 
-export type TreeNode = WorktreeItem | MessageItem;
+export type { TreeNode } from './nodes';
+export { FileItem, WorktreeItem } from './nodes';
 
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -20,6 +36,10 @@ export class WorktreeTreeProvider
   private readonly disposables: vscode.Disposable[] = [];
   private folderWatchers: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
+
+  /** Cache compare results per worktree path */
+  private readonly compareCache = new Map<string, CompareResult>();
+  private readonly compareErrors = new Map<string, string>();
 
   constructor(private readonly output: vscode.OutputChannel) {
     this.disposables.push(
@@ -39,11 +59,12 @@ export class WorktreeTreeProvider
   }
 
   refresh(): void {
-    // Debounce filesystem events
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
     }
     this.refreshTimer = setTimeout(() => {
+      this.compareCache.clear();
+      this.compareErrors.clear();
       void this.load();
     }, 150);
   }
@@ -70,7 +91,6 @@ export class WorktreeTreeProvider
     this.folderWatchers = [];
 
     for (const root of resolveWatchRoots()) {
-      // Watch the folder itself and one level of children (add/remove worktrees)
       const pattern = new vscode.RelativePattern(root, '*');
       try {
         const watcher = vscode.workspace.createFileSystemWatcher(pattern);
@@ -78,14 +98,37 @@ export class WorktreeTreeProvider
           watcher,
           watcher.onDidCreate(() => this.refresh()),
           watcher.onDidDelete(() => this.refresh()),
-          // Rename / git metadata sometimes shows as change
           watcher.onDidChange(() => this.refresh()),
         );
         this.output.appendLine(`Watching ${root}`);
       } catch {
-        // Root may not exist yet — discovery still runs on refresh
         this.output.appendLine(`Watch root not ready: ${root}`);
       }
+    }
+  }
+
+  private defaultBaseRef(): string {
+    return vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<string>('defaultBaseRef', 'main');
+  }
+
+  private async getCompare(worktreePath: string): Promise<CompareResult | undefined> {
+    const cached = this.compareCache.get(worktreePath);
+    if (cached) {
+      return cached;
+    }
+    try {
+      const baseRef = await resolveBaseRef(worktreePath, this.defaultBaseRef());
+      const result = await compareWorkingTreeToBase(worktreePath, baseRef);
+      this.compareCache.set(worktreePath, result);
+      this.compareErrors.delete(worktreePath);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Compare failed for ${worktreePath}: ${message}`);
+      this.compareErrors.set(worktreePath, message);
+      return undefined;
     }
   }
 
@@ -93,14 +136,28 @@ export class WorktreeTreeProvider
     return element;
   }
 
-  getChildren(element?: TreeNode): TreeNode[] {
-    if (element) {
-      // Nested compare tree lands in a later commit
-      return [];
+  async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+    if (!element) {
+      return this.getRootChildren();
     }
 
+    switch (element.kind) {
+      case 'worktree':
+        return this.getWorktreeChildren(element);
+      case 'compareRoot':
+        return this.getCompareRootChildren(element);
+      case 'section':
+        return this.getSectionChildren(element);
+      case 'commit':
+        return this.getCommitChildren(element);
+      default:
+        return [];
+    }
+  }
+
+  private getRootChildren(): TreeNode[] {
     if (this.loading && this.worktrees.length === 0) {
-      return [new MessageItem('Scanning worktrees…', 'loading')];
+      return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
     }
 
     if (this.worktrees.length === 0) {
@@ -109,16 +166,112 @@ export class WorktreeTreeProvider
           .getConfiguration('worktreeCompare')
           .get<string[]>('watchFolders', ['.claude/worktrees'])
           .join(', ') || '.claude/worktrees';
-      return [
-        new MessageItem(
-          'No worktrees found',
-          'empty',
-          `Watched: ${folders}`,
-        ),
-      ];
+      return [new MessageItem('No worktrees found', `Watched: ${folders}`)];
     }
 
     return this.worktrees.map((wt) => new WorktreeItem(wt));
+  }
+
+  private async getWorktreeChildren(item: WorktreeItem): Promise<TreeNode[]> {
+    const compare = await this.getCompare(item.worktreePath);
+    if (!compare) {
+      const err = this.compareErrors.get(item.worktreePath) ?? 'Compare failed';
+      return [new MessageItem('Could not compare', err, 'error')];
+    }
+    return [
+      new CompareRootItem(
+        item.worktreePath,
+        compare.baseRef,
+        compare.ahead,
+        compare.behind,
+      ),
+    ];
+  }
+
+  private async getCompareRootChildren(item: CompareRootItem): Promise<TreeNode[]> {
+    const compare = await this.getCompare(item.worktreePath);
+    if (!compare) {
+      return [new MessageItem('Could not compare', undefined, 'error')];
+    }
+
+    const nodes: TreeNode[] = [];
+
+    nodes.push(
+      new SectionItem(
+        `Behind ${compare.behind} commit${compare.behind === 1 ? '' : 's'}`,
+        'behind',
+        item.worktreePath,
+        compare.baseRef,
+        compare.behind > 0
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
+      ),
+    );
+
+    nodes.push(
+      new SectionItem(
+        `Ahead ${compare.ahead} commit${compare.ahead === 1 ? '' : 's'}`,
+        'ahead',
+        item.worktreePath,
+        compare.baseRef,
+        compare.ahead > 0
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.None,
+      ),
+    );
+
+    const fileLabel = `${compare.files.length} file${compare.files.length === 1 ? '' : 's'} changed`;
+    nodes.push(
+      new SectionItem(
+        fileLabel,
+        'files',
+        item.worktreePath,
+        compare.baseRef,
+        compare.files.length > 0
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.None,
+      ),
+    );
+
+    return nodes;
+  }
+
+  private async getSectionChildren(item: SectionItem): Promise<TreeNode[]> {
+    const compare = await this.getCompare(item.worktreePath);
+    if (!compare) {
+      return [];
+    }
+
+    if (item.section === 'behind') {
+      return compare.commitsBehind.map(
+        (c) => new CommitItem(item.worktreePath, item.baseRef, c),
+      );
+    }
+
+    if (item.section === 'ahead') {
+      return compare.commitsAhead.map(
+        (c) => new CommitItem(item.worktreePath, item.baseRef, c),
+      );
+    }
+
+    // Working tree file list
+    return compare.files.map(
+      (f) => new FileItem(item.worktreePath, item.baseRef, f),
+    );
+  }
+
+  private async getCommitChildren(item: CommitItem): Promise<TreeNode[]> {
+    try {
+      const files = await listCommitFiles(item.worktreePath, item.commit.hash);
+      return files.map(
+        (f) =>
+          new FileItem(item.worktreePath, item.baseRef, f, item.commit.hash),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Commit files failed: ${message}`);
+      return [new MessageItem('Could not list files', message, 'error')];
+    }
   }
 
   dispose(): void {
@@ -132,49 +285,5 @@ export class WorktreeTreeProvider
       d.dispose();
     }
     this._onDidChangeTreeData.dispose();
-  }
-}
-
-export class WorktreeItem extends vscode.TreeItem {
-  readonly worktreePath: string;
-
-  constructor(worktree: DiscoveredWorktree) {
-    super(worktree.name, vscode.TreeItemCollapsibleState.None);
-    this.worktreePath = worktree.path;
-    this.contextValue = 'worktree';
-    this.iconPath = new vscode.ThemeIcon('repo');
-    this.description = worktree.branch + (worktree.detached ? ' (detached)' : '');
-    this.tooltip = new vscode.MarkdownString(
-      [
-        `**${worktree.name}**`,
-        '',
-        `Path: \`${worktree.path}\``,
-        `Branch: \`${worktree.branch}\``,
-        worktree.relativePath ? `Relative: \`${worktree.relativePath}\`` : '',
-        worktree.mainWorktreePath
-          ? `Main: \`${worktree.mainWorktreePath}\``
-          : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    );
-    this.command = {
-      command: 'worktreeCompare.openWorktree',
-      title: 'Reveal Worktree',
-      arguments: [this],
-    };
-  }
-}
-
-class MessageItem extends vscode.TreeItem {
-  constructor(
-    label: string,
-    kind: 'loading' | 'empty',
-    description?: string,
-  ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
-    this.description = description;
-    this.contextValue = kind;
-    this.iconPath = new vscode.ThemeIcon(kind === 'loading' ? 'loading~spin' : 'info');
   }
 }

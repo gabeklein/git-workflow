@@ -71,6 +71,11 @@
         "command": "worktreeCompare.openWorktree",
         "title": "Reveal Worktree in Explorer",
         "category": "Worktree Compare"
+      },
+      {
+        "command": "worktreeCompare.openFileDiff",
+        "title": "Open File Diff",
+        "category": "Worktree Compare"
       }
     ],
     "menus": {
