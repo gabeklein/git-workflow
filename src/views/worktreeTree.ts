@@ -21,7 +21,7 @@ import {
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { FileItem, WorktreeItem } from './nodes';
+export { CompareRootItem, FileItem, WorktreeItem } from './nodes';
 
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -40,6 +40,8 @@ export class WorktreeTreeProvider
   /** Cache compare results per worktree path */
   private readonly compareCache = new Map<string, CompareResult>();
   private readonly compareErrors = new Map<string, string>();
+  /** User-picked base ref overrides (path → ref). Survives refresh. */
+  private readonly baseOverrides = new Map<string, string>();
 
   constructor(private readonly output: vscode.OutputChannel) {
     this.disposables.push(
@@ -65,8 +67,28 @@ export class WorktreeTreeProvider
     this.refreshTimer = setTimeout(() => {
       this.compareCache.clear();
       this.compareErrors.clear();
+      // baseOverrides intentionally kept
       void this.load();
     }, 150);
+  }
+
+  /** Current base used for a worktree (override or resolved default). */
+  getBaseRef(worktreePath: string): string | undefined {
+    return (
+      this.baseOverrides.get(worktreePath) ??
+      this.compareCache.get(worktreePath)?.baseRef
+    );
+  }
+
+  /**
+   * Set the compare base for a worktree and refresh its compare tree.
+   */
+  setBaseRef(worktreePath: string, baseRef: string): void {
+    this.baseOverrides.set(worktreePath, baseRef);
+    this.compareCache.delete(worktreePath);
+    this.compareErrors.delete(worktreePath);
+    this.output.appendLine(`Base ref for ${worktreePath} → ${baseRef}`);
+    this._onDidChangeTreeData.fire();
   }
 
   private async load(): Promise<void> {
@@ -119,7 +141,9 @@ export class WorktreeTreeProvider
       return cached;
     }
     try {
-      const baseRef = await resolveBaseRef(worktreePath, this.defaultBaseRef());
+      const baseRef =
+        this.baseOverrides.get(worktreePath) ??
+        (await resolveBaseRef(worktreePath, this.defaultBaseRef()));
       const result = await compareWorkingTreeToBase(worktreePath, baseRef);
       this.compareCache.set(worktreePath, result);
       this.compareErrors.delete(worktreePath);

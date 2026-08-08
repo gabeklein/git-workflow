@@ -54,6 +54,13 @@ export class CompareRootItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon('git-compare');
     this.description =
       ahead || behind ? `${ahead}↑ ${behind}↓` : '0↑ 0↓';
+    this.tooltip = new vscode.MarkdownString(
+      [
+        `Comparing **Working Tree** with \`${baseRef}\``,
+        '',
+        'Click the compare icon or run **Change Base Ref** to pick another branch/tag.',
+      ].join('\n'),
+    );
   }
 }
 

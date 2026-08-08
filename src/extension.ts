@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
 import { openCommitFileDiff, openWorkingTreeDiff } from './compare/openDiff';
+import { pickBaseRef } from './compare/pickBaseRef';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
-import { FileItem, WorktreeItem, WorktreeTreeProvider } from './views/worktreeTree';
+import {
+  CompareRootItem,
+  FileItem,
+  WorktreeItem,
+  WorktreeTreeProvider,
+} from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Worktree Compare');
@@ -41,6 +47,32 @@ export function activate(context: vscode.ExtensionContext): void {
           'revealInExplorer',
           vscode.Uri.file(target),
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.changeBaseRef',
+      async (item?: CompareRootItem | WorktreeItem) => {
+        const worktreePath = item?.worktreePath;
+        if (!worktreePath) {
+          return;
+        }
+        const current =
+          item && 'baseRef' in item
+            ? item.baseRef
+            : treeProvider.getBaseRef(worktreePath);
+        try {
+          const picked = await pickBaseRef(worktreePath, current);
+          if (!picked) {
+            return;
+          }
+          treeProvider.setBaseRef(worktreePath, picked);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          output.appendLine(`Change base ref failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Worktree Compare: could not change base — ${message}`,
+          );
+        }
       },
     ),
     vscode.commands.registerCommand(

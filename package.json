@@ -76,6 +76,12 @@
         "command": "worktreeCompare.openFileDiff",
         "title": "Open File Diff",
         "category": "Worktree Compare"
+      },
+      {
+        "command": "worktreeCompare.changeBaseRef",
+        "title": "Change Base Ref",
+        "icon": "$(git-compare)",
+        "category": "Worktree Compare"
       }
     ],
     "menus": {
@@ -91,6 +97,21 @@
           "command": "worktreeCompare.openWorktree",
           "when": "view == worktreeCompare.worktrees && viewItem == worktree",
           "group": "inline"
+        },
+        {
+          "command": "worktreeCompare.changeBaseRef",
+          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
+          "group": "inline"
+        },
+        {
+          "command": "worktreeCompare.changeBaseRef",
+          "when": "view == worktreeCompare.worktrees && viewItem == compareRoot",
+          "group": "inline"
+        },
+        {
+          "command": "worktreeCompare.changeBaseRef",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktree|compareRoot)$/",
+          "group": "0_compare"
         }
       ]
     }
