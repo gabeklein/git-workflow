@@ -1,0 +1,55 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+export class GitError extends Error {
+  constructor(
+    message: string,
+    readonly stderr: string,
+    readonly code: number | null,
+  ) {
+    super(message);
+    this.name = 'GitError';
+  }
+}
+
+export async function git(
+  cwd: string,
+  args: string[],
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd,
+      maxBuffer: 10 * 1024 * 1024,
+      env: {
+        ...process.env,
+        // Stable, script-friendly output
+        GIT_TERMINAL_PROMPT: '0',
+        LANG: 'C',
+      },
+    });
+    return stdout.toString();
+  } catch (err: unknown) {
+    const e = err as {
+      stderr?: Buffer | string;
+      code?: number;
+      message?: string;
+    };
+    const stderr = e.stderr?.toString() ?? '';
+    throw new GitError(
+      e.message ?? `git ${args.join(' ')} failed`,
+      stderr,
+      e.code ?? null,
+    );
+  }
+}
+
+export async function gitOk(cwd: string, args: string[]): Promise<boolean> {
+  try {
+    await git(cwd, args);
+    return true;
+  } catch {
+    return false;
+  }
+}

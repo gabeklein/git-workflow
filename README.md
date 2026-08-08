@@ -24,6 +24,6 @@ npm run watch   # or press F5 (starts watch via preLaunchTask)
 ## Roadmap
 
 - [x] Extension scaffold (TreeView shell, config, F5/watch)
-- [ ] Discover worktrees under watch folders
+- [x] Discover worktrees under watch folders
 - [ ] Compare Working Tree vs base (ahead/behind, commits, files)
 - [ ] Open diffs with real worktree file paths (editable)

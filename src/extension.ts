@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WorktreeTreeProvider } from './views/worktreeTree';
+import { WorktreeItem, WorktreeTreeProvider } from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Worktree Compare');
@@ -21,7 +21,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand(
       'worktreeCompare.openWorktree',
-      async (item?: { worktreePath?: string }) => {
+      async (item?: WorktreeItem) => {
         const target = item?.worktreePath;
         if (!target) {
           return;
