@@ -77,7 +77,7 @@ export class SectionItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly section: 'staged' | 'changes' | 'fullPr',
+    readonly section: 'staged' | 'changes' | 'squash',
     readonly worktreePath: string,
     readonly baseRef: string,
     collapsible: vscode.TreeItemCollapsibleState,
@@ -91,6 +91,7 @@ export class SectionItem extends vscode.TreeItem {
     } else if (section === 'changes') {
       this.iconPath = new vscode.ThemeIcon('request-changes');
     } else {
+      // Squash = cumulative WT ↔ base file set
       this.iconPath = new vscode.ThemeIcon('git-pull-request');
     }
   }
@@ -107,12 +108,15 @@ export class CommitItem extends vscode.TreeItem {
     super(commit.subject || commit.shortHash, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = 'commit';
     this.iconPath = new vscode.ThemeIcon('git-commit');
-    // Secondary label on the right (TreeItem has no "description only on hover").
-    // Full SHA stays on Copy Commit SHA; author is available on tooltip.
+    // Time on the right; full subject + time + author on hover (narrow sidebars).
     this.description = commit.relativeDate || undefined;
-    this.tooltip = commit.author
-      ? `${commit.relativeDate || ''}${commit.relativeDate ? ' · ' : ''}${commit.author}`.trim()
-      : commit.relativeDate || undefined;
+    this.tooltip = [
+      commit.subject || commit.shortHash,
+      commit.relativeDate || undefined,
+      commit.author ? commit.author : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 }
 
@@ -142,7 +146,7 @@ export class FileItem extends vscode.TreeItem {
       opts.diffKind === 'commit'
         ? 'commitFile'
         : opts.diffKind === 'vsBase'
-          ? 'fullPrFile'
+          ? 'squashFile'
           : opts.statusSide === 'staged'
             ? 'stagedFile'
             : opts.statusSide === 'unstaged'

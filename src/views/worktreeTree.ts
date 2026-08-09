@@ -274,16 +274,16 @@ export class WorktreeTreeProvider
       ),
     );
 
-    const prCount = compare.fullPrFiles.length;
+    const squashCount = compare.fullPrFiles.length;
     nodes.push(
       new SectionItem(
-        'Full PR',
-        'fullPr',
+        'Squash',
+        'squash',
         item.worktreePath,
         compare.baseRef,
         vscode.TreeItemCollapsibleState.Collapsed,
-        prCount > 0
-          ? `${prCount} vs ${compare.baseRef}`
+        squashCount > 0
+          ? `${squashCount} vs ${compare.baseRef}`
           : `0 vs ${compare.baseRef}`,
       ),
     );

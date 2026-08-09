@@ -5,7 +5,7 @@ import type { FileChange } from '../git/compare';
 
 /**
  * Editable diff: left = ref content, right = real worktree file.
- * Used for Full PR (vs base) and dirty Changes (vs HEAD).
+ * Used for Squash (vs base) and dirty Changes (vs HEAD).
  */
 export async function openWorkingTreeDiff(
   worktreePath: string,
