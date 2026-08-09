@@ -44,15 +44,17 @@ export class WorktreeListItem extends vscode.TreeItem {
       worktree.branch + (worktree.detached ? ' (detached)' : '');
     super(branchLabel, vscode.TreeItemCollapsibleState.None);
     this.worktreePath = worktree.path;
-    this.description = worktree.name;
+    // Branch only in the row; path on hover
+    this.description = undefined;
     this.contextValue = selected ? 'worktreeListItemActive' : 'worktreeListItem';
     this.iconPath = new vscode.ThemeIcon(
       selected ? 'circle-filled' : 'circle-outline',
     );
+    const rel =
+      worktree.relativePath || worktree.name || worktree.path;
     this.tooltip = [
       branchLabel,
-      `Folder: ${worktree.name}`,
-      worktree.path,
+      rel,
       selected ? 'Selected' : 'Click to focus',
     ].join('\n');
     this.command = {
