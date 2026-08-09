@@ -64,6 +64,9 @@ export class WorktreeTreeProvider
   private pollTimer: NodeJS.Timeout | undefined;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
+  /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
+  private pollPace: 'active' | 'idle' = 'idle';
+  private lastFingerprintChangeAt = 0;
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
@@ -193,6 +196,8 @@ export class WorktreeTreeProvider
     if (!selected || !isPathInside(uri.fsPath, selected)) {
       return;
     }
+    // File activity → bump to active pace (next scheduled poll uses it too)
+    this.enterActivePollPace('file-event');
     if (this.contentDebounce) {
       clearTimeout(this.contentDebounce);
     }
@@ -202,29 +207,105 @@ export class WorktreeTreeProvider
     }, 400);
   }
 
-  private contentRefreshIntervalMs(): number {
+  /** Idle (relaxed) poll interval; 0 disables polling entirely. */
+  private idlePollIntervalMs(): number {
     return vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIntervalMs', 3000);
+      .get<number>('contentRefreshIntervalMs', 5000);
+  }
+
+  /** Active (rapid) poll while changes keep landing. */
+  private activePollIntervalMs(): number {
+    const configured = vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<number>('contentRefreshActiveIntervalMs', 1500);
+    const idle = this.idlePollIntervalMs();
+    if (idle <= 0) {
+      return configured;
+    }
+    // Never slower than idle; never below 500ms
+    return Math.max(500, Math.min(configured, idle));
+  }
+
+  /** Quiet time before stepping back from active → idle pace. */
+  private idleAfterMs(): number {
+    return vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<number>('contentRefreshIdleAfterMs', 15000);
+  }
+
+  private enterActivePollPace(reason: string): void {
+    const was = this.pollPace;
+    this.pollPace = 'active';
+    this.lastFingerprintChangeAt = Date.now();
+    if (was !== 'active') {
+      this.output.appendLine(`Hot-follow pace → active (${reason})`);
+      // Reschedule sooner if we were idling on a long timer
+      this.restartPoll();
+    }
+  }
+
+  private maybeRelaxPollPace(): void {
+    if (this.pollPace !== 'active') {
+      return;
+    }
+    if (Date.now() - this.lastFingerprintChangeAt < this.idleAfterMs()) {
+      return;
+    }
+    this.pollPace = 'idle';
+    this.output.appendLine('Hot-follow pace → idle (quiet)');
+  }
+
+  private currentPollIntervalMs(): number {
+    return this.pollPace === 'active'
+      ? this.activePollIntervalMs()
+      : this.idlePollIntervalMs();
   }
 
   private restartPoll(): void {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
     }
-    const ms = this.contentRefreshIntervalMs();
-    if (ms <= 0) {
+    const idle = this.idlePollIntervalMs();
+    if (idle <= 0) {
       this.output.appendLine('Hot-follow poll disabled (contentRefreshIntervalMs=0)');
       return;
     }
-    this.output.appendLine(`Hot-follow poll every ${ms}ms (selected worktree only)`);
-    this.pollTimer = setInterval(() => {
-      if (!vscode.window.state.focused) {
-        return;
-      }
-      void this.softRefreshSelected('poll');
+    this.output.appendLine(
+      `Hot-follow poll: idle=${idle}ms active=${this.activePollIntervalMs()}ms relaxAfter=${this.idleAfterMs()}ms`,
+    );
+    this.scheduleNextPoll();
+  }
+
+  private scheduleNextPoll(): void {
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    const idle = this.idlePollIntervalMs();
+    if (idle <= 0) {
+      return;
+    }
+    this.maybeRelaxPollPace();
+    const ms = this.currentPollIntervalMs();
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = undefined;
+      void this.runPollTick();
     }, ms);
+  }
+
+  private async runPollTick(): Promise<void> {
+    try {
+      if (vscode.window.state.focused) {
+        await this.softRefreshSelected('poll');
+      } else {
+        // Unfocused: still decay toward idle so we don't stay hot forever
+        this.maybeRelaxPollPace();
+      }
+    } finally {
+      this.scheduleNextPoll();
+    }
   }
 
   private async softRefreshSelected(reason: string): Promise<void> {
@@ -244,9 +325,13 @@ export class WorktreeTreeProvider
       }
       const nextFp = snapshotFingerprint(next);
       if (prevFp === nextFp) {
+        this.maybeRelaxPollPace();
         return;
       }
-      this.output.appendLine(`Hot-follow update (${reason}): ${path.basename(worktreePath)}`);
+      this.enterActivePollPace(reason);
+      this.output.appendLine(
+        `Hot-follow update (${reason}, pace=${this.pollPace}): ${path.basename(worktreePath)}`,
+      );
       this._onDidChangeTreeData.fire();
     } finally {
       this.softRefreshInFlight = false;
@@ -658,7 +743,7 @@ export class WorktreeTreeProvider
       clearTimeout(this.refreshTimer);
     }
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
     }
     if (this.contentDebounce) {
       clearTimeout(this.contentDebounce);

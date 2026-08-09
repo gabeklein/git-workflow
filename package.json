@@ -61,9 +61,21 @@
         },
         "worktreeCompare.contentRefreshIntervalMs": {
           "type": "number",
-          "default": 3000,
+          "default": 5000,
           "minimum": 0,
-          "description": "Hot-follow: poll the focused worktree for git status changes (ms). 0 disables polling. Also refreshes on save/create/delete under the focused worktree (no recursive **/* watchers)."
+          "description": "Hot-follow idle poll interval for the focused worktree (ms). Used when quiet. 0 disables polling. File save/create/delete still refresh."
+        },
+        "worktreeCompare.contentRefreshActiveIntervalMs": {
+          "type": "number",
+          "default": 1500,
+          "minimum": 500,
+          "description": "Hot-follow active poll interval (ms) after a change is detected. Relaxes back to idle after contentRefreshIdleAfterMs of no changes."
+        },
+        "worktreeCompare.contentRefreshIdleAfterMs": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "description": "How long after the last detected change before hot-follow poll pace returns to idle."
         }
       }
     },
