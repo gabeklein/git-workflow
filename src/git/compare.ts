@@ -139,13 +139,19 @@ export async function listCommitFiles(
   return parseNameStatus(out);
 }
 
-/** Read file contents at a ref; empty string if missing. */
+/**
+ * Read file contents at a ref; empty string if missing.
+ * Special ref `INDEX` (or `:` / `:0`) reads the staging-area blob.
+ */
 export async function showFileAtRef(
   worktreePath: string,
   ref: string,
   relativePath: string,
 ): Promise<string> {
   try {
+    if (ref === 'INDEX' || ref === ':' || ref === ':0') {
+      return await git(worktreePath, ['show', `:${relativePath}`]);
+    }
     return await git(worktreePath, ['show', `${ref}:${relativePath}`]);
   } catch {
     return '';

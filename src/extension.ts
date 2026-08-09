@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import {
   openCommitFileDiff,
+  openStagedDiff,
+  openUnstagedDiff,
   openWorkingTreeDiff,
 } from './compare/openDiff';
 import { pickBaseRef } from './compare/pickBaseRef';
@@ -115,13 +117,13 @@ export function activate(context: vscode.ExtensionContext): void {
             );
             return;
           }
-          // Staged / unstaged: editable vs HEAD
-          await openWorkingTreeDiff(
-            item.worktreePath,
-            'HEAD',
-            item.file,
-            'Working Tree',
-          );
+          // Keep staged vs unstaged views separate (no mixed HEAD↔WT)
+          if (item.statusSide === 'staged') {
+            await openStagedDiff(item.worktreePath, item.file);
+            return;
+          }
+          // Changes (unstaged): Index ↔ Working Tree only
+          await openUnstagedDiff(item.worktreePath, item.file);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           output.appendLine(`Open diff failed: ${message}`);

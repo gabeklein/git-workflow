@@ -5,7 +5,7 @@ import type { FileChange } from '../git/compare';
 
 /**
  * Editable diff: left = ref content, right = real worktree file.
- * Used for Squash (vs base) and dirty Changes (vs HEAD).
+ * Used for Squash (Working Tree ↔ base).
  */
 export async function openWorkingTreeDiff(
   worktreePath: string,
@@ -16,11 +16,62 @@ export async function openWorkingTreeDiff(
   const rel = file.path;
   const abs = path.join(worktreePath, ...rel.split('/'));
   const right = vscode.Uri.file(abs);
-  const left = toGitContentUri(worktreePath, leftRef, rel);
-
+  const left = toGitContentUri(worktreePath, leftRef, file.oldPath ?? rel);
   const title = `${path.basename(rel)} (${leftRef} ↔ ${titleRightLabel})`;
 
   if (file.status === 'A' || file.status === '?') {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+    return;
+  }
+
+  if (file.status === 'D') {
+    await vscode.commands.executeCommand('vscode.open', left);
+    return;
+  }
+
+  await vscode.commands.executeCommand('vscode.diff', left, right, title);
+}
+
+/**
+ * Unstaged only: Index ↔ Working Tree (real file on the right).
+ * Does not mix in staged-only hunks.
+ */
+export async function openUnstagedDiff(
+  worktreePath: string,
+  file: FileChange,
+): Promise<void> {
+  const rel = file.path;
+  const abs = path.join(worktreePath, ...rel.split('/'));
+  const right = vscode.Uri.file(abs);
+  const left = toGitContentUri(worktreePath, 'INDEX', file.oldPath ?? rel);
+  const title = `${path.basename(rel)} (Index ↔ Working Tree)`;
+
+  if (file.status === 'A' || file.status === '?') {
+    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+    return;
+  }
+
+  if (file.status === 'D') {
+    await vscode.commands.executeCommand('vscode.open', left);
+    return;
+  }
+
+  await vscode.commands.executeCommand('vscode.diff', left, right, title);
+}
+
+/**
+ * Staged only: HEAD ↔ Index (both virtual — no unstaged WT noise).
+ */
+export async function openStagedDiff(
+  worktreePath: string,
+  file: FileChange,
+): Promise<void> {
+  const rel = file.path;
+  const left = toGitContentUri(worktreePath, 'HEAD', file.oldPath ?? rel);
+  const right = toGitContentUri(worktreePath, 'INDEX', rel);
+  const title = `${path.basename(rel)} (HEAD ↔ Index)`;
+
+  if (file.status === 'A') {
     await vscode.commands.executeCommand('vscode.diff', left, right, title);
     return;
   }
