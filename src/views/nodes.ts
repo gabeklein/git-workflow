@@ -1,15 +1,67 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { CommitInfo, FileChange } from '../git/compare';
+import type { DiscoveredWorktree } from '../discovery/scanner';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
 
 export type TreeNode =
+  | GroupItem
+  | WorktreeListItem
   | BehindWarningItem
   | CommitItem
   | SectionItem
   | FileItem
   | MessageItem;
+
+/** Top-level collapsible group (Worktrees list / Details body). */
+export class GroupItem extends vscode.TreeItem {
+  readonly kind = 'group' as const;
+
+  constructor(
+    label: string,
+    readonly group: 'worktrees' | 'details',
+    collapsible: vscode.TreeItemCollapsibleState,
+    description?: string,
+  ) {
+    super(label, collapsible);
+    this.contextValue = `group:${group}`;
+    this.description = description;
+    this.iconPath =
+      group === 'worktrees'
+        ? new vscode.ThemeIcon('repo')
+        : new vscode.ThemeIcon('list-tree');
+  }
+}
+
+/** One row in the Worktrees group — click focuses Details. */
+export class WorktreeListItem extends vscode.TreeItem {
+  readonly kind = 'worktreeList' as const;
+  readonly worktreePath: string;
+
+  constructor(worktree: DiscoveredWorktree, selected: boolean) {
+    const branchLabel =
+      worktree.branch + (worktree.detached ? ' (detached)' : '');
+    super(branchLabel, vscode.TreeItemCollapsibleState.None);
+    this.worktreePath = worktree.path;
+    this.description = worktree.name;
+    this.contextValue = selected ? 'worktreeListItemActive' : 'worktreeListItem';
+    this.iconPath = new vscode.ThemeIcon(
+      selected ? 'circle-filled' : 'circle-outline',
+    );
+    this.tooltip = [
+      branchLabel,
+      `Folder: ${worktree.name}`,
+      worktree.path,
+      selected ? 'Selected — shown under Details' : 'Click to show under Details',
+    ].join('\n');
+    this.command = {
+      command: 'worktreeCompare.focusWorktree',
+      title: 'Focus Worktree',
+      arguments: [this.worktreePath],
+    };
+  }
+}
 
 /** Soft warning when worktree tip is behind its compare base. */
 export class BehindWarningItem extends vscode.TreeItem {

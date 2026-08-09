@@ -10,7 +10,6 @@ import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { stagePaths, unstagePaths } from './git/stage';
 import { createFileBackedLogger } from './log';
-import { WorktreeListProvider } from './views/worktreeListProvider';
 import {
   CommitItem,
   FileItem,
@@ -36,20 +35,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeProvider = new WorktreeTreeProvider(log, context);
   context.subscriptions.push(treeProvider);
 
-  const listProvider = new WorktreeListProvider(treeProvider);
-  context.subscriptions.push(listProvider);
-
-  const listView = vscode.window.createTreeView('worktreeCompare.list', {
-    treeDataProvider: listProvider,
-    showCollapseAll: false,
-  });
-  context.subscriptions.push(listView);
-
-  const detailsView = vscode.window.createTreeView('worktreeCompare.worktrees', {
+  const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
-  context.subscriptions.push(detailsView);
+  context.subscriptions.push(treeView);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('worktreeCompare.refresh', () => {

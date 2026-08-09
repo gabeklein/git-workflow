@@ -16,13 +16,15 @@ import {
   BehindWarningItem,
   CommitItem,
   FileItem,
+  GroupItem,
   MessageItem,
   SectionItem,
   type TreeNode,
+  WorktreeListItem,
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { CommitItem, FileItem } from './nodes';
+export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
@@ -32,9 +34,9 @@ interface WorktreeSnapshot {
 }
 
 /**
- * Focused single-worktree tree.
- * Discovery still scans all watch folders; sidebar body is the selected
- * worktree only. Selection UI lives in the webview above this tree.
+ * Single TreeView:
+ *   ▼ Worktrees   — list (click to focus)
+ *   ▼ Details     — body of the selected worktree
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -269,9 +271,14 @@ export class WorktreeTreeProvider
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
       if (!element) {
-        return await this.getRootChildren();
+        return this.getRootChildren();
       }
       switch (element.kind) {
+        case 'group':
+          if (element.group === 'worktrees') {
+            return this.getWorktreeListChildren();
+          }
+          return await this.getDetailsChildren();
         case 'section':
           return await this.getSectionChildren(element);
         case 'commit':
@@ -286,7 +293,7 @@ export class WorktreeTreeProvider
     }
   }
 
-  private async getRootChildren(): Promise<TreeNode[]> {
+  private getRootChildren(): TreeNode[] {
     if (this.loading && this.worktrees.length === 0) {
       return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
     }
@@ -300,11 +307,38 @@ export class WorktreeTreeProvider
     }
 
     const selected = this.getSelected();
-    if (!selected) {
-      return [new MessageItem('Select a worktree', 'Use the dropdown above')];
-    }
+    const detailsDesc = selected
+      ? selected.branch + (selected.detached ? ' (detached)' : '')
+      : undefined;
 
-    // Body only — selection UI is the webview above this tree
+    return [
+      new GroupItem(
+        'Worktrees',
+        'worktrees',
+        vscode.TreeItemCollapsibleState.Expanded,
+        String(this.worktrees.length),
+      ),
+      new GroupItem(
+        'Details',
+        'details',
+        vscode.TreeItemCollapsibleState.Expanded,
+        detailsDesc,
+      ),
+    ];
+  }
+
+  private getWorktreeListChildren(): TreeNode[] {
+    const selected = this.getSelectedPath();
+    return this.worktrees.map(
+      (wt) => new WorktreeListItem(wt, wt.path === selected),
+    );
+  }
+
+  private async getDetailsChildren(): Promise<TreeNode[]> {
+    const selected = this.getSelected();
+    if (!selected) {
+      return [new MessageItem('Select a worktree above')];
+    }
     return this.getWorktreeBody(selected.path);
   }
 

@@ -20,7 +20,6 @@
     "claude"
   ],
   "activationEvents": [
-    "onView:worktreeCompare.list",
     "onView:worktreeCompare.worktrees"
   ],
   "main": "./dist/extension.js",
@@ -57,14 +56,8 @@
     "views": {
       "worktreeCompare": [
         {
-          "id": "worktreeCompare.list",
-          "name": "Worktrees",
-          "contextualTitle": "Worktrees"
-        },
-        {
           "id": "worktreeCompare.worktrees",
-          "name": "Details",
-          "contextualTitle": "Details"
+          "name": "Worktree"
         }
       ]
     },
@@ -129,12 +122,12 @@
       "view/title": [
         {
           "command": "worktreeCompare.selectWorktree",
-          "when": "view == worktreeCompare.list || view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.worktrees",
           "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.refresh",
-          "when": "view == worktreeCompare.list || view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.worktrees",
           "group": "navigation@2"
         }
       ],
@@ -146,12 +139,7 @@
         },
         {
           "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.list && viewItem =~ /^worktreeListItem/",
-          "group": "navigation"
-        },
-        {
-          "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^worktreeListItem/",
           "group": "navigation"
         },
         {
