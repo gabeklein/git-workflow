@@ -14,13 +14,13 @@ export type TreeNode =
   | FileItem
   | MessageItem;
 
-/** Top-level collapsible group (Worktrees list / Details body). */
+/** Top-level collapsible group (Worktrees list / Ahead commits). */
 export class GroupItem extends vscode.TreeItem {
   readonly kind = 'group' as const;
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'details',
+    readonly group: 'worktrees' | 'ahead',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
   ) {
@@ -30,11 +30,11 @@ export class GroupItem extends vscode.TreeItem {
     this.iconPath =
       group === 'worktrees'
         ? new vscode.ThemeIcon('repo')
-        : new vscode.ThemeIcon('list-tree');
+        : new vscode.ThemeIcon('git-commit');
   }
 }
 
-/** One row in the Worktrees group — click focuses Details. */
+/** One row in the Worktrees group — click focuses the sections below. */
 export class WorktreeListItem extends vscode.TreeItem {
   readonly kind = 'worktreeList' as const;
   readonly worktreePath: string;
@@ -53,7 +53,7 @@ export class WorktreeListItem extends vscode.TreeItem {
       branchLabel,
       `Folder: ${worktree.name}`,
       worktree.path,
-      selected ? 'Selected — shown under Details' : 'Click to show under Details',
+      selected ? 'Selected' : 'Click to focus',
     ].join('\n');
     this.command = {
       command: 'worktreeCompare.focusWorktree',

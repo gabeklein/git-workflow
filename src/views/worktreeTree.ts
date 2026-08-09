@@ -271,14 +271,14 @@ export class WorktreeTreeProvider
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
       if (!element) {
-        return this.getRootChildren();
+        return await this.getRootChildren();
       }
       switch (element.kind) {
         case 'group':
           if (element.group === 'worktrees') {
             return this.getWorktreeListChildren();
           }
-          return await this.getDetailsChildren();
+          return await this.getAheadChildren();
         case 'section':
           return await this.getSectionChildren(element);
         case 'commit':
@@ -293,7 +293,7 @@ export class WorktreeTreeProvider
     }
   }
 
-  private getRootChildren(): TreeNode[] {
+  private async getRootChildren(): Promise<TreeNode[]> {
     if (this.loading && this.worktrees.length === 0) {
       return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
     }
@@ -307,65 +307,50 @@ export class WorktreeTreeProvider
     }
 
     const selected = this.getSelected();
-    const detailsDesc = selected
-      ? selected.branch + (selected.detached ? ' (detached)' : '')
-      : undefined;
-
-    return [
+    const nodes: TreeNode[] = [
       new GroupItem(
         'Worktrees',
         'worktrees',
         vscode.TreeItemCollapsibleState.Expanded,
         String(this.worktrees.length),
       ),
-      new GroupItem(
-        'Details',
-        'details',
-        vscode.TreeItemCollapsibleState.Expanded,
-        detailsDesc,
-      ),
     ];
-  }
 
-  private getWorktreeListChildren(): TreeNode[] {
-    const selected = this.getSelectedPath();
-    return this.worktrees.map(
-      (wt) => new WorktreeListItem(wt, wt.path === selected),
-    );
-  }
-
-  private async getDetailsChildren(): Promise<TreeNode[]> {
-    const selected = this.getSelected();
     if (!selected) {
-      return [new MessageItem('Select a worktree above')];
+      nodes.push(new MessageItem('Select a worktree above'));
+      return nodes;
     }
-    return this.getWorktreeBody(selected.path);
-  }
 
-  private async getWorktreeBody(worktreePath: string): Promise<TreeNode[]> {
-    const snap = await this.getSnapshot(worktreePath);
+    const snap = await this.getSnapshot(selected.path);
+    const aheadCount = snap?.compare.ahead;
+    const aheadDesc =
+      aheadCount !== undefined
+        ? `${aheadCount} commit${aheadCount === 1 ? '' : 's'}`
+        : selected.branch;
+
+    nodes.push(
+      new GroupItem(
+        'Ahead',
+        'ahead',
+        vscode.TreeItemCollapsibleState.Expanded,
+        aheadDesc,
+      ),
+    );
+
     if (!snap) {
-      const err = this.compareErrors.get(worktreePath) ?? 'Failed to load';
-      return [new MessageItem('Could not load worktree', err, 'error')];
+      const err = this.compareErrors.get(selected.path) ?? 'Failed to load';
+      nodes.push(new MessageItem('Could not load worktree', err, 'error'));
+      return nodes;
     }
 
     const { compare, status } = snap;
-    const nodes: TreeNode[] = [];
+    const worktreePath = selected.path;
 
-    if (compare.behind > 0) {
-      nodes.push(
-        new BehindWarningItem(worktreePath, compare.baseRef, compare.behind),
-      );
-    }
-
-    for (const c of compare.commitsAhead) {
-      nodes.push(new CommitItem(worktreePath, compare.baseRef, c));
-    }
-
+    // Hoisted file sections (siblings of Worktrees / Ahead)
     if (status.staged.length > 0) {
       nodes.push(
         new SectionItem(
-          'Staged Changes',
+          'Staged',
           'staged',
           worktreePath,
           compare.baseRef,
@@ -375,7 +360,6 @@ export class WorktreeTreeProvider
       );
     }
 
-    const changesCount = status.unstaged.length;
     nodes.push(
       new SectionItem(
         'Changes',
@@ -383,11 +367,10 @@ export class WorktreeTreeProvider
         worktreePath,
         compare.baseRef,
         vscode.TreeItemCollapsibleState.Expanded,
-        changesCount > 0 ? String(changesCount) : undefined,
+        status.unstaged.length > 0 ? String(status.unstaged.length) : undefined,
       ),
     );
 
-    const squashCount = compare.fullPrFiles.length;
     nodes.push(
       new SectionItem(
         'Squashed',
@@ -395,12 +378,55 @@ export class WorktreeTreeProvider
         worktreePath,
         compare.baseRef,
         vscode.TreeItemCollapsibleState.Collapsed,
-        squashCount > 0
-          ? `${squashCount} vs ${compare.baseRef}`
+        compare.fullPrFiles.length > 0
+          ? `${compare.fullPrFiles.length} vs ${compare.baseRef}`
           : `0 vs ${compare.baseRef}`,
       ),
     );
 
+    return nodes;
+  }
+
+  private getWorktreeListChildren(): TreeNode[] {
+    const selected = this.getSelectedPath();
+    return this.worktrees.map(
+      (wt) => new WorktreeListItem(wt, wt.path === selected),
+    );
+  }
+
+  /** Behind warning + commits ahead of base (no file sections). */
+  private async getAheadChildren(): Promise<TreeNode[]> {
+    const selected = this.getSelected();
+    if (!selected) {
+      return [new MessageItem('Select a worktree above')];
+    }
+    const snap = await this.getSnapshot(selected.path);
+    if (!snap) {
+      const err = this.compareErrors.get(selected.path) ?? 'Failed to load';
+      return [new MessageItem('Could not load', err, 'error')];
+    }
+
+    const { compare } = snap;
+    const nodes: TreeNode[] = [];
+
+    if (compare.behind > 0) {
+      nodes.push(
+        new BehindWarningItem(
+          selected.path,
+          compare.baseRef,
+          compare.behind,
+        ),
+      );
+    }
+
+    if (compare.commitsAhead.length === 0) {
+      nodes.push(new MessageItem('No commits ahead of base', compare.baseRef));
+      return nodes;
+    }
+
+    for (const c of compare.commitsAhead) {
+      nodes.push(new CommitItem(selected.path, compare.baseRef, c));
+    }
     return nodes;
   }
 

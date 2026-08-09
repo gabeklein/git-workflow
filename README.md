@@ -43,13 +43,15 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 ▼ Worktrees (N)
   ● fix/foo          folder-a   ← click to focus
   ○ feat/bar         folder-b
-▼ Details · fix/foo             ← body of selection only
-  ⚠ Behind …
+▼ Ahead (N commits)
+  ⚠ Behind …                    ← if behind base
   commits…
-  Staged / Changes / Squashed
+▼ Staged (N)                    ← hidden if empty
+▼ Changes
+▼ Squashed · N vs base
 ```
 
-One tree: collapsible groups only (no real separators / no second view).
+One tree. Staged / Changes / Squashed are root-level sections (not nested under Ahead).
 Selection is persisted per workspace.
 
 ## Roadmap
