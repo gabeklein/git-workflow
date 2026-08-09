@@ -61,21 +61,21 @@
         },
         "worktreeCompare.contentRefreshIntervalMs": {
           "type": "number",
-          "default": 5000,
+          "default": 0,
           "minimum": 0,
-          "description": "Hot-follow idle poll interval for the focused worktree (ms). Used when quiet. 0 disables polling. File save/create/delete still refresh."
+          "description": "Hot-follow idle poll interval for the focused worktree (ms). 0 = off (default; events only). When >0, uses decaying active/idle poll. Prefer events; enable poll only if agents write outside the editor."
         },
         "worktreeCompare.contentRefreshActiveIntervalMs": {
           "type": "number",
-          "default": 1500,
-          "minimum": 500,
-          "description": "Hot-follow active poll interval (ms) after a change is detected. Relaxes back to idle after contentRefreshIdleAfterMs of no changes."
+          "default": 2500,
+          "minimum": 1000,
+          "description": "Hot-follow active poll interval (ms) after a change is detected. Only used when contentRefreshIntervalMs > 0."
         },
         "worktreeCompare.contentRefreshIdleAfterMs": {
           "type": "number",
-          "default": 15000,
-          "minimum": 1000,
-          "description": "How long after the last detected change before hot-follow poll pace returns to idle."
+          "default": 20000,
+          "minimum": 3000,
+          "description": "Quiet time before poll pace returns to idle. Only used when contentRefreshIntervalMs > 0."
         }
       }
     },

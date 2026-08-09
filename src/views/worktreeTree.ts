@@ -240,8 +240,8 @@ export class WorktreeTreeProvider
     this.lastFingerprintChangeAt = Date.now();
     if (was !== 'active') {
       this.output.appendLine(`Hot-follow pace → active (${reason})`);
-      // Reschedule sooner if we were idling on a long timer
-      this.restartPoll();
+      // Pull the next poll forward without a full restart/log spam
+      this.scheduleNextPoll();
     }
   }
 
@@ -269,9 +269,12 @@ export class WorktreeTreeProvider
     }
     const idle = this.idlePollIntervalMs();
     if (idle <= 0) {
-      this.output.appendLine('Hot-follow poll disabled (contentRefreshIntervalMs=0)');
+      this.output.appendLine(
+        'Hot-follow poll disabled (contentRefreshIntervalMs=0); save/create/delete events still refresh',
+      );
       return;
     }
+    this.pollPace = 'idle';
     this.output.appendLine(
       `Hot-follow poll: idle=${idle}ms active=${this.activePollIntervalMs()}ms relaxAfter=${this.idleAfterMs()}ms`,
     );
@@ -300,7 +303,6 @@ export class WorktreeTreeProvider
       if (vscode.window.state.focused) {
         await this.softRefreshSelected('poll');
       } else {
-        // Unfocused: still decay toward idle so we don't stay hot forever
         this.maybeRelaxPollPace();
       }
     } finally {
@@ -308,6 +310,10 @@ export class WorktreeTreeProvider
     }
   }
 
+  /**
+   * Cheap content refresh: reuse cached baseRef; only re-run status/diff.
+   * Avoids resolveBaseRef on every tick (that path was hang-prone).
+   */
   private async softRefreshSelected(reason: string): Promise<void> {
     const worktreePath = this.getSelectedPath();
     if (!worktreePath || this.loading || this.softRefreshInFlight) {
@@ -317,13 +323,20 @@ export class WorktreeTreeProvider
     try {
       const prev = this.snapshotCache.get(worktreePath);
       const prevFp = prev ? snapshotFingerprint(prev) : undefined;
-      this.snapshotCache.delete(worktreePath);
-      const next = await this.getSnapshot(worktreePath);
-      if (!next) {
-        this._onDidChangeTreeData.fire();
-        return;
-      }
+      const baseRef =
+        this.baseOverrides.get(worktreePath) ??
+        prev?.compare.baseRef ??
+        (await resolveBaseRef(worktreePath, this.defaultBaseRef()));
+
+      const [compare, status] = await Promise.all([
+        compareWorkingTreeToBase(worktreePath, baseRef),
+        getWorkingStatus(worktreePath),
+      ]);
+      const next: WorktreeSnapshot = { compare, status };
       const nextFp = snapshotFingerprint(next);
+      this.snapshotCache.set(worktreePath, next);
+      this.compareErrors.delete(worktreePath);
+
       if (prevFp === nextFp) {
         this.maybeRelaxPollPace();
         return;
@@ -333,6 +346,9 @@ export class WorktreeTreeProvider
         `Hot-follow update (${reason}, pace=${this.pollPace}): ${path.basename(worktreePath)}`,
       );
       this._onDidChangeTreeData.fire();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Hot-follow soft refresh failed: ${message}`);
     } finally {
       this.softRefreshInFlight = false;
     }

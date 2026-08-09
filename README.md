@@ -21,9 +21,9 @@ npm run watch   # or press F5 (starts watch via preLaunchTask)
 | `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees |
 | `worktreeCompare.includeRootCheckout` | `always` | `always` / `dirty` / `never` — main workspace checkout in the list |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
-| `worktreeCompare.contentRefreshIntervalMs` | `5000` | Idle poll of focused worktree (`0` = off). Also save/create/delete under that path. |
-| `worktreeCompare.contentRefreshActiveIntervalMs` | `1500` | Faster poll while changes keep landing |
-| `worktreeCompare.contentRefreshIdleAfterMs` | `15000` | Quiet time before poll relaxes idle again |
+| `worktreeCompare.contentRefreshIntervalMs` | `0` | Idle poll (`0` = off, events only). Set e.g. `5000` if agents write outside the editor. |
+| `worktreeCompare.contentRefreshActiveIntervalMs` | `2500` | Faster poll after a change (only if poll enabled) |
+| `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
 | `worktreeCompare.squashLayout` | `list` | Squashed files: `list` or `tree` |
 | `worktreeCompare.contentRefreshIntervalMs` | `3000` | Poll expanded worktrees for agent writes (`0` = watchers only) |
 
