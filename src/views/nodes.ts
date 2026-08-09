@@ -107,16 +107,12 @@ export class CommitItem extends vscode.TreeItem {
     super(commit.subject || commit.shortHash, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = 'commit';
     this.iconPath = new vscode.ThemeIcon('git-commit');
-    // Subject only in the row; time (+ author) on hover. Full SHA via Copy Commit SHA.
-    const tip = new vscode.MarkdownString(undefined, true);
-    tip.isTrusted = false;
-    tip.supportThemeIcons = true;
-    const lines = [
-      `$(history) ${commit.relativeDate || 'unknown time'}`,
-      commit.author ? `$(person) ${commit.author}` : undefined,
-    ].filter((l): l is string => Boolean(l));
-    tip.appendMarkdown(lines.join('  \n'));
-    this.tooltip = tip;
+    // Secondary label on the right (TreeItem has no "description only on hover").
+    // Full SHA stays on Copy Commit SHA; author is available on tooltip.
+    this.description = commit.relativeDate || undefined;
+    this.tooltip = commit.author
+      ? `${commit.relativeDate || ''}${commit.relativeDate ? ' · ' : ''}${commit.author}`.trim()
+      : commit.relativeDate || undefined;
   }
 }
 
