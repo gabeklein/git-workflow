@@ -19,11 +19,10 @@ import {
   MessageItem,
   SectionItem,
   type TreeNode,
-  WorktreePickerItem,
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { CommitItem, FileItem, WorktreePickerItem } from './nodes';
+export { CommitItem, FileItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
@@ -34,8 +33,8 @@ interface WorktreeSnapshot {
 
 /**
  * Focused single-worktree tree.
- * Discovery still scans all watch folders; the sidebar shows one selection
- * (picker header + that worktree's body). No recursive content watchers.
+ * Discovery still scans all watch folders; sidebar body is the selected
+ * worktree only. Selection UI lives in the webview above this tree.
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -44,6 +43,10 @@ export class WorktreeTreeProvider
     TreeNode | undefined | void
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  private readonly _onDidChangeWorktrees = new vscode.EventEmitter<void>();
+  /** Fired when discovery list or selection changes (for the select webview). */
+  readonly onDidChangeWorktrees = this._onDidChangeWorktrees.event;
 
   private worktrees: DiscoveredWorktree[] = [];
   private loading = false;
@@ -111,6 +114,7 @@ export class WorktreeTreeProvider
       }
     }
     this._onDidChangeTreeData.fire();
+    this._onDidChangeWorktrees.fire();
   }
 
   refresh(): void {
@@ -163,6 +167,7 @@ export class WorktreeTreeProvider
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
+      this._onDidChangeWorktrees.fire();
     }
   }
 
@@ -296,14 +301,11 @@ export class WorktreeTreeProvider
 
     const selected = this.getSelected();
     if (!selected) {
-      return [new MessageItem('Select a worktree', 'Use the toolbar')];
+      return [new MessageItem('Select a worktree', 'Use the dropdown above')];
     }
 
-    const nodes: TreeNode[] = [
-      new WorktreePickerItem(selected, this.worktrees.length),
-    ];
-    nodes.push(...(await this.getWorktreeBody(selected.path)));
-    return nodes;
+    // Body only — selection UI is the webview above this tree
+    return this.getWorktreeBody(selected.path);
   }
 
   private async getWorktreeBody(worktreePath: string): Promise<TreeNode[]> {
@@ -436,5 +438,6 @@ export class WorktreeTreeProvider
       d.dispose();
     }
     this._onDidChangeTreeData.dispose();
+    this._onDidChangeWorktrees.dispose();
   }
 }

@@ -1,56 +1,15 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { CommitInfo, FileChange } from '../git/compare';
-import type { DiscoveredWorktree } from '../discovery/scanner';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
 
 export type TreeNode =
-  | WorktreePickerItem
   | BehindWarningItem
   | CommitItem
   | SectionItem
   | FileItem
   | MessageItem;
-
-/**
- * Header row: current worktree focus. Click to open the worktree picker.
- * Not a collapsible parent — body nodes sit as siblings under the root.
- */
-export class WorktreePickerItem extends vscode.TreeItem {
-  readonly kind = 'picker' as const;
-  readonly worktreePath: string;
-  readonly worktree: DiscoveredWorktree;
-
-  constructor(worktree: DiscoveredWorktree, totalCount: number) {
-    const branchLabel =
-      worktree.branch + (worktree.detached ? ' (detached)' : '');
-    super(branchLabel, vscode.TreeItemCollapsibleState.None);
-    this.worktree = worktree;
-    this.worktreePath = worktree.path;
-    this.contextValue = 'worktreePicker';
-    this.iconPath = new vscode.ThemeIcon('repo');
-    this.description =
-      totalCount > 1
-        ? `${worktree.name}  ·  ${totalCount} worktrees`
-        : worktree.name;
-    this.tooltip = [
-      branchLabel,
-      `Worktree: ${worktree.name}`,
-      `Path: ${worktree.path}`,
-      worktree.relativePath ? `Relative: ${worktree.relativePath}` : '',
-      '',
-      'Click to switch worktree',
-    ]
-      .filter(Boolean)
-      .join('\n');
-    this.command = {
-      command: 'worktreeCompare.selectWorktree',
-      title: 'Select Worktree',
-      arguments: [],
-    };
-  }
-}
 
 /** Soft warning when worktree tip is behind its compare base. */
 export class BehindWarningItem extends vscode.TreeItem {

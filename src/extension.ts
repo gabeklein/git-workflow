@@ -10,10 +10,10 @@ import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { stagePaths, unstagePaths } from './git/stage';
 import { createFileBackedLogger } from './log';
+import { WorktreePickerViewProvider } from './views/worktreePickerView';
 import {
   CommitItem,
   FileItem,
-  WorktreePickerItem,
   WorktreeTreeProvider,
 } from './views/worktreeTree';
 
@@ -35,6 +35,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const treeProvider = new WorktreeTreeProvider(log, context);
   context.subscriptions.push(treeProvider);
+
+  const pickerView = new WorktreePickerViewProvider(treeProvider);
+  context.subscriptions.push(
+    pickerView,
+    vscode.window.registerWebviewViewProvider(
+      WorktreePickerViewProvider.viewType,
+      pickerView,
+      { webviewOptions: { retainContextWhenHidden: true } },
+    ),
+  );
 
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
     treeDataProvider: treeProvider,
@@ -61,11 +71,8 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.openWorktree',
-      async (item?: WorktreePickerItem | { worktreePath?: string }) => {
-        const target =
-          item && 'worktreePath' in item
-            ? item.worktreePath
-            : treeProvider.getSelectedPath();
+      async (item?: { worktreePath?: string }) => {
+        const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         if (!target) {
           return;
         }

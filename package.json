@@ -20,7 +20,8 @@
     "claude"
   ],
   "activationEvents": [
-    "onView:worktreeCompare.worktrees"
+    "onView:worktreeCompare.worktrees",
+    "onView:worktreeCompare.picker"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -56,8 +57,14 @@
     "views": {
       "worktreeCompare": [
         {
+          "type": "webview",
+          "id": "worktreeCompare.picker",
+          "name": "Worktree",
+          "contextualTitle": "Worktree"
+        },
+        {
           "id": "worktreeCompare.worktrees",
-          "name": "Worktree"
+          "name": "Details"
         }
       ]
     },
@@ -117,30 +124,25 @@
       "view/title": [
         {
           "command": "worktreeCompare.selectWorktree",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.picker || view == worktreeCompare.worktrees",
           "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.refresh",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.picker || view == worktreeCompare.worktrees",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktreePicker|behindWarning)$/",
+          "when": "view == worktreeCompare.worktrees && viewItem == behindWarning",
           "group": "0_compare"
         },
         {
-          "command": "worktreeCompare.selectWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem == worktreePicker",
-          "group": "navigation@1"
-        },
-        {
           "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem == worktreePicker",
-          "group": "navigation@2"
+          "when": "view == worktreeCompare.worktrees",
+          "group": "navigation"
         },
         {
           "command": "worktreeCompare.copyCommitSha",
