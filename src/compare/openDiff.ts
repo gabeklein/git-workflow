@@ -3,31 +3,43 @@ import * as vscode from 'vscode';
 import { toGitContentUri } from '../git/contentProvider';
 import type { FileChange } from '../git/compare';
 
+/**
+ * Editable diff: left = ref content, right = real worktree file.
+ * Used for Full PR (vs base) and dirty Changes (vs HEAD).
+ */
 export async function openWorkingTreeDiff(
   worktreePath: string,
-  baseRef: string,
+  leftRef: string,
   file: FileChange,
+  titleRightLabel = 'Working Tree',
 ): Promise<void> {
   const rel = file.path;
   const abs = path.join(worktreePath, ...rel.split('/'));
-  const right = vscode.Uri.file(abs); // real file — edits land on disk
-  const left = toGitContentUri(worktreePath, baseRef, rel);
+  const right = vscode.Uri.file(abs);
+  const left = toGitContentUri(worktreePath, leftRef, rel);
 
-  const title = `${path.basename(rel)} (${baseRef} ↔ Working Tree)`;
+  const title = `${path.basename(rel)} (${leftRef} ↔ ${titleRightLabel})`;
 
-  if (file.status === 'A') {
-    // Added in working tree — nothing on base; still open diff with empty left
+  if (file.status === 'A' || file.status === '?') {
     await vscode.commands.executeCommand('vscode.diff', left, right, title);
     return;
   }
 
   if (file.status === 'D') {
-    // Deleted in working tree — show base only (left), no real file to edit
     await vscode.commands.executeCommand('vscode.open', left);
     return;
   }
 
   await vscode.commands.executeCommand('vscode.diff', left, right, title);
+}
+
+/** Open the real file only (fallback for awkward statuses). */
+export async function openWorkingTreeFile(
+  worktreePath: string,
+  file: FileChange,
+): Promise<void> {
+  const abs = path.join(worktreePath, ...file.path.split('/'));
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(abs));
 }
 
 export async function openCommitFileDiff(

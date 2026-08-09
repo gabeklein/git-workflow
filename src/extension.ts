@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
-import { openCommitFileDiff, openWorkingTreeDiff } from './compare/openDiff';
+import {
+  openCommitFileDiff,
+  openWorkingTreeDiff,
+} from './compare/openDiff';
 import { pickBaseRef } from './compare/pickBaseRef';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
-import {
-  CompareRootItem,
-  FileItem,
-  WorktreeItem,
-  WorktreeTreeProvider,
-} from './views/worktreeTree';
+import { FileItem, WorktreeItem, WorktreeTreeProvider } from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Git Workflow');
@@ -51,15 +49,13 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.changeBaseRef',
-      async (item?: CompareRootItem | WorktreeItem) => {
+      async (item?: { worktreePath?: string; baseRef?: string }) => {
         const worktreePath = item?.worktreePath;
         if (!worktreePath) {
           return;
         }
         const current =
-          item && 'baseRef' in item
-            ? item.baseRef
-            : treeProvider.getBaseRef(worktreePath);
+          item?.baseRef ?? treeProvider.getBaseRef(worktreePath);
         try {
           const picked = await pickBaseRef(worktreePath, current);
           if (!picked) {
@@ -82,19 +78,30 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         try {
-          if (item.commitHash) {
+          if (item.diffKind === 'commit' && item.commitHash) {
             await openCommitFileDiff(
               item.worktreePath,
               item.commitHash,
               item.file,
             );
-          } else {
+            return;
+          }
+          if (item.diffKind === 'vsBase') {
             await openWorkingTreeDiff(
               item.worktreePath,
               item.baseRef,
               item.file,
+              'Working Tree',
             );
+            return;
           }
+          // Staged / unstaged: editable vs HEAD
+          await openWorkingTreeDiff(
+            item.worktreePath,
+            'HEAD',
+            item.file,
+            'Working Tree',
+          );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           output.appendLine(`Open diff failed: ${message}`);

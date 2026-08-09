@@ -9,10 +9,11 @@ import {
   listCommitFiles,
   type CompareResult,
 } from '../git/compare';
+import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
 import {
+  BehindWarningItem,
   CommitItem,
-  CompareRootItem,
   FileItem,
   MessageItem,
   SectionItem,
@@ -21,7 +22,13 @@ import {
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { CompareRootItem, FileItem, WorktreeItem } from './nodes';
+export { FileItem, WorktreeItem } from './nodes';
+
+/** Cached snapshot for one expanded worktree. */
+interface WorktreeSnapshot {
+  compare: CompareResult;
+  status: WorkingStatus;
+}
 
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -35,18 +42,14 @@ export class WorktreeTreeProvider
   private loading = false;
   private readonly disposables: vscode.Disposable[] = [];
   private folderWatchers: vscode.Disposable[] = [];
-  /** Per-worktree content watchers (agent writes inside an expanded tree) */
   private contentWatchers = new Map<string, vscode.Disposable[]>();
   private refreshTimer: NodeJS.Timeout | undefined;
   private contentDebounce = new Map<string, NodeJS.Timeout>();
   private pollTimer: NodeJS.Timeout | undefined;
 
-  /** Cache compare results per worktree path */
-  private readonly compareCache = new Map<string, CompareResult>();
+  private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
-  /** User-picked base ref overrides (path → ref). Survives refresh. */
   private readonly baseOverrides = new Map<string, string>();
-  /** Worktrees the user has expanded at least once this session */
   private readonly expandedPaths = new Set<string>();
 
   constructor(private readonly output: vscode.OutputChannel) {
@@ -73,39 +76,29 @@ export class WorktreeTreeProvider
       clearTimeout(this.refreshTimer);
     }
     this.refreshTimer = setTimeout(() => {
-      this.compareCache.clear();
+      this.snapshotCache.clear();
       this.compareErrors.clear();
-      // baseOverrides intentionally kept
       void this.load();
     }, 150);
   }
 
-  /**
-   * Re-run compare for a single worktree without rediscovering the list.
-   * Used when agent activity mutates files inside an expanded tree.
-   */
   refreshCompare(worktreePath: string): void {
-    this.compareCache.delete(worktreePath);
+    this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
     this._onDidChangeTreeData.fire();
   }
 
-  /** Current base used for a worktree (override or resolved default). */
   getBaseRef(worktreePath: string): string | undefined {
     return (
       this.baseOverrides.get(worktreePath) ??
-      this.compareCache.get(worktreePath)?.baseRef
+      this.snapshotCache.get(worktreePath)?.compare.baseRef
     );
   }
 
-  /**
-   * Set the compare base for a worktree and refresh its compare tree.
-   * Prefers origin/<name> when the user picks a bare local integration branch.
-   */
   async setBaseRef(worktreePath: string, baseRef: string): Promise<void> {
     const preferred = await preferRemoteTrackingRef(worktreePath, baseRef);
     this.baseOverrides.set(worktreePath, preferred);
-    this.compareCache.delete(worktreePath);
+    this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
     if (preferred !== baseRef) {
       this.output.appendLine(
@@ -156,10 +149,6 @@ export class WorktreeTreeProvider
     }
   }
 
-  /**
-   * Watch file content under worktrees the user has expanded.
-   * Debounced → refreshCompare.
-   */
   private syncContentWatchers(): void {
     const live = new Set(this.worktrees.map((w) => w.path));
 
@@ -229,9 +218,6 @@ export class WorktreeTreeProvider
       return;
     }
     this.pollTimer = setInterval(() => {
-      if (this.expandedPaths.size === 0) {
-        return;
-      }
       for (const wtPath of this.expandedPaths) {
         this.refreshCompare(wtPath);
       }
@@ -244,8 +230,10 @@ export class WorktreeTreeProvider
       .get<string>('defaultBaseRef', 'main');
   }
 
-  private async getCompare(worktreePath: string): Promise<CompareResult | undefined> {
-    const cached = this.compareCache.get(worktreePath);
+  private async getSnapshot(
+    worktreePath: string,
+  ): Promise<WorktreeSnapshot | undefined> {
+    const cached = this.snapshotCache.get(worktreePath);
     if (cached) {
       return cached;
     }
@@ -257,13 +245,17 @@ export class WorktreeTreeProvider
       if (!overridden) {
         this.output.appendLine(`Inferred base for ${worktreePath}: ${baseRef}`);
       }
-      const result = await compareWorkingTreeToBase(worktreePath, baseRef);
-      this.compareCache.set(worktreePath, result);
+      const [compare, status] = await Promise.all([
+        compareWorkingTreeToBase(worktreePath, baseRef),
+        getWorkingStatus(worktreePath),
+      ]);
+      const snap: WorktreeSnapshot = { compare, status };
+      this.snapshotCache.set(worktreePath, snap);
       this.compareErrors.delete(worktreePath);
-      return result;
+      return snap;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Compare failed for ${worktreePath}: ${message}`);
+      this.output.appendLine(`Snapshot failed for ${worktreePath}: ${message}`);
       this.compareErrors.set(worktreePath, message);
       return undefined;
     }
@@ -281,8 +273,6 @@ export class WorktreeTreeProvider
     switch (element.kind) {
       case 'worktree':
         return this.getWorktreeChildren(element);
-      case 'compareRoot':
-        return this.getCompareRootChildren(element);
       case 'section':
         return this.getSectionChildren(element);
       case 'commit':
@@ -315,63 +305,72 @@ export class WorktreeTreeProvider
       this.syncContentWatchers();
     }
 
-    const compare = await this.getCompare(item.worktreePath);
-    if (!compare) {
-      const err = this.compareErrors.get(item.worktreePath) ?? 'Compare failed';
-      return [new MessageItem('Could not compare', err, 'error')];
-    }
-    return [
-      new CompareRootItem(
-        item.worktreePath,
-        compare.baseRef,
-        compare.ahead,
-        compare.behind,
-      ),
-    ];
-  }
-
-  private async getCompareRootChildren(item: CompareRootItem): Promise<TreeNode[]> {
-    const compare = await this.getCompare(item.worktreePath);
-    if (!compare) {
-      return [new MessageItem('Could not compare', undefined, 'error')];
+    const snap = await this.getSnapshot(item.worktreePath);
+    if (!snap) {
+      const err = this.compareErrors.get(item.worktreePath) ?? 'Failed to load';
+      return [new MessageItem('Could not load worktree', err, 'error')];
     }
 
+    const { compare, status } = snap;
     const nodes: TreeNode[] = [];
 
+    // Soft warning — not an expandable behind-commit list
+    if (compare.behind > 0) {
+      nodes.push(
+        new BehindWarningItem(
+          item.worktreePath,
+          compare.baseRef,
+          compare.behind,
+        ),
+      );
+    }
+
+    // Flat ahead commits (newest first from git log)
+    for (const c of compare.commitsAhead) {
+      nodes.push(new CommitItem(item.worktreePath, compare.baseRef, c));
+    }
+
+    // Staged — hide when empty
+    if (status.staged.length > 0) {
+      nodes.push(
+        new SectionItem(
+          'Staged Changes',
+          'staged',
+          item.worktreePath,
+          compare.baseRef,
+          vscode.TreeItemCollapsibleState.Expanded,
+          String(status.staged.length),
+        ),
+      );
+    }
+
+    // Changes (unstaged / untracked) — always show when dirty, or empty placeholder
+    const changesCount = status.unstaged.length;
     nodes.push(
       new SectionItem(
-        `Behind ${compare.behind} commit${compare.behind === 1 ? '' : 's'}`,
-        'behind',
+        'Changes',
+        'changes',
         item.worktreePath,
         compare.baseRef,
-        compare.behind > 0
+        changesCount > 0
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed,
+        changesCount > 0 ? String(changesCount) : undefined,
+      ),
+    );
+
+    // Full PR — WT ↔ base file list
+    const prCount = compare.fullPrFiles.length;
+    nodes.push(
+      new SectionItem(
+        'Full PR',
+        'fullPr',
+        item.worktreePath,
+        compare.baseRef,
+        prCount > 0
           ? vscode.TreeItemCollapsibleState.Collapsed
-          : vscode.TreeItemCollapsibleState.None,
-      ),
-    );
-
-    nodes.push(
-      new SectionItem(
-        `Ahead ${compare.ahead} commit${compare.ahead === 1 ? '' : 's'}`,
-        'ahead',
-        item.worktreePath,
-        compare.baseRef,
-        compare.ahead > 0
-          ? vscode.TreeItemCollapsibleState.Expanded
-          : vscode.TreeItemCollapsibleState.None,
-      ),
-    );
-
-    const fileLabel = `${compare.files.length} file${compare.files.length === 1 ? '' : 's'} changed`;
-    nodes.push(
-      new SectionItem(
-        fileLabel,
-        'files',
-        item.worktreePath,
-        compare.baseRef,
-        compare.files.length > 0
-          ? vscode.TreeItemCollapsibleState.Expanded
-          : vscode.TreeItemCollapsibleState.None,
+          : vscode.TreeItemCollapsibleState.Collapsed,
+        prCount > 0 ? `${prCount} vs ${compare.baseRef}` : `0 vs ${compare.baseRef}`,
       ),
     );
 
@@ -379,25 +378,41 @@ export class WorktreeTreeProvider
   }
 
   private async getSectionChildren(item: SectionItem): Promise<TreeNode[]> {
-    const compare = await this.getCompare(item.worktreePath);
-    if (!compare) {
+    const snap = await this.getSnapshot(item.worktreePath);
+    if (!snap) {
       return [];
     }
 
-    if (item.section === 'behind') {
-      return compare.commitsBehind.map(
-        (c) => new CommitItem(item.worktreePath, item.baseRef, c),
+    if (item.section === 'staged') {
+      return snap.status.staged.map(
+        (f) =>
+          new FileItem(item.worktreePath, item.baseRef, f, {
+            diffKind: 'vsHead',
+          }),
       );
     }
 
-    if (item.section === 'ahead') {
-      return compare.commitsAhead.map(
-        (c) => new CommitItem(item.worktreePath, item.baseRef, c),
+    if (item.section === 'changes') {
+      if (snap.status.unstaged.length === 0) {
+        return [new MessageItem('No unstaged changes')];
+      }
+      return snap.status.unstaged.map(
+        (f) =>
+          new FileItem(item.worktreePath, item.baseRef, f, {
+            diffKind: 'vsHead',
+          }),
       );
     }
 
-    return compare.files.map(
-      (f) => new FileItem(item.worktreePath, item.baseRef, f),
+    // Full PR
+    if (snap.compare.fullPrFiles.length === 0) {
+      return [new MessageItem('No differences from base', item.baseRef)];
+    }
+    return snap.compare.fullPrFiles.map(
+      (f) =>
+        new FileItem(item.worktreePath, item.baseRef, f, {
+          diffKind: 'vsBase',
+        }),
     );
   }
 
@@ -406,7 +421,10 @@ export class WorktreeTreeProvider
       const files = await listCommitFiles(item.worktreePath, item.commit.hash);
       return files.map(
         (f) =>
-          new FileItem(item.worktreePath, item.baseRef, f, item.commit.hash),
+          new FileItem(item.worktreePath, item.baseRef, f, {
+            diffKind: 'commit',
+            commitHash: item.commit.hash,
+          }),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -442,7 +460,6 @@ export class WorktreeTreeProvider
   }
 }
 
-/** Skip high-churn / irrelevant paths so agent watches stay cheap. */
 function shouldIgnoreContentPath(fsPath: string): boolean {
   const parts = fsPath.split(/[/\\]/);
   for (const part of parts) {

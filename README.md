@@ -37,6 +37,17 @@ Picking a bare local name like `staging` upgrades to `origin/staging` when that 
 
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
+## Tree shape (per worktree)
+
+```
+branch-name
+├── ⚠ Behind base (N)     ← soft warning only if behind > 0
+├── commit…               ← ahead of base (read-only file diffs)
+├── Staged Changes        ← hidden if empty; editable vs HEAD
+├── Changes               ← unstaged/untracked; hot-follow; editable vs HEAD
+└── Full PR               ← all files vs base (WT ↔ base, editable)
+```
+
 ## Roadmap
 
 - [x] Extension scaffold (TreeView shell, config, F5/watch)
@@ -47,5 +58,7 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 - [x] Infer fork point (reflog / vscode-merge-base / closest ancestor)
 - [x] Branch name primary label; worktree dir secondary
 - [x] Hot-follow agent writes (content watcher + poll on expanded trees)
-- [ ] Multi-select / stage-style actions on files
-- [ ] Addition/deletion stats on file sections
+- [x] SCM-like Staged / Changes + Full PR single tree
+- [ ] Stage/unstage/commit actions (optional; agents usually commit)
+- [ ] Two-view split (History | Changes) if single tree gets dense
+- [ ] Editable commits via rebase on confirm

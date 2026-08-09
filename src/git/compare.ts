@@ -24,10 +24,10 @@ export interface CompareResult {
   baseHead: string;
   ahead: number;
   behind: number;
+  /** Newest-first commits on HEAD not in base */
   commitsAhead: CommitInfo[];
-  commitsBehind: CommitInfo[];
-  /** Working tree + index vs base (includes uncommitted) */
-  files: FileChange[];
+  /** Working tree + index vs base — Full PR file list (editable WT side) */
+  fullPrFiles: FileChange[];
 }
 
 const COMMIT_FORMAT = ['%H', '%h', '%s', '%an', '%ar'].join('%x1f') + '%x1e';
@@ -105,25 +105,14 @@ export async function compareWorkingTreeToBase(
         )
       : [];
 
-  const commitsBehind =
-    behind > 0
-      ? parseCommits(
-          await git(worktreePath, [
-            'log',
-            '--format=' + COMMIT_FORMAT,
-            `HEAD..${baseRef}`,
-          ]),
-        )
-      : [];
-
-  // Working tree (and index) vs base — matches "compare Working Tree with X"
+  // Working tree (and index) vs base — Full PR (includes uncommitted)
   const diffOut = await git(worktreePath, [
     'diff',
     '--name-status',
     '--find-renames',
     baseRef,
   ]);
-  const files = parseNameStatus(diffOut);
+  const fullPrFiles = parseNameStatus(diffOut);
 
   return {
     baseRef,
@@ -131,8 +120,7 @@ export async function compareWorkingTreeToBase(
     ahead,
     behind,
     commitsAhead,
-    commitsBehind,
-    files,
+    fullPrFiles,
   };
 }
 

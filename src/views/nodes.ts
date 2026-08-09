@@ -3,11 +3,13 @@ import * as vscode from 'vscode';
 import type { CommitInfo, FileChange } from '../git/compare';
 import type { DiscoveredWorktree } from '../discovery/scanner';
 
+export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
+
 export type TreeNode =
   | WorktreeItem
-  | CompareRootItem
-  | SectionItem
+  | BehindWarningItem
   | CommitItem
+  | SectionItem
   | FileItem
   | MessageItem;
 
@@ -19,7 +21,6 @@ export class WorktreeItem extends vscode.TreeItem {
   constructor(worktree: DiscoveredWorktree) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
-    // Branch is primary; worktree directory name is secondary
     super(branchLabel, vscode.TreeItemCollapsibleState.Collapsed);
     this.worktree = worktree;
     this.worktreePath = worktree.path;
@@ -27,7 +28,6 @@ export class WorktreeItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon(
       worktree.detached ? 'git-commit' : 'git-branch',
     );
-    // Directory name only on hover — keeps narrow sidebars readable
     this.description = undefined;
     this.tooltip = new vscode.MarkdownString(
       [
@@ -43,30 +43,40 @@ export class WorktreeItem extends vscode.TreeItem {
   }
 }
 
-export class CompareRootItem extends vscode.TreeItem {
-  readonly kind = 'compareRoot' as const;
+/** Soft warning when worktree tip is behind its compare base. */
+export class BehindWarningItem extends vscode.TreeItem {
+  readonly kind = 'behindWarning' as const;
 
   constructor(
     readonly worktreePath: string,
     readonly baseRef: string,
-    readonly ahead: number,
     readonly behind: number,
   ) {
+    const n = behind;
     super(
-      `Comparing Working Tree with ${baseRef}`,
-      vscode.TreeItemCollapsibleState.Expanded,
+      `Behind ${baseRef} (${n} commit${n === 1 ? '' : 's'})`,
+      vscode.TreeItemCollapsibleState.None,
     );
-    this.contextValue = 'compareRoot';
-    this.iconPath = new vscode.ThemeIcon('git-compare');
-    this.description =
-      ahead || behind ? `${ahead}↑ ${behind}↓` : '0↑ 0↓';
+    this.contextValue = 'behindWarning';
+    this.iconPath = new vscode.ThemeIcon(
+      'warning',
+      new vscode.ThemeColor('list.warningForeground'),
+    );
+    this.description = 'rebase recommended';
     this.tooltip = new vscode.MarkdownString(
       [
-        `Comparing **Working Tree** with \`${baseRef}\``,
+        `This worktree is **${n}** commit${n === 1 ? '' : 's'} behind \`${baseRef}\`.`,
         '',
-        'Click the compare icon or run **Change Base Ref** to pick another branch/tag.',
+        'Browsing and editing still work. Consider rebasing (or merging) onto the base before adding more commits.',
+        '',
+        'Use **Change Base Ref** if the base is wrong.',
       ].join('\n'),
     );
+    this.command = {
+      command: 'worktreeCompare.changeBaseRef',
+      title: 'Change Base Ref',
+      arguments: [{ worktreePath, baseRef } satisfies { worktreePath: string; baseRef: string }],
+    };
   }
 }
 
@@ -75,19 +85,21 @@ export class SectionItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly section: 'behind' | 'ahead' | 'files',
+    readonly section: 'staged' | 'changes' | 'fullPr',
     readonly worktreePath: string,
     readonly baseRef: string,
-    collapsible: vscode.TreeItemCollapsibleState = vscode.TreeItemCollapsibleState.Collapsed,
+    collapsible: vscode.TreeItemCollapsibleState,
+    description?: string,
   ) {
     super(label, collapsible);
     this.contextValue = `section:${section}`;
-    if (section === 'behind') {
-      this.iconPath = new vscode.ThemeIcon('arrow-down');
-    } else if (section === 'ahead') {
-      this.iconPath = new vscode.ThemeIcon('arrow-up');
+    this.description = description;
+    if (section === 'staged') {
+      this.iconPath = new vscode.ThemeIcon('check');
+    } else if (section === 'changes') {
+      this.iconPath = new vscode.ThemeIcon('request-changes');
     } else {
-      this.iconPath = new vscode.ThemeIcon('diff');
+      this.iconPath = new vscode.ThemeIcon('git-pull-request');
     }
   }
 }
@@ -110,18 +122,26 @@ export class CommitItem extends vscode.TreeItem {
 
 export class FileItem extends vscode.TreeItem {
   readonly kind = 'file' as const;
+  readonly diffKind: FileDiffKind;
+  readonly commitHash?: string;
 
   constructor(
     readonly worktreePath: string,
     readonly baseRef: string,
     readonly file: FileChange,
-    /** When set, open commit-to-parent diff instead of working tree */
-    readonly commitHash?: string,
+    opts: { diffKind: FileDiffKind; commitHash?: string },
   ) {
     const basename = path.posix.basename(file.path);
     const dir = path.posix.dirname(file.path);
     super(basename, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = commitHash ? 'commitFile' : 'workingFile';
+    this.diffKind = opts.diffKind;
+    this.commitHash = opts.commitHash;
+    this.contextValue =
+      opts.diffKind === 'commit'
+        ? 'commitFile'
+        : opts.diffKind === 'vsBase'
+          ? 'fullPrFile'
+          : 'workingFile';
     this.description = dir === '.' ? undefined : dir;
     this.iconPath = statusIcon(file.status);
     this.resourceUri = vscode.Uri.file(
@@ -150,12 +170,15 @@ export class MessageItem extends vscode.TreeItem {
 function statusIcon(status: string): vscode.ThemeIcon {
   switch (status) {
     case 'A':
+    case '?':
       return new vscode.ThemeIcon('diff-added');
     case 'D':
       return new vscode.ThemeIcon('diff-removed');
     case 'R':
     case 'C':
       return new vscode.ThemeIcon('diff-renamed');
+    case 'U':
+      return new vscode.ThemeIcon('warning');
     default:
       return new vscode.ThemeIcon('diff-modified');
   }
@@ -164,6 +187,7 @@ function statusIcon(status: string): vscode.ThemeIcon {
 function statusLabel(status: string): string {
   switch (status) {
     case 'A':
+    case '?':
       return 'Added';
     case 'D':
       return 'Deleted';
@@ -173,6 +197,8 @@ function statusLabel(status: string): string {
       return 'Copied';
     case 'M':
       return 'Modified';
+    case 'U':
+      return 'Unmerged';
     default:
       return status;
   }

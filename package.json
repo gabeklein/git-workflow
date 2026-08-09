@@ -102,12 +102,7 @@
       "view/item/context": [
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem == compareRoot",
-          "group": "inline"
-        },
-        {
-          "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktree|compareRoot)$/",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktree|behindWarning)$/",
           "group": "0_compare"
         },
         {
