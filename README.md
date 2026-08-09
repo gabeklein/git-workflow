@@ -37,22 +37,22 @@ Picking a bare local name like `staging` upgrades to `origin/staging` when that 
 
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
-## Sidebar layout (focused worktree)
+## Sidebar layout (two TreeViews)
 
 ```
-┌ Worktree ─────────────────────┐
-│ [ branch · folder          ▾ ]│  ← real <select> webview
+┌ Worktrees ────────────────────┐  ← collapsible section
+│ ● fix/foo          folder-a   │  ← click to focus (filled = selected)
+│ ○ feat/bar         folder-b   │
 └───────────────────────────────┘
-┌ Details ──────────────────────┐
+┌ Details ──────────────────────┐  ← collapsible section (body of selection)
 │ ⚠ Behind base (N)             │
 │ commit…                       │
-│ Staged Changes                │
-│ Changes                       │
-│ Squashed                      │
+│ Staged / Changes / Squashed   │
 └───────────────────────────────┘
 ```
 
-Selection is persisted per workspace. Toolbar still has Select Worktree (QuickPick) as a fallback.
+No webview. Sections are separable (drag sash / collapse independently).
+Selection is persisted per workspace.
 
 ## Roadmap
 
