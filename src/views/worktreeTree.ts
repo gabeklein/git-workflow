@@ -192,26 +192,32 @@ export class WorktreeTreeProvider
     if (uri.scheme !== 'file') {
       return;
     }
-    const selected = this.getSelectedPath();
-    if (!selected || !isPathInside(uri.fsPath, selected)) {
+    const selected = this.getSelected();
+    if (!selected || !isPathInside(uri.fsPath, selected.path)) {
       return;
     }
-    // File activity → bump to active pace (next scheduled poll uses it too)
+    // Root monorepo checkout: ignore high-churn / irrelevant paths so every
+    // node_modules or dist write does not trigger git status.
+    if (shouldIgnoreHotFollowPath(uri.fsPath)) {
+      return;
+    }
+    // File activity → mark active (poll pace, if enabled)
     this.enterActivePollPace('file-event');
     if (this.contentDebounce) {
       clearTimeout(this.contentDebounce);
     }
+    // Longer debounce: agent bursts can write many files in one go
     this.contentDebounce = setTimeout(() => {
       this.contentDebounce = undefined;
       void this.softRefreshSelected('file-event');
-    }, 400);
+    }, 800);
   }
 
   /** Idle (relaxed) poll interval; 0 disables polling entirely. */
   private idlePollIntervalMs(): number {
     return vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIntervalMs', 5000);
+      .get<number>('contentRefreshIntervalMs', 0);
   }
 
   /** Active (rapid) poll while changes keep landing. */
@@ -782,6 +788,29 @@ function isPathInside(fsPath: string, root: string): boolean {
     resolved === rootResolved ||
     resolved.startsWith(rootResolved + path.sep)
   );
+}
+
+/** Skip hot-follow for paths that churn hard and are not useful for SCM UI. */
+function shouldIgnoreHotFollowPath(fsPath: string): boolean {
+  const parts = fsPath.split(/[/\\]/);
+  for (const part of parts) {
+    if (
+      part === 'node_modules' ||
+      part === '.git' ||
+      part === 'dist' ||
+      part === 'out' ||
+      part === 'build' ||
+      part === '.next' ||
+      part === 'coverage' ||
+      part === '.turbo' ||
+      part === '.cache' ||
+      part === 'tmp' ||
+      part === '.DS_Store'
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Cheap equality for deciding whether the tree UI needs a rebuild. */
