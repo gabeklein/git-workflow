@@ -22,7 +22,7 @@ import {
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { FileItem, WorktreeItem } from './nodes';
+export { CommitItem, FileItem, WorktreeItem } from './nodes';
 
 interface WorktreeSnapshot {
   compare: CompareResult;
@@ -302,6 +302,7 @@ export class WorktreeTreeProvider
         (f) =>
           new FileItem(item.worktreePath, item.baseRef, f, {
             diffKind: 'vsHead',
+            statusSide: 'staged',
           }),
       );
     }
@@ -314,6 +315,7 @@ export class WorktreeTreeProvider
         (f) =>
           new FileItem(item.worktreePath, item.baseRef, f, {
             diffKind: 'vsHead',
+            statusSide: 'unstaged',
           }),
       );
     }

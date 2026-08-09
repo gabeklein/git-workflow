@@ -107,8 +107,15 @@ export class CommitItem extends vscode.TreeItem {
     super(commit.subject || commit.shortHash, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = 'commit';
     this.iconPath = new vscode.ThemeIcon('git-commit');
-    this.description = `${commit.shortHash} · ${commit.relativeDate}`;
-    this.tooltip = `${commit.subject}\n${commit.author} · ${commit.relativeDate}\n${commit.hash}`;
+    // Subject only in the row; time + full SHA on hover; copy via context menu
+    this.tooltip = [
+      commit.subject || commit.shortHash,
+      commit.relativeDate || undefined,
+      commit.author ? `Author: ${commit.author}` : undefined,
+      `SHA: ${commit.hash}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 }
 
@@ -116,24 +123,34 @@ export class FileItem extends vscode.TreeItem {
   readonly kind = 'file' as const;
   readonly diffKind: FileDiffKind;
   readonly commitHash?: string;
+  readonly statusSide?: 'staged' | 'unstaged';
 
   constructor(
     readonly worktreePath: string,
     readonly baseRef: string,
     readonly file: FileChange,
-    opts: { diffKind: FileDiffKind; commitHash?: string },
+    opts: {
+      diffKind: FileDiffKind;
+      commitHash?: string;
+      statusSide?: 'staged' | 'unstaged';
+    },
   ) {
     const basename = path.posix.basename(file.path);
     const dir = path.posix.dirname(file.path);
     super(basename, vscode.TreeItemCollapsibleState.None);
     this.diffKind = opts.diffKind;
     this.commitHash = opts.commitHash;
+    this.statusSide = opts.statusSide;
     this.contextValue =
       opts.diffKind === 'commit'
         ? 'commitFile'
         : opts.diffKind === 'vsBase'
           ? 'fullPrFile'
-          : 'workingFile';
+          : opts.statusSide === 'staged'
+            ? 'stagedFile'
+            : opts.statusSide === 'unstaged'
+              ? 'unstagedFile'
+              : 'workingFile';
     this.description = dir === '.' ? undefined : dir;
     this.iconPath = statusIcon(file.status);
     this.resourceUri = vscode.Uri.file(

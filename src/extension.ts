@@ -5,7 +5,13 @@ import {
 } from './compare/openDiff';
 import { pickBaseRef } from './compare/pickBaseRef';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
-import { FileItem, WorktreeItem, WorktreeTreeProvider } from './views/worktreeTree';
+import { stagePaths, unstagePaths } from './git/stage';
+import {
+  CommitItem,
+  FileItem,
+  WorktreeItem,
+  WorktreeTreeProvider,
+} from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Git Workflow');
@@ -72,6 +78,20 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand(
+      'worktreeCompare.copyCommitSha',
+      async (item?: CommitItem) => {
+        const sha = item?.commit.hash;
+        if (!sha) {
+          return;
+        }
+        await vscode.env.clipboard.writeText(sha);
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: copied ${item.commit.shortHash}`,
+          2000,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.openFileDiff',
       async (item?: FileItem) => {
         if (!item) {
@@ -107,6 +127,52 @@ export function activate(context: vscode.ExtensionContext): void {
           output.appendLine(`Open diff failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not open diff — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.stageFile',
+      async (item?: FileItem) => {
+        if (!item?.file.path) {
+          return;
+        }
+        try {
+          const paths = [item.file.path];
+          if (item.file.oldPath) {
+            paths.push(item.file.oldPath);
+          }
+          await stagePaths(item.worktreePath, paths);
+          treeProvider.refreshCompare(item.worktreePath);
+          output.appendLine(`Staged ${item.file.path}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          output.appendLine(`Stage failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not stage — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.unstageFile',
+      async (item?: FileItem) => {
+        if (!item?.file.path) {
+          return;
+        }
+        try {
+          const paths = [item.file.path];
+          if (item.file.oldPath) {
+            paths.push(item.file.oldPath);
+          }
+          await unstagePaths(item.worktreePath, paths);
+          treeProvider.refreshCompare(item.worktreePath);
+          output.appendLine(`Unstaged ${item.file.path}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          output.appendLine(`Unstage failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not unstage — ${message}`,
           );
         }
       },
