@@ -37,16 +37,18 @@ Picking a bare local name like `staging` upgrades to `origin/staging` when that 
 
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
-## Tree shape (per worktree)
+## Tree shape (focused worktree)
 
 ```
-branch-name
+branch-name · folder      ← click / toolbar to Select Worktree (QuickPick)
 ├── ⚠ Behind base (N)     ← soft warning only if behind > 0
 ├── commit…               ← ahead of base (read-only file diffs)
-├── Staged Changes        ← hidden if empty; editable vs HEAD
-├── Changes               ← unstaged/untracked; hot-follow; editable vs HEAD
+├── Staged Changes        ← hidden if empty; HEAD ↔ Index
+├── Changes               ← unstaged/untracked; Index ↔ Working Tree
 └── Squashed              ← all files vs base (WT ↔ base, editable)
 ```
+
+Selection is persisted per workspace. Auto-reveal of the active file is unnecessary with this model.
 
 ## Roadmap
 

@@ -6,36 +6,49 @@ import type { DiscoveredWorktree } from '../discovery/scanner';
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
 
 export type TreeNode =
-  | WorktreeItem
+  | WorktreePickerItem
   | BehindWarningItem
   | CommitItem
   | SectionItem
   | FileItem
   | MessageItem;
 
-export class WorktreeItem extends vscode.TreeItem {
-  readonly kind = 'worktree' as const;
+/**
+ * Header row: current worktree focus. Click to open the worktree picker.
+ * Not a collapsible parent — body nodes sit as siblings under the root.
+ */
+export class WorktreePickerItem extends vscode.TreeItem {
+  readonly kind = 'picker' as const;
   readonly worktreePath: string;
   readonly worktree: DiscoveredWorktree;
 
-  constructor(worktree: DiscoveredWorktree) {
+  constructor(worktree: DiscoveredWorktree, totalCount: number) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
-    super(branchLabel, vscode.TreeItemCollapsibleState.Collapsed);
+    super(branchLabel, vscode.TreeItemCollapsibleState.None);
     this.worktree = worktree;
     this.worktreePath = worktree.path;
-    this.contextValue = 'worktree';
-    this.iconPath = new vscode.ThemeIcon(
-      worktree.detached ? 'git-commit' : 'git-branch',
-    );
+    this.contextValue = 'worktreePicker';
+    this.iconPath = new vscode.ThemeIcon('repo');
+    this.description =
+      totalCount > 1
+        ? `${worktree.name}  ·  ${totalCount} worktrees`
+        : worktree.name;
     this.tooltip = [
       branchLabel,
       `Worktree: ${worktree.name}`,
       `Path: ${worktree.path}`,
       worktree.relativePath ? `Relative: ${worktree.relativePath}` : '',
+      '',
+      'Click to switch worktree',
     ]
       .filter(Boolean)
       .join('\n');
+    this.command = {
+      command: 'worktreeCompare.selectWorktree',
+      title: 'Select Worktree',
+      arguments: [],
+    };
   }
 }
 

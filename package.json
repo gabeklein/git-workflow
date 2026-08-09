@@ -57,7 +57,7 @@
       "worktreeCompare": [
         {
           "id": "worktreeCompare.worktrees",
-          "name": "Worktrees"
+          "name": "Worktree"
         }
       ]
     },
@@ -66,6 +66,12 @@
         "command": "worktreeCompare.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.selectWorktree",
+        "title": "Select Worktree",
+        "icon": "$(list-selection)",
         "category": "Git Workflow"
       },
       {
@@ -105,21 +111,31 @@
     "menus": {
       "view/title": [
         {
+          "command": "worktreeCompare.selectWorktree",
+          "when": "view == worktreeCompare.worktrees",
+          "group": "navigation@1"
+        },
+        {
           "command": "worktreeCompare.refresh",
           "when": "view == worktreeCompare.worktrees",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktree|behindWarning)$/",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktreePicker|behindWarning)$/",
           "group": "0_compare"
         },
         {
+          "command": "worktreeCompare.selectWorktree",
+          "when": "view == worktreeCompare.worktrees && viewItem == worktreePicker",
+          "group": "navigation@1"
+        },
+        {
           "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
-          "group": "navigation"
+          "when": "view == worktreeCompare.worktrees && viewItem == worktreePicker",
+          "group": "navigation@2"
         },
         {
           "command": "worktreeCompare.copyCommitSha",

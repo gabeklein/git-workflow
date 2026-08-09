@@ -6,12 +6,13 @@ import {
   openWorkingTreeDiff,
 } from './compare/openDiff';
 import { pickBaseRef } from './compare/pickBaseRef';
+import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { stagePaths, unstagePaths } from './git/stage';
 import {
   CommitItem,
   FileItem,
-  WorktreeItem,
+  WorktreePickerItem,
   WorktreeTreeProvider,
 } from './views/worktreeTree';
 
@@ -29,7 +30,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  const treeProvider = new WorktreeTreeProvider(output);
+  const treeProvider = new WorktreeTreeProvider(output, context);
   context.subscriptions.push(treeProvider);
 
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
@@ -43,9 +44,25 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.refresh();
     }),
     vscode.commands.registerCommand(
+      'worktreeCompare.selectWorktree',
+      async () => {
+        const picked = await pickWorktree(
+          treeProvider.getWorktrees(),
+          treeProvider.getSelectedPath(),
+        );
+        if (!picked) {
+          return;
+        }
+        await treeProvider.setSelectedPath(picked.path);
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.openWorktree',
-      async (item?: WorktreeItem) => {
-        const target = item?.worktreePath;
+      async (item?: WorktreePickerItem | { worktreePath?: string }) => {
+        const target =
+          item && 'worktreePath' in item
+            ? item.worktreePath
+            : treeProvider.getSelectedPath();
         if (!target) {
           return;
         }
@@ -58,7 +75,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'worktreeCompare.changeBaseRef',
       async (item?: { worktreePath?: string; baseRef?: string }) => {
-        const worktreePath = item?.worktreePath;
+        const worktreePath =
+          item?.worktreePath ?? treeProvider.getSelectedPath();
         if (!worktreePath) {
           return;
         }
@@ -117,12 +135,10 @@ export function activate(context: vscode.ExtensionContext): void {
             );
             return;
           }
-          // Keep staged vs unstaged views separate (no mixed HEAD↔WT)
           if (item.statusSide === 'staged') {
             await openStagedDiff(item.worktreePath, item.file);
             return;
           }
-          // Changes (unstaged): Index ↔ Working Tree only
           await openUnstagedDiff(item.worktreePath, item.file);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

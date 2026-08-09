@@ -18,11 +18,13 @@ import {
   MessageItem,
   SectionItem,
   type TreeNode,
-  WorktreeItem,
+  WorktreePickerItem,
 } from './nodes';
 
 export type { TreeNode } from './nodes';
-export { CommitItem, FileItem, WorktreeItem } from './nodes';
+export { CommitItem, FileItem, WorktreePickerItem } from './nodes';
+
+const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
 interface WorktreeSnapshot {
   compare: CompareResult;
@@ -30,10 +32,9 @@ interface WorktreeSnapshot {
 }
 
 /**
- * Minimal, stable tree provider.
- * No recursive content watchers / polling (those OOM'd the extension host
- * on large monorepo worktrees after ~15–20s). Refresh is manual or when a
- * worktree directory is created/removed under the watch folder.
+ * Focused single-worktree tree.
+ * Discovery still scans all watch folders; the sidebar shows one selection
+ * (picker header + that worktree's body). No recursive content watchers.
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -53,7 +54,13 @@ export class WorktreeTreeProvider
   private readonly compareErrors = new Map<string, string>();
   private readonly baseOverrides = new Map<string, string>();
 
-  constructor(private readonly output: vscode.OutputChannel) {
+  private selectedPath: string | undefined;
+
+  constructor(
+    private readonly output: vscode.OutputChannel,
+    private readonly context: vscode.ExtensionContext,
+  ) {
+    this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.rewatchFolders();
@@ -70,6 +77,41 @@ export class WorktreeTreeProvider
     void this.refresh();
   }
 
+  /** All discovered worktrees (for the picker). */
+  getWorktrees(): DiscoveredWorktree[] {
+    return this.worktrees.slice();
+  }
+
+  getSelectedPath(): string | undefined {
+    return this.getSelected()?.path;
+  }
+
+  getSelected(): DiscoveredWorktree | undefined {
+    if (this.worktrees.length === 0) {
+      return undefined;
+    }
+    if (this.selectedPath) {
+      const hit = this.worktrees.find((w) => w.path === this.selectedPath);
+      if (hit) {
+        return hit;
+      }
+    }
+    return this.worktrees[0];
+  }
+
+  async setSelectedPath(worktreePath: string): Promise<void> {
+    this.selectedPath = worktreePath;
+    await this.context.workspaceState.update(SELECTED_PATH_KEY, worktreePath);
+    this.output.appendLine(`Selected worktree → ${worktreePath}`);
+    // Drop other snapshots so we don't grow unbounded; keep selected warm on next expand
+    for (const key of [...this.snapshotCache.keys()]) {
+      if (key !== worktreePath) {
+        this.snapshotCache.delete(key);
+      }
+    }
+    this._onDidChangeTreeData.fire();
+  }
+
   refresh(): void {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
@@ -81,7 +123,6 @@ export class WorktreeTreeProvider
     }, 150);
   }
 
-  /** Re-fetch compare/status for one worktree (e.g. after stage). */
   refreshCompare(worktreePath: string): void {
     this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
@@ -109,6 +150,7 @@ export class WorktreeTreeProvider
     this._onDidChangeTreeData.fire();
     try {
       this.worktrees = await discoverWorktrees(this.output);
+      this.ensureValidSelection();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Discovery failed: ${message}`);
@@ -119,6 +161,23 @@ export class WorktreeTreeProvider
     }
   }
 
+  private ensureValidSelection(): void {
+    if (this.worktrees.length === 0) {
+      this.selectedPath = undefined;
+      return;
+    }
+    if (
+      !this.selectedPath ||
+      !this.worktrees.some((w) => w.path === this.selectedPath)
+    ) {
+      this.selectedPath = this.worktrees[0]!.path;
+      void this.context.workspaceState.update(
+        SELECTED_PATH_KEY,
+        this.selectedPath,
+      );
+    }
+  }
+
   private rewatchFolders(): void {
     for (const w of this.folderWatchers) {
       w.dispose();
@@ -126,13 +185,12 @@ export class WorktreeTreeProvider
     this.folderWatchers = [];
 
     for (const root of resolveWatchRoots()) {
-      // Only top-level create/delete of worktree dirs — not recursive **/*
       const pattern = new vscode.RelativePattern(root, '*');
       try {
         const watcher = vscode.workspace.createFileSystemWatcher(
           pattern,
           false,
-          true, // ignore change storms inside dirs
+          true,
           false,
         );
         this.folderWatchers.push(
@@ -191,11 +249,9 @@ export class WorktreeTreeProvider
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
       if (!element) {
-        return this.getRootChildren();
+        return await this.getRootChildren();
       }
       switch (element.kind) {
-        case 'worktree':
-          return await this.getWorktreeChildren(element);
         case 'section':
           return await this.getSectionChildren(element);
         case 'commit':
@@ -210,7 +266,7 @@ export class WorktreeTreeProvider
     }
   }
 
-  private getRootChildren(): TreeNode[] {
+  private async getRootChildren(): Promise<TreeNode[]> {
     if (this.loading && this.worktrees.length === 0) {
       return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
     }
@@ -222,13 +278,23 @@ export class WorktreeTreeProvider
           .join(', ') || '.claude/worktrees';
       return [new MessageItem('No worktrees found', `Watched: ${folders}`)];
     }
-    return this.worktrees.map((wt) => new WorktreeItem(wt));
+
+    const selected = this.getSelected();
+    if (!selected) {
+      return [new MessageItem('Select a worktree', 'Use the toolbar')];
+    }
+
+    const nodes: TreeNode[] = [
+      new WorktreePickerItem(selected, this.worktrees.length),
+    ];
+    nodes.push(...(await this.getWorktreeBody(selected.path)));
+    return nodes;
   }
 
-  private async getWorktreeChildren(item: WorktreeItem): Promise<TreeNode[]> {
-    const snap = await this.getSnapshot(item.worktreePath);
+  private async getWorktreeBody(worktreePath: string): Promise<TreeNode[]> {
+    const snap = await this.getSnapshot(worktreePath);
     if (!snap) {
-      const err = this.compareErrors.get(item.worktreePath) ?? 'Failed to load';
+      const err = this.compareErrors.get(worktreePath) ?? 'Failed to load';
       return [new MessageItem('Could not load worktree', err, 'error')];
     }
 
@@ -237,16 +303,12 @@ export class WorktreeTreeProvider
 
     if (compare.behind > 0) {
       nodes.push(
-        new BehindWarningItem(
-          item.worktreePath,
-          compare.baseRef,
-          compare.behind,
-        ),
+        new BehindWarningItem(worktreePath, compare.baseRef, compare.behind),
       );
     }
 
     for (const c of compare.commitsAhead) {
-      nodes.push(new CommitItem(item.worktreePath, compare.baseRef, c));
+      nodes.push(new CommitItem(worktreePath, compare.baseRef, c));
     }
 
     if (status.staged.length > 0) {
@@ -254,7 +316,7 @@ export class WorktreeTreeProvider
         new SectionItem(
           'Staged Changes',
           'staged',
-          item.worktreePath,
+          worktreePath,
           compare.baseRef,
           vscode.TreeItemCollapsibleState.Expanded,
           String(status.staged.length),
@@ -267,7 +329,7 @@ export class WorktreeTreeProvider
       new SectionItem(
         'Changes',
         'changes',
-        item.worktreePath,
+        worktreePath,
         compare.baseRef,
         vscode.TreeItemCollapsibleState.Expanded,
         changesCount > 0 ? String(changesCount) : undefined,
@@ -279,7 +341,7 @@ export class WorktreeTreeProvider
       new SectionItem(
         'Squashed',
         'squash',
-        item.worktreePath,
+        worktreePath,
         compare.baseRef,
         vscode.TreeItemCollapsibleState.Collapsed,
         squashCount > 0
