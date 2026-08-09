@@ -41,12 +41,6 @@
           "type": "string",
           "default": "main",
           "description": "Fallback base ref when a worktree's fork point cannot be inferred (reflog / merge-base / upstream)."
-        },
-        "worktreeCompare.contentRefreshIntervalMs": {
-          "type": "number",
-          "default": 3000,
-          "minimum": 0,
-          "description": "How often to re-compare expanded worktrees for agent file writes (ms). Set 0 to disable polling (file watchers still run)."
         }
       }
     },

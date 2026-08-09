@@ -28,18 +28,14 @@ export class WorktreeItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon(
       worktree.detached ? 'git-commit' : 'git-branch',
     );
-    this.description = undefined;
-    this.tooltip = new vscode.MarkdownString(
-      [
-        `**${branchLabel}**`,
-        '',
-        `Worktree: \`${worktree.name}\``,
-        `Path: \`${worktree.path}\``,
-        worktree.relativePath ? `Relative: \`${worktree.relativePath}\`` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    );
+    this.tooltip = [
+      branchLabel,
+      `Worktree: ${worktree.name}`,
+      `Path: ${worktree.path}`,
+      worktree.relativePath ? `Relative: ${worktree.relativePath}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 }
 
@@ -63,15 +59,11 @@ export class BehindWarningItem extends vscode.TreeItem {
       new vscode.ThemeColor('list.warningForeground'),
     );
     this.description = 'rebase recommended';
-    this.tooltip = new vscode.MarkdownString(
-      [
-        `This worktree is **${n}** commit${n === 1 ? '' : 's'} behind \`${baseRef}\`.`,
-        '',
-        'Browsing and editing still work. Consider rebasing (or merging) onto the base before adding more commits.',
-        '',
-        'Use **Change Base Ref** if the base is wrong.',
-      ].join('\n'),
-    );
+    this.tooltip = [
+      `This worktree is ${n} commit${n === 1 ? '' : 's'} behind ${baseRef}.`,
+      'Browsing and editing still work. Consider rebasing (or merging) onto the base before adding more commits.',
+      'Use Change Base Ref if the base is wrong.',
+    ].join('\n');
     this.command = {
       command: 'worktreeCompare.changeBaseRef',
       title: 'Change Base Ref',
