@@ -1,3 +1,4 @@
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   discoverWorktrees,
@@ -146,11 +147,15 @@ export class WorktreeTreeProvider
   }
 
   private async load(): Promise<void> {
+    const t0 = Date.now();
     this.loading = true;
     this._onDidChangeTreeData.fire();
     try {
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
+      this.output.appendLine(
+        `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Discovery failed: ${message}`);
@@ -218,25 +223,35 @@ export class WorktreeTreeProvider
     if (cached) {
       return cached;
     }
+    const t0 = Date.now();
     try {
       const overridden = this.baseOverrides.get(worktreePath);
+      const tBase = Date.now();
       const baseRef =
         overridden ??
         (await resolveBaseRef(worktreePath, this.defaultBaseRef()));
       if (!overridden) {
-        this.output.appendLine(`Inferred base for ${worktreePath}: ${baseRef}`);
+        this.output.appendLine(
+          `Inferred base for ${worktreePath}: ${baseRef} (${Date.now() - tBase}ms)`,
+        );
       }
+      const tDiff = Date.now();
       const [compare, status] = await Promise.all([
         compareWorkingTreeToBase(worktreePath, baseRef),
         getWorkingStatus(worktreePath),
       ]);
+      this.output.appendLine(
+        `Snapshot ${path.basename(worktreePath)}: base=${baseRef} ahead=${compare.ahead} staged=${status.staged.length} unstaged=${status.unstaged.length} (diff ${Date.now() - tDiff}ms, total ${Date.now() - t0}ms)`,
+      );
       const snap: WorktreeSnapshot = { compare, status };
       this.snapshotCache.set(worktreePath, snap);
       this.compareErrors.delete(worktreePath);
       return snap;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Snapshot failed for ${worktreePath}: ${message}`);
+      this.output.appendLine(
+        `Snapshot failed for ${worktreePath} after ${Date.now() - t0}ms: ${message}`,
+      );
       this.compareErrors.set(worktreePath, message);
       return undefined;
     }

@@ -29,42 +29,24 @@ async function listDirectChildDirs(dir: string): Promise<string[]> {
 
 /**
  * Scan configured watch folders under each workspace folder for git worktrees.
+ * Inspects children with limited concurrency (avoids serial git storms).
  */
 export async function discoverWorktrees(
   output?: vscode.OutputChannel,
 ): Promise<DiscoveredWorktree[]> {
+  const t0 = Date.now();
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
   const found: DiscoveredWorktree[] = [];
   const seen = new Set<string>();
 
-  const consider = async (
-    absPath: string,
-    workspaceFolder?: vscode.WorkspaceFolder,
-  ): Promise<void> => {
-    const normalized = path.normalize(absPath);
-    if (seen.has(normalized)) {
-      return;
-    }
-    const info = await inspectWorktree(normalized);
-    if (!info) {
-      return;
-    }
-    seen.add(normalized);
-    const relativePath = workspaceFolder
-      ? path.relative(workspaceFolder.uri.fsPath, normalized)
-      : undefined;
-    found.push({
-      ...info,
-      workspaceFolder,
-      relativePath: relativePath && !relativePath.startsWith('..') ? relativePath : undefined,
-    });
-  };
-
   if (workspaceFolders.length === 0) {
     output?.appendLine('No workspace folder open — nothing to scan');
     return found;
   }
+
+  type Job = { absPath: string; workspaceFolder: vscode.WorkspaceFolder };
+  const jobs: Job[] = [];
 
   for (const folder of workspaceFolders) {
     for (const watch of watchFolders) {
@@ -74,17 +56,62 @@ export async function discoverWorktrees(
       output?.appendLine(`Scanning ${watchAbs}`);
       const children = await listDirectChildDirs(watchAbs);
       for (const child of children) {
-        await consider(child, folder);
+        jobs.push({ absPath: child, workspaceFolder: folder });
       }
     }
   }
 
-  // Primary label is branch name — sort that way
+  output?.appendLine(`Discovery: ${jobs.length} candidate dir(s)`);
+
+  const concurrency = 6;
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < jobs.length) {
+      const i = next++;
+      const job = jobs[i]!;
+      const normalized = path.normalize(job.absPath);
+      if (seen.has(normalized)) {
+        continue;
+      }
+      try {
+        const info = await inspectWorktree(normalized);
+        if (!info) {
+          continue;
+        }
+        seen.add(normalized);
+        const relativePath = path.relative(
+          job.workspaceFolder.uri.fsPath,
+          normalized,
+        );
+        found.push({
+          ...info,
+          workspaceFolder: job.workspaceFolder,
+          relativePath:
+            relativePath && !relativePath.startsWith('..')
+              ? relativePath
+              : undefined,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        output?.appendLine(`Discovery skip ${normalized}: ${message}`);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, Math.max(jobs.length, 1)) }, () =>
+      worker(),
+    ),
+  );
+
   found.sort((a, b) => {
     const byBranch = a.branch.localeCompare(b.branch);
     return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
   });
-  output?.appendLine(`Discovered ${found.length} worktree(s)`);
+  output?.appendLine(
+    `Discovered ${found.length} worktree(s) in ${Date.now() - t0}ms`,
+  );
   return found;
 }
 

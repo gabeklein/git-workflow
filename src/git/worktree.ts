@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from './exec';
 
@@ -29,7 +30,19 @@ export async function isGitWorktree(dir: string): Promise<boolean> {
   return gitOk(dir, ['rev-parse', '--is-inside-work-tree']);
 }
 
+/**
+ * Lightweight inspect for discovery (few git calls).
+ * Skips mainWorktreePath — not needed for the picker list.
+ */
 export async function inspectWorktree(dir: string): Promise<WorktreeInfo | undefined> {
+  // Cheap filesystem probe before spawning git
+  try {
+    const gitPath = path.join(dir, '.git');
+    await fs.access(gitPath);
+  } catch {
+    return undefined;
+  }
+
   if (!(await isGitWorktree(dir))) {
     return undefined;
   }
@@ -52,26 +65,11 @@ export async function inspectWorktree(dir: string): Promise<WorktreeInfo | undef
     }
   }
 
-  let mainWorktreePath: string | undefined;
-  try {
-    const commonDir = (
-      await git(dir, ['rev-parse', '--path-format=absolute', '--git-common-dir'])
-    ).trim();
-    if (commonDir.endsWith(`${path.sep}.git`) || commonDir.endsWith('/.git')) {
-      mainWorktreePath = path.dirname(commonDir);
-    } else if (commonDir.endsWith('.git')) {
-      mainWorktreePath = path.dirname(commonDir);
-    }
-  } catch {
-    // optional metadata
-  }
-
   return {
     path: dir,
     name,
     branch,
     detached,
-    mainWorktreePath,
   };
 }
 
@@ -267,49 +265,6 @@ async function baseFromBranchConfig(
 }
 
 /**
- * Among known integration refs, pick the closest ancestor of HEAD
- * (fewest commits in base..HEAD). Prefers remote-tracking names.
- */
-async function baseFromClosestAncestor(
-  worktreePath: string,
-  defaultBaseRef: string,
-): Promise<string | undefined> {
-  let best: { ref: string; ahead: number } | undefined;
-
-  for (const ref of integrationCandidates(defaultBaseRef)) {
-    if (!(await refResolves(worktreePath, ref))) {
-      continue;
-    }
-    const isAncestor = await gitOk(worktreePath, [
-      'merge-base',
-      '--is-ancestor',
-      ref,
-      'HEAD',
-    ]);
-    if (!isAncestor) {
-      continue;
-    }
-    try {
-      const aheadStr = (
-        await git(worktreePath, ['rev-list', '--count', `${ref}..HEAD`])
-      ).trim();
-      const ahead = Number(aheadStr) || 0;
-      if (!best || ahead < best.ahead) {
-        best = { ref, ahead };
-      } else if (best && ahead === best.ahead) {
-        if (ref.startsWith('origin/') && !best.ref.startsWith('origin/')) {
-          best = { ref, ahead };
-        }
-      }
-    } catch {
-      // skip
-    }
-  }
-
-  return best?.ref;
-}
-
-/**
  * Upstream is only useful as a compare base when it is not just the same
  * feature branch on a remote (origin/my-feature).
  */
@@ -381,20 +336,17 @@ export async function resolveBaseRef(
     return fromUpstream;
   }
 
-  const fromAncestor = await baseFromClosestAncestor(worktreePath, defaultBaseRef);
-  if (fromAncestor) {
-    return fromAncestor;
-  }
-
+  // Skip closest-ancestor scan by default — it can spawn dozens of git
+  // processes on large repos and was a hang risk. Prefer quick fallbacks.
   const candidates = [
-    defaultBaseRef,
     `origin/${defaultBaseRef}`,
+    defaultBaseRef,
+    'origin/staging',
+    'staging',
     'origin/main',
     'main',
     'origin/master',
     'master',
-    'origin/staging',
-    'staging',
   ];
   const seen = new Set<string>();
   for (const ref of candidates) {
