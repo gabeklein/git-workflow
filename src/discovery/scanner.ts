@@ -79,7 +79,11 @@ export async function discoverWorktrees(
     }
   }
 
-  found.sort((a, b) => a.name.localeCompare(b.name));
+  // Primary label is branch name — sort that way
+  found.sort((a, b) => {
+    const byBranch = a.branch.localeCompare(b.branch);
+    return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
+  });
   output?.appendLine(`Discovered ${found.length} worktree(s)`);
   return found;
 }

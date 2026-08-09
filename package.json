@@ -1,7 +1,7 @@
 {
-  "name": "worktree-compare",
-  "displayName": "Worktree Compare",
-  "description": "Auto-discover git worktrees and compare Working Tree against their base ref — GitLens-style, editable diffs.",
+  "name": "git-workflow",
+  "displayName": "Git Workflow",
+  "description": "Discover git worktrees and compare each Working Tree against its base ref — GitLens-style, editable diffs.",
   "version": "0.0.1",
   "publisher": "local",
   "engines": {
@@ -16,6 +16,7 @@
     "worktree",
     "diff",
     "compare",
+    "workflow",
     "claude"
   ],
   "activationEvents": [
@@ -24,7 +25,7 @@
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
-      "title": "Worktree Compare",
+      "title": "Git Workflow",
       "properties": {
         "worktreeCompare.watchFolders": {
           "type": "array",
@@ -39,7 +40,13 @@
         "worktreeCompare.defaultBaseRef": {
           "type": "string",
           "default": "main",
-          "description": "Default base ref to compare a worktree against when no upstream or other base is resolved."
+          "description": "Fallback base ref when a worktree's fork point cannot be inferred (reflog / merge-base / upstream)."
+        },
+        "worktreeCompare.contentRefreshIntervalMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 0,
+          "description": "How often to re-compare expanded worktrees for agent file writes (ms). Set 0 to disable polling (file watchers still run)."
         }
       }
     },
@@ -47,7 +54,7 @@
       "activitybar": [
         {
           "id": "worktreeCompare",
-          "title": "Worktree Compare",
+          "title": "Git Workflow",
           "icon": "media/worktree.svg"
         }
       ]
@@ -65,23 +72,23 @@
         "command": "worktreeCompare.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
-        "category": "Worktree Compare"
+        "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.openWorktree",
         "title": "Reveal Worktree in Explorer",
-        "category": "Worktree Compare"
+        "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.openFileDiff",
         "title": "Open File Diff",
-        "category": "Worktree Compare"
+        "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.changeBaseRef",
         "title": "Change Base Ref",
         "icon": "$(git-compare)",
-        "category": "Worktree Compare"
+        "category": "Git Workflow"
       }
     ],
     "menus": {

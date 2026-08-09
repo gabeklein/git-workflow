@@ -10,9 +10,9 @@ import {
 } from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('Worktree Compare');
+  const output = vscode.window.createOutputChannel('Git Workflow');
   context.subscriptions.push(output);
-  output.appendLine('Worktree Compare activated');
+  output.appendLine('Git Workflow activated');
 
   const contentProvider = new GitContentProvider();
   context.subscriptions.push(
@@ -65,12 +65,12 @@ export function activate(context: vscode.ExtensionContext): void {
           if (!picked) {
             return;
           }
-          treeProvider.setBaseRef(worktreePath, picked);
+          await treeProvider.setBaseRef(worktreePath, picked);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           output.appendLine(`Change base ref failed: ${message}`);
           void vscode.window.showErrorMessage(
-            `Worktree Compare: could not change base — ${message}`,
+            `Git Workflow: could not change base — ${message}`,
           );
         }
       },
@@ -99,7 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
           const message = err instanceof Error ? err.message : String(err);
           output.appendLine(`Open diff failed: ${message}`);
           void vscode.window.showErrorMessage(
-            `Worktree Compare: could not open diff — ${message}`,
+            `Git Workflow: could not open diff — ${message}`,
           );
         }
       },

@@ -17,18 +17,23 @@ export class WorktreeItem extends vscode.TreeItem {
   readonly worktree: DiscoveredWorktree;
 
   constructor(worktree: DiscoveredWorktree) {
-    super(worktree.name, vscode.TreeItemCollapsibleState.Collapsed);
+    const branchLabel =
+      worktree.branch + (worktree.detached ? ' (detached)' : '');
+    // Branch is primary; worktree directory name is secondary
+    super(branchLabel, vscode.TreeItemCollapsibleState.Collapsed);
     this.worktree = worktree;
     this.worktreePath = worktree.path;
     this.contextValue = 'worktree';
-    this.iconPath = new vscode.ThemeIcon('repo');
-    this.description = worktree.branch + (worktree.detached ? ' (detached)' : '');
+    this.iconPath = new vscode.ThemeIcon(
+      worktree.detached ? 'git-commit' : 'git-branch',
+    );
+    this.description = worktree.name;
     this.tooltip = new vscode.MarkdownString(
       [
-        `**${worktree.name}**`,
+        `**${branchLabel}**`,
         '',
+        `Worktree: \`${worktree.name}\``,
         `Path: \`${worktree.path}\``,
-        `Branch: \`${worktree.branch}\``,
         worktree.relativePath ? `Relative: \`${worktree.relativePath}\`` : '',
       ]
         .filter(Boolean)
