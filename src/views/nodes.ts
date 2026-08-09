@@ -91,7 +91,7 @@ export class SectionItem extends vscode.TreeItem {
     } else if (section === 'changes') {
       this.iconPath = new vscode.ThemeIcon('request-changes');
     } else {
-      // Squash = cumulative WT ↔ base file set
+      // Squashed = cumulative WT ↔ base file set
       this.iconPath = new vscode.ThemeIcon('git-pull-request');
     }
   }

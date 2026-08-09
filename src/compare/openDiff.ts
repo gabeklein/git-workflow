@@ -5,7 +5,7 @@ import type { FileChange } from '../git/compare';
 
 /**
  * Editable diff: left = ref content, right = real worktree file.
- * Used for Squash (Working Tree ↔ base).
+ * Used for Squashed (Working Tree ↔ base).
  */
 export async function openWorkingTreeDiff(
   worktreePath: string,

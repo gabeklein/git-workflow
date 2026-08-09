@@ -45,7 +45,7 @@ branch-name
 ├── commit…               ← ahead of base (read-only file diffs)
 ├── Staged Changes        ← hidden if empty; editable vs HEAD
 ├── Changes               ← unstaged/untracked; hot-follow; editable vs HEAD
-└── Squash                ← all files vs base (WT ↔ base, editable)
+└── Squashed              ← all files vs base (WT ↔ base, editable)
 ```
 
 ## Roadmap
@@ -58,7 +58,7 @@ branch-name
 - [x] Infer fork point (reflog / vscode-merge-base / closest ancestor)
 - [x] Branch name primary label; worktree dir secondary
 - [x] Hot-follow agent writes (content watcher + poll on expanded trees)
-- [x] SCM-like Staged / Changes + Squash single tree
+- [x] SCM-like Staged / Changes + Squashed single tree
 - [ ] Stage/unstage/commit actions (optional; agents usually commit)
 - [ ] Two-view split (History | Changes) if single tree gets dense
 - [ ] Editable commits via rebase on confirm

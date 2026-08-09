@@ -277,7 +277,7 @@ export class WorktreeTreeProvider
     const squashCount = compare.fullPrFiles.length;
     nodes.push(
       new SectionItem(
-        'Squash',
+        'Squashed',
         'squash',
         item.worktreePath,
         compare.baseRef,

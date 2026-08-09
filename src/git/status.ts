@@ -7,80 +7,30 @@ export interface WorkingStatus {
 }
 
 /**
- * Parse `git status --porcelain=v1 -uall` into staged / unstaged lists.
- * A path can appear in both (e.g. staged edit + further unstaged edits).
+ * Staged / unstaged lists via the same diffs the UI opens:
+ * - staged:   `git diff --cached`  (HEAD ↔ index)
+ * - unstaged: `git diff` + untracked (index ↔ working tree)
+ *
+ * Prefer this over porcelain XY parsing — clearer and harder to mis-split.
  */
 export async function getWorkingStatus(worktreePath: string): Promise<WorkingStatus> {
-  const out = await git(worktreePath, [
-    'status',
-    '--porcelain=v1',
-    '-uall',
-    '--ignore-submodules=dirty',
+  const [stagedOut, unstagedOut, untrackedOut] = await Promise.all([
+    git(worktreePath, ['diff', '--name-status', '--cached', '--find-renames']),
+    git(worktreePath, ['diff', '--name-status', '--find-renames']),
+    git(worktreePath, [
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '-z',
+    ]),
   ]);
 
-  const staged: FileChange[] = [];
-  const unstaged: FileChange[] = [];
-  const seenStaged = new Set<string>();
-  const seenUnstaged = new Set<string>();
+  const staged = parseNameStatus(stagedOut);
+  const unstaged = parseNameStatus(unstagedOut);
 
-  for (const raw of out.split('\n')) {
-    if (!raw) {
-      continue;
-    }
-    // Format: XY PATH | XY ORIG -> PATH | ?? PATH
-    const x = raw[0] ?? ' ';
-    const y = raw[1] ?? ' ';
-    const rest = raw.slice(3);
-
-    if (x === '?' && y === '?') {
-      const path = rest.trim();
-      if (path && !seenUnstaged.has(path)) {
-        seenUnstaged.add(path);
-        unstaged.push({ path, status: 'A' });
-      }
-      continue;
-    }
-    if (x === '!' && y === '!') {
-      continue;
-    }
-
-    let path = rest;
-    let oldPath: string | undefined;
-    const renameIdx = rest.indexOf(' -> ');
-    if (renameIdx !== -1 && (x === 'R' || x === 'C' || y === 'R' || y === 'C')) {
-      oldPath = rest.slice(0, renameIdx).trim();
-      path = rest.slice(renameIdx + 4).trim();
-    } else {
-      path = rest.trim();
-    }
-    if (!path) {
-      continue;
-    }
-
-    // Staged: index column has a change
-    if (x !== ' ' && x !== '?') {
-      const key = path;
-      if (!seenStaged.has(key)) {
-        seenStaged.add(key);
-        staged.push({
-          path,
-          oldPath,
-          status: normalizeStatus(x),
-        });
-      }
-    }
-
-    // Unstaged: worktree column has a change
-    if (y !== ' ' && y !== '?') {
-      const key = path;
-      if (!seenUnstaged.has(key)) {
-        seenUnstaged.add(key);
-        unstaged.push({
-          path,
-          oldPath: y === 'R' || y === 'C' ? oldPath : undefined,
-          status: normalizeStatus(y),
-        });
-      }
+  for (const path of parseNulPaths(untrackedOut)) {
+    if (!unstaged.some((f) => f.path === path)) {
+      unstaged.push({ path, status: 'A' });
     }
   }
 
@@ -89,17 +39,35 @@ export async function getWorkingStatus(worktreePath: string): Promise<WorkingSta
   return { staged, unstaged };
 }
 
-function normalizeStatus(code: string): string {
-  switch (code) {
-    case 'A':
-    case 'M':
-    case 'D':
-    case 'R':
-    case 'C':
-    case 'T':
-    case 'U':
-      return code;
-    default:
-      return 'M';
+function parseNameStatus(stdout: string): FileChange[] {
+  const files: FileChange[] = [];
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) {
+      continue;
+    }
+    // M\tpath | A\tpath | D\tpath | R100\told\tnew
+    const parts = line.split('\t');
+    const statusRaw = parts[0] ?? '';
+    const status = statusRaw.charAt(0) || 'M';
+    if (parts.length >= 3 && (status === 'R' || status === 'C')) {
+      files.push({
+        status,
+        oldPath: parts[1],
+        path: parts[2] ?? parts[1],
+      });
+    } else if (parts.length >= 2 && parts[1]) {
+      files.push({
+        status,
+        path: parts[1],
+      });
+    }
   }
+  return files;
+}
+
+function parseNulPaths(stdout: string): string[] {
+  return stdout
+    .split('\0')
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
