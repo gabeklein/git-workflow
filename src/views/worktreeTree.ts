@@ -327,21 +327,6 @@ export class WorktreeTreeProvider
     }
 
     const snap = await this.getSnapshot(selected.path);
-    const aheadCount = snap?.compare.ahead;
-    const aheadDesc =
-      aheadCount !== undefined
-        ? `${aheadCount} commit${aheadCount === 1 ? '' : 's'}`
-        : selected.branch;
-
-    nodes.push(
-      new GroupItem(
-        'Ahead',
-        'ahead',
-        vscode.TreeItemCollapsibleState.Expanded,
-        aheadDesc,
-      ),
-    );
-
     if (!snap) {
       const err = this.compareErrors.get(selected.path) ?? 'Failed to load';
       nodes.push(new MessageItem('Could not load worktree', err, 'error'));
@@ -351,7 +336,24 @@ export class WorktreeTreeProvider
     const { compare, status } = snap;
     const worktreePath = selected.path;
 
-    // Hoisted file sections (siblings of Worktrees / Ahead)
+    // Soft warning above Ahead — only when behind > 0
+    if (compare.behind > 0) {
+      nodes.push(
+        new BehindWarningItem(worktreePath, compare.baseRef, compare.behind),
+      );
+    }
+
+    const aheadCount = compare.ahead;
+    nodes.push(
+      new GroupItem(
+        'Ahead',
+        'ahead',
+        vscode.TreeItemCollapsibleState.Expanded,
+        `${aheadCount} commit${aheadCount === 1 ? '' : 's'}`,
+      ),
+    );
+
+    // File sections (siblings of Worktrees / Ahead)
     if (status.staged.length > 0) {
       nodes.push(
         new SectionItem(
@@ -399,7 +401,7 @@ export class WorktreeTreeProvider
     );
   }
 
-  /** Behind warning + commits ahead of base (no file sections). */
+  /** Commits ahead of base only (Behind lives above this group at root). */
   private async getAheadChildren(): Promise<TreeNode[]> {
     const selected = this.getSelected();
     if (!selected) {
@@ -412,27 +414,13 @@ export class WorktreeTreeProvider
     }
 
     const { compare } = snap;
-    const nodes: TreeNode[] = [];
-
-    if (compare.behind > 0) {
-      nodes.push(
-        new BehindWarningItem(
-          selected.path,
-          compare.baseRef,
-          compare.behind,
-        ),
-      );
-    }
-
     if (compare.commitsAhead.length === 0) {
-      nodes.push(new MessageItem('No commits ahead of base', compare.baseRef));
-      return nodes;
+      return [new MessageItem('No commits ahead of base', compare.baseRef)];
     }
 
-    for (const c of compare.commitsAhead) {
-      nodes.push(new CommitItem(selected.path, compare.baseRef, c));
-    }
-    return nodes;
+    return compare.commitsAhead.map(
+      (c) => new CommitItem(selected.path, compare.baseRef, c),
+    );
   }
 
   private async getSectionChildren(item: SectionItem): Promise<TreeNode[]> {
