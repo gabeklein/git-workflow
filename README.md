@@ -21,6 +21,8 @@ npm run watch   # or press F5 (starts watch via preLaunchTask)
 | `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees |
 | `worktreeCompare.includeRootCheckout` | `always` | `always` / `dirty` / `never` — main workspace checkout in the list |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
+| `worktreeCompare.contentRefreshIntervalMs` | `3000` | Hot-follow poll of focused worktree (`0` = off). Also refreshes on save/create/delete under that worktree — **no** recursive `**/*` watchers. |
+| `worktreeCompare.squashLayout` | `list` | Squashed files: `list` or `tree` |
 | `worktreeCompare.contentRefreshIntervalMs` | `3000` | Poll expanded worktrees for agent writes (`0` = watchers only) |
 
 ## Base ref inference

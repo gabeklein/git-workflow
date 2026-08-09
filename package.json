@@ -58,6 +58,12 @@
           "enum": ["list", "tree"],
           "default": "list",
           "description": "How to show files under Squashed: flat list or nested directory tree."
+        },
+        "worktreeCompare.contentRefreshIntervalMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 0,
+          "description": "Hot-follow: poll the focused worktree for git status changes (ms). 0 disables polling. Also refreshes on save/create/delete under the focused worktree (no recursive **/* watchers)."
         }
       }
     },

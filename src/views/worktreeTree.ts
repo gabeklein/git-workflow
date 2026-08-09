@@ -39,7 +39,10 @@ interface WorktreeSnapshot {
 /**
  * Single TreeView:
  *   ▼ Worktrees   — list (click to focus)
- *   ▼ Details     — body of the selected worktree
+ *   ▼ Ahead / file sections for the selected worktree
+ *
+ * Hot-follow (safe): poll selected worktree only + VS Code file events
+ * under that path. No recursive glob FileSystemWatchers.
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -50,7 +53,7 @@ export class WorktreeTreeProvider
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private readonly _onDidChangeWorktrees = new vscode.EventEmitter<void>();
-  /** Fired when discovery list or selection changes (for the select webview). */
+  /** Fired when discovery list or selection changes. */
   readonly onDidChangeWorktrees = this._onDidChangeWorktrees.event;
 
   private worktrees: DiscoveredWorktree[] = [];
@@ -58,6 +61,9 @@ export class WorktreeTreeProvider
   private readonly disposables: vscode.Disposable[] = [];
   private folderWatchers: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
+  private pollTimer: NodeJS.Timeout | undefined;
+  private contentDebounce: NodeJS.Timeout | undefined;
+  private softRefreshInFlight = false;
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
@@ -78,11 +84,46 @@ export class WorktreeTreeProvider
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('worktreeCompare')) {
           this.rewatchFolders();
-          this.refresh();
+          this.restartPoll();
+          if (
+            e.affectsConfiguration('worktreeCompare.watchFolders') ||
+            e.affectsConfiguration('worktreeCompare.includeRootCheckout')
+          ) {
+            this.refresh();
+          } else if (
+            e.affectsConfiguration('worktreeCompare.squashLayout') ||
+            e.affectsConfiguration('worktreeCompare.defaultBaseRef')
+          ) {
+            const sel = this.getSelectedPath();
+            if (sel) {
+              this.refreshCompare(sel);
+            }
+          }
+        }
+      }),
+      // Agent/editor writes through VS Code (no recursive FS watcher)
+      vscode.workspace.onDidSaveTextDocument((doc) => {
+        this.scheduleSoftRefreshIfUnderSelected(doc.uri);
+      }),
+      vscode.workspace.onDidCreateFiles((e) => {
+        for (const u of e.files) {
+          this.scheduleSoftRefreshIfUnderSelected(u);
+        }
+      }),
+      vscode.workspace.onDidDeleteFiles((e) => {
+        for (const u of e.files) {
+          this.scheduleSoftRefreshIfUnderSelected(u);
+        }
+      }),
+      vscode.workspace.onDidRenameFiles((e) => {
+        for (const f of e.files) {
+          this.scheduleSoftRefreshIfUnderSelected(f.newUri);
+          this.scheduleSoftRefreshIfUnderSelected(f.oldUri);
         }
       }),
     );
     this.rewatchFolders();
+    this.restartPoll();
     void this.refresh();
   }
 
@@ -133,10 +174,83 @@ export class WorktreeTreeProvider
     }, 150);
   }
 
+  /** Force re-fetch for one worktree (stage/unstage, layout toggle). */
   refreshCompare(worktreePath: string): void {
     this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
     this._onDidChangeTreeData.fire();
+  }
+
+  /**
+   * Hot-follow: re-run git status/diff for the focused worktree and only
+   * rebuild the tree if something actually changed.
+   */
+  private scheduleSoftRefreshIfUnderSelected(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file') {
+      return;
+    }
+    const selected = this.getSelectedPath();
+    if (!selected || !isPathInside(uri.fsPath, selected)) {
+      return;
+    }
+    if (this.contentDebounce) {
+      clearTimeout(this.contentDebounce);
+    }
+    this.contentDebounce = setTimeout(() => {
+      this.contentDebounce = undefined;
+      void this.softRefreshSelected('file-event');
+    }, 400);
+  }
+
+  private contentRefreshIntervalMs(): number {
+    return vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<number>('contentRefreshIntervalMs', 3000);
+  }
+
+  private restartPoll(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    const ms = this.contentRefreshIntervalMs();
+    if (ms <= 0) {
+      this.output.appendLine('Hot-follow poll disabled (contentRefreshIntervalMs=0)');
+      return;
+    }
+    this.output.appendLine(`Hot-follow poll every ${ms}ms (selected worktree only)`);
+    this.pollTimer = setInterval(() => {
+      if (!vscode.window.state.focused) {
+        return;
+      }
+      void this.softRefreshSelected('poll');
+    }, ms);
+  }
+
+  private async softRefreshSelected(reason: string): Promise<void> {
+    const worktreePath = this.getSelectedPath();
+    if (!worktreePath || this.loading || this.softRefreshInFlight) {
+      return;
+    }
+    this.softRefreshInFlight = true;
+    try {
+      const prev = this.snapshotCache.get(worktreePath);
+      const prevFp = prev ? snapshotFingerprint(prev) : undefined;
+      this.snapshotCache.delete(worktreePath);
+      const next = await this.getSnapshot(worktreePath);
+      if (!next) {
+        this._onDidChangeTreeData.fire();
+        return;
+      }
+      const nextFp = snapshotFingerprint(next);
+      if (prevFp === nextFp) {
+        return;
+      }
+      this.output.appendLine(`Hot-follow update (${reason}): ${path.basename(worktreePath)}`);
+      this._onDidChangeTreeData.fire();
+    } finally {
+      this.softRefreshInFlight = false;
+    }
   }
 
   getBaseRef(worktreePath: string): string | undefined {
@@ -543,6 +657,12 @@ export class WorktreeTreeProvider
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
     }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    if (this.contentDebounce) {
+      clearTimeout(this.contentDebounce);
+    }
     for (const w of this.folderWatchers) {
       w.dispose();
     }
@@ -552,4 +672,32 @@ export class WorktreeTreeProvider
     this._onDidChangeTreeData.dispose();
     this._onDidChangeWorktrees.dispose();
   }
+}
+
+function isPathInside(fsPath: string, root: string): boolean {
+  const resolved = path.resolve(fsPath);
+  const rootResolved = path.resolve(root);
+  return (
+    resolved === rootResolved ||
+    resolved.startsWith(rootResolved + path.sep)
+  );
+}
+
+/** Cheap equality for deciding whether the tree UI needs a rebuild. */
+function snapshotFingerprint(snap: WorktreeSnapshot): string {
+  const { compare, status } = snap;
+  const fmt = (files: FileChange[]) =>
+    files
+      .map((f) => `${f.status}:${f.path}${f.oldPath ? `>${f.oldPath}` : ''}`)
+      .sort()
+      .join('|');
+  return [
+    compare.baseRef,
+    compare.ahead,
+    compare.behind,
+    compare.commitsAhead.map((c) => c.hash).join(','),
+    fmt(status.staged),
+    fmt(status.unstaged),
+    fmt(compare.fullPrFiles),
+  ].join('::');
 }
