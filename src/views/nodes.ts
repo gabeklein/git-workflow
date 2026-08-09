@@ -27,7 +27,8 @@ export class WorktreeItem extends vscode.TreeItem {
     this.iconPath = new vscode.ThemeIcon(
       worktree.detached ? 'git-commit' : 'git-branch',
     );
-    this.description = worktree.name;
+    // Directory name only on hover — keeps narrow sidebars readable
+    this.description = undefined;
     this.tooltip = new vscode.MarkdownString(
       [
         `**${branchLabel}**`,

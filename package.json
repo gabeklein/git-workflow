@@ -101,16 +101,6 @@
       ],
       "view/item/context": [
         {
-          "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
-          "group": "inline"
-        },
-        {
-          "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
-          "group": "inline"
-        },
-        {
           "command": "worktreeCompare.changeBaseRef",
           "when": "view == worktreeCompare.worktrees && viewItem == compareRoot",
           "group": "inline"
@@ -119,6 +109,11 @@
           "command": "worktreeCompare.changeBaseRef",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /^(worktree|compareRoot)$/",
           "group": "0_compare"
+        },
+        {
+          "command": "worktreeCompare.openWorktree",
+          "when": "view == worktreeCompare.worktrees && viewItem == worktree",
+          "group": "navigation"
         }
       ]
     }
