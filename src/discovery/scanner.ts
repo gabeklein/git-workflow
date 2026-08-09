@@ -32,7 +32,7 @@ async function listDirectChildDirs(dir: string): Promise<string[]> {
  * Inspects children with limited concurrency (avoids serial git storms).
  */
 export async function discoverWorktrees(
-  output?: vscode.OutputChannel,
+  output?: { appendLine(value: string): void },
 ): Promise<DiscoveredWorktree[]> {
   const t0 = Date.now();
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];

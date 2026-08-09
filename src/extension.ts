@@ -9,6 +9,7 @@ import { pickBaseRef } from './compare/pickBaseRef';
 import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { stagePaths, unstagePaths } from './git/stage';
+import { createFileBackedLogger } from './log';
 import {
   CommitItem,
   FileItem,
@@ -19,7 +20,9 @@ import {
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Git Workflow');
   context.subscriptions.push(output);
-  output.appendLine('Git Workflow activated');
+  const log = createFileBackedLogger(context, output);
+  context.subscriptions.push(log);
+  log.appendLine('Git Workflow activated');
 
   const contentProvider = new GitContentProvider();
   context.subscriptions.push(
@@ -30,7 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  const treeProvider = new WorktreeTreeProvider(output, context);
+  const treeProvider = new WorktreeTreeProvider(log, context);
   context.subscriptions.push(treeProvider);
 
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
@@ -90,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await treeProvider.setBaseRef(worktreePath, picked);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          output.appendLine(`Change base ref failed: ${message}`);
+          log.appendLine(`Change base ref failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not change base — ${message}`,
           );
@@ -142,7 +145,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await openUnstagedDiff(item.worktreePath, item.file);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          output.appendLine(`Open diff failed: ${message}`);
+          log.appendLine(`Open diff failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not open diff — ${message}`,
           );
@@ -162,10 +165,10 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           await stagePaths(item.worktreePath, paths);
           treeProvider.refreshCompare(item.worktreePath);
-          output.appendLine(`Staged ${item.file.path}`);
+          log.appendLine(`Staged ${item.file.path}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          output.appendLine(`Stage failed: ${message}`);
+          log.appendLine(`Stage failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not stage — ${message}`,
           );
@@ -185,16 +188,20 @@ export function activate(context: vscode.ExtensionContext): void {
           }
           await unstagePaths(item.worktreePath, paths);
           treeProvider.refreshCompare(item.worktreePath);
-          output.appendLine(`Unstaged ${item.file.path}`);
+          log.appendLine(`Unstaged ${item.file.path}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          output.appendLine(`Unstage failed: ${message}`);
+          log.appendLine(`Unstage failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not unstage — ${message}`,
           );
         }
       },
     ),
+    vscode.commands.registerCommand('worktreeCompare.openLogFile', async () => {
+      const uri = vscode.Uri.file(log.logFile);
+      await vscode.window.showTextDocument(uri);
+    }),
   );
 }
 

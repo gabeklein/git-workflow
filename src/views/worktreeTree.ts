@@ -58,7 +58,7 @@ export class WorktreeTreeProvider
   private selectedPath: string | undefined;
 
   constructor(
-    private readonly output: vscode.OutputChannel,
+    private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
   ) {
     this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);
