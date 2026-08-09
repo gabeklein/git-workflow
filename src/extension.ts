@@ -46,6 +46,30 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.refresh();
     }),
     vscode.commands.registerCommand(
+      'worktreeCompare.toggleSquashLayout',
+      async () => {
+        const config = vscode.workspace.getConfiguration('worktreeCompare');
+        const current = config.get<string>('squashLayout', 'list');
+        const next = current === 'tree' ? 'list' : 'tree';
+        await config.update(
+          'squashLayout',
+          next,
+          vscode.ConfigurationTarget.Global,
+        );
+        // Refresh only selected worktree body (not full rediscovery)
+        const selected = treeProvider.getSelectedPath();
+        if (selected) {
+          treeProvider.refreshCompare(selected);
+        } else {
+          treeProvider.refresh();
+        }
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: Squashed layout → ${next}`,
+          2500,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.focusWorktree',
       async (pathOrItem?: string | { worktreePath?: string }) => {
         const path =

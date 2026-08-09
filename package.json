@@ -41,6 +41,12 @@
           "type": "string",
           "default": "main",
           "description": "Fallback base ref when a worktree's fork point cannot be inferred (reflog / merge-base / upstream)."
+        },
+        "worktreeCompare.squashLayout": {
+          "type": "string",
+          "enum": ["list", "tree"],
+          "default": "list",
+          "description": "How to show files under Squashed: flat list or nested directory tree."
         }
       }
     },
@@ -116,6 +122,12 @@
         "command": "worktreeCompare.openLogFile",
         "title": "Open Durable Log File",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.toggleSquashLayout",
+        "title": "Toggle Squashed List/Tree Layout",
+        "icon": "$(list-tree)",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -126,9 +138,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "worktreeCompare.refresh",
+          "command": "worktreeCompare.toggleSquashLayout",
           "when": "view == worktreeCompare.worktrees",
           "group": "navigation@2"
+        },
+        {
+          "command": "worktreeCompare.refresh",
+          "when": "view == worktreeCompare.worktrees",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -136,6 +153,11 @@
           "command": "worktreeCompare.changeBaseRef",
           "when": "view == worktreeCompare.worktrees && viewItem == behindWarning",
           "group": "0_compare"
+        },
+        {
+          "command": "worktreeCompare.toggleSquashLayout",
+          "when": "view == worktreeCompare.worktrees && viewItem == section:squash",
+          "group": "inline"
         },
         {
           "command": "worktreeCompare.openWorktree",

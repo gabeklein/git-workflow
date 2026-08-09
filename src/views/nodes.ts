@@ -11,6 +11,7 @@ export type TreeNode =
   | BehindWarningItem
   | CommitItem
   | SectionItem
+  | FolderItem
   | FileItem
   | MessageItem;
 
@@ -146,6 +147,29 @@ export class CommitItem extends vscode.TreeItem {
   }
 }
 
+/** Directory node under Squashed tree layout. */
+export class FolderItem extends vscode.TreeItem {
+  readonly kind = 'folder' as const;
+
+  constructor(
+    readonly worktreePath: string,
+    readonly baseRef: string,
+    /** Posix path from worktree root */
+    readonly folderPath: string,
+    fileCount: number,
+  ) {
+    const name = path.posix.basename(folderPath);
+    super(name, vscode.TreeItemCollapsibleState.Expanded);
+    this.contextValue = 'squashFolder';
+    this.iconPath = vscode.ThemeIcon.Folder;
+    this.resourceUri = vscode.Uri.file(
+      path.join(worktreePath, ...folderPath.split('/')),
+    );
+    this.description = fileCount > 0 ? String(fileCount) : undefined;
+    this.tooltip = folderPath;
+  }
+}
+
 export class FileItem extends vscode.TreeItem {
   readonly kind = 'file' as const;
   readonly diffKind: FileDiffKind;
@@ -160,6 +184,8 @@ export class FileItem extends vscode.TreeItem {
       diffKind: FileDiffKind;
       commitHash?: string;
       statusSide?: 'staged' | 'unstaged';
+      /** Tree layout: status letter only (path is in folder hierarchy) */
+      treeLayout?: boolean;
     },
   ) {
     const basename = path.posix.basename(file.path);
@@ -178,17 +204,27 @@ export class FileItem extends vscode.TreeItem {
             : opts.statusSide === 'unstaged'
               ? 'unstagedFile'
               : 'workingFile';
-    this.description = dir === '.' ? undefined : dir;
-    this.iconPath = statusIcon(file.status);
+
+    // File-type icon from product/file icon theme
     this.resourceUri = vscode.Uri.file(
       path.join(worktreePath, ...file.path.split('/')),
     );
+    this.iconPath = vscode.ThemeIcon.File;
+
+    // SCM-style status letter on the right
+    const letter = statusLetter(file.status);
+    if (opts.treeLayout) {
+      this.description = letter;
+    } else {
+      this.description = dir === '.' ? letter : `${dir}  ${letter}`;
+    }
+
     this.command = {
       command: 'worktreeCompare.openFileDiff',
       title: 'Open Diff',
       arguments: [this],
     };
-    this.tooltip = `${statusLabel(file.status)} ${file.path}`;
+    this.tooltip = `${statusLabel(file.status)} (${letter})  ${file.path}`;
   }
 }
 
@@ -203,28 +239,30 @@ export class MessageItem extends vscode.TreeItem {
   }
 }
 
-function statusIcon(status: string): vscode.ThemeIcon {
+/** Single-letter badge like native SCM (M / A / D / R / U / …). */
+function statusLetter(status: string): string {
   switch (status) {
-    case 'A':
     case '?':
-      return new vscode.ThemeIcon('diff-added');
+      return 'U'; // untracked
+    case 'A':
+    case 'M':
     case 'D':
-      return new vscode.ThemeIcon('diff-removed');
     case 'R':
     case 'C':
-      return new vscode.ThemeIcon('diff-renamed');
+    case 'T':
     case 'U':
-      return new vscode.ThemeIcon('warning');
+      return status;
     default:
-      return new vscode.ThemeIcon('diff-modified');
+      return status || 'M';
   }
 }
 
 function statusLabel(status: string): string {
   switch (status) {
     case 'A':
-    case '?':
       return 'Added';
+    case '?':
+      return 'Untracked';
     case 'D':
       return 'Deleted';
     case 'R':
@@ -233,6 +271,8 @@ function statusLabel(status: string): string {
       return 'Copied';
     case 'M':
       return 'Modified';
+    case 'T':
+      return 'Type changed';
     case 'U':
       return 'Unmerged';
     default:

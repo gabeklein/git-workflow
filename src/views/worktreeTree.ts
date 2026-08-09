@@ -12,10 +12,13 @@ import {
 } from '../git/compare';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
+import type { FileChange } from '../git/compare';
+import { childrenAtPrefix, countFilesUnder, joinPrefix } from './fileTree';
 import {
   BehindWarningItem,
   CommitItem,
   FileItem,
+  FolderItem,
   GroupItem,
   MessageItem,
   SectionItem,
@@ -281,6 +284,8 @@ export class WorktreeTreeProvider
           return await this.getAheadChildren();
         case 'section':
           return await this.getSectionChildren(element);
+        case 'folder':
+          return await this.getFolderChildren(element);
         case 'commit':
           return await this.getCommitChildren(element);
         default:
@@ -459,8 +464,17 @@ export class WorktreeTreeProvider
       );
     }
 
+    // Squashed
     if (snap.compare.fullPrFiles.length === 0) {
       return [new MessageItem('No differences from base', item.baseRef)];
+    }
+    if (this.squashLayout() === 'tree') {
+      return this.buildFolderLevel(
+        item.worktreePath,
+        item.baseRef,
+        snap.compare.fullPrFiles,
+        '',
+      );
     }
     return snap.compare.fullPrFiles.map(
       (f) =>
@@ -468,6 +482,56 @@ export class WorktreeTreeProvider
           diffKind: 'vsBase',
         }),
     );
+  }
+
+  private async getFolderChildren(item: FolderItem): Promise<TreeNode[]> {
+    const snap = await this.getSnapshot(item.worktreePath);
+    if (!snap) {
+      return [];
+    }
+    return this.buildFolderLevel(
+      item.worktreePath,
+      item.baseRef,
+      snap.compare.fullPrFiles,
+      item.folderPath,
+    );
+  }
+
+  private squashLayout(): 'list' | 'tree' {
+    const v = vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<string>('squashLayout', 'list');
+    return v === 'tree' ? 'tree' : 'list';
+  }
+
+  private buildFolderLevel(
+    worktreePath: string,
+    baseRef: string,
+    files: FileChange[],
+    prefix: string,
+  ): TreeNode[] {
+    const level = childrenAtPrefix(files, prefix);
+    const nodes: TreeNode[] = [];
+    for (const dir of level.dirs) {
+      const folderPath = joinPrefix(prefix, dir);
+      nodes.push(
+        new FolderItem(
+          worktreePath,
+          baseRef,
+          folderPath,
+          countFilesUnder(files, folderPath),
+        ),
+      );
+    }
+    for (const f of level.files) {
+      nodes.push(
+        new FileItem(worktreePath, baseRef, f, {
+          diffKind: 'vsBase',
+          treeLayout: true,
+        }),
+      );
+    }
+    return nodes;
   }
 
   private async getCommitChildren(item: CommitItem): Promise<TreeNode[]> {
