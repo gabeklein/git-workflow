@@ -18,7 +18,8 @@ npm run watch   # or press F5 (starts watch via preLaunchTask)
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for worktrees |
+| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees |
+| `worktreeCompare.includeRootCheckout` | `always` | `always` / `dirty` / `never` — main workspace checkout in the list |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.contentRefreshIntervalMs` | `3000` | Poll expanded worktrees for agent writes (`0` = watchers only) |
 

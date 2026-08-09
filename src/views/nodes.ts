@@ -55,9 +55,16 @@ export class WorktreeListItem extends vscode.TreeItem {
       worktree.relativePath || worktree.name || worktree.path;
     this.tooltip = [
       branchLabel,
-      rel,
+      worktree.isRootCheckout ? `Root checkout (${rel})` : rel,
+      worktree.isDirty ? 'Dirty working tree' : undefined,
       selected ? 'Selected' : 'Click to focus',
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
+    // Subtle cue for root without cluttering the row with a folder name
+    if (worktree.isRootCheckout) {
+      this.description = worktree.isDirty ? 'root · dirty' : 'root';
+    }
     this.command = {
       command: 'worktreeCompare.focusWorktree',
       title: 'Focus Worktree',

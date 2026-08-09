@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { git } from '../git/exec';
 import { inspectWorktree, type WorktreeInfo } from '../git/worktree';
 
 export interface DiscoveredWorktree extends WorktreeInfo {
@@ -8,12 +9,43 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   workspaceFolder?: vscode.WorkspaceFolder;
   /** Relative path from workspace folder, when applicable */
   relativePath?: string;
+  /** True when this is the workspace root checkout (not under watchFolders). */
+  isRootCheckout?: boolean;
+  /** Working tree has uncommitted changes (best-effort; used for root visibility). */
+  isDirty?: boolean;
 }
+
+export type RootCheckoutMode = 'always' | 'dirty' | 'never';
 
 function getWatchFolders(): string[] {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
   const folders = config.get<string[]>('watchFolders', ['.claude/worktrees']);
   return folders.length > 0 ? folders : ['.claude/worktrees'];
+}
+
+function getRootCheckoutMode(): RootCheckoutMode {
+  const v = vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<string>('includeRootCheckout', 'always');
+  if (v === 'dirty' || v === 'never') {
+    return v;
+  }
+  return 'always';
+}
+
+/** Cheap dirty probe for root-checkout visibility. */
+async function probeDirty(dir: string): Promise<boolean> {
+  try {
+    const out = await git(dir, [
+      'status',
+      '--porcelain=v1',
+      '-unormal',
+      '--ignore-submodules=dirty',
+    ]);
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function listDirectChildDirs(dir: string): Promise<string[]> {
@@ -28,7 +60,7 @@ async function listDirectChildDirs(dir: string): Promise<string[]> {
 }
 
 /**
- * Scan configured watch folders under each workspace folder for git worktrees.
+ * Scan workspace roots + configured watch folders for git worktrees.
  * Inspects children with limited concurrency (avoids serial git storms).
  */
 export async function discoverWorktrees(
@@ -37,6 +69,7 @@ export async function discoverWorktrees(
   const t0 = Date.now();
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
+  const rootMode = getRootCheckoutMode();
   const found: DiscoveredWorktree[] = [];
   const seen = new Set<string>();
 
@@ -45,6 +78,46 @@ export async function discoverWorktrees(
     return found;
   }
 
+  // 1) Workspace root checkouts (main repo) — optional via setting
+  if (rootMode !== 'never') {
+    for (const folder of workspaceFolders) {
+      const rootPath = path.normalize(folder.uri.fsPath);
+      if (seen.has(rootPath)) {
+        continue;
+      }
+      try {
+        const info = await inspectWorktree(rootPath);
+        if (!info) {
+          continue;
+        }
+        const dirty = await probeDirty(rootPath);
+        if (rootMode === 'dirty' && !dirty) {
+          output?.appendLine(
+            `Root checkout clean, omitted (includeRootCheckout=dirty): ${rootPath}`,
+          );
+          continue;
+        }
+        seen.add(rootPath);
+        found.push({
+          ...info,
+          // Prefer stable label for root vs folder basename alone
+          name: info.name,
+          workspaceFolder: folder,
+          relativePath: '.',
+          isRootCheckout: true,
+          isDirty: dirty,
+        });
+        output?.appendLine(
+          `Root checkout: ${info.branch} @ ${rootPath}${dirty ? ' (dirty)' : ''}`,
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        output?.appendLine(`Root checkout skip ${rootPath}: ${message}`);
+      }
+    }
+  }
+
+  // 2) Linked / agent worktrees under watch folders
   type Job = { absPath: string; workspaceFolder: vscode.WorkspaceFolder };
   const jobs: Job[] = [];
 
@@ -61,7 +134,7 @@ export async function discoverWorktrees(
     }
   }
 
-  output?.appendLine(`Discovery: ${jobs.length} candidate dir(s)`);
+  output?.appendLine(`Discovery: ${jobs.length} linked-worktree candidate(s)`);
 
   const concurrency = 6;
   let next = 0;
@@ -91,6 +164,7 @@ export async function discoverWorktrees(
             relativePath && !relativePath.startsWith('..')
               ? relativePath
               : undefined,
+          isRootCheckout: false,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -105,12 +179,16 @@ export async function discoverWorktrees(
     ),
   );
 
+  // Root first, then linked worktrees by branch
   found.sort((a, b) => {
+    if (a.isRootCheckout !== b.isRootCheckout) {
+      return a.isRootCheckout ? -1 : 1;
+    }
     const byBranch = a.branch.localeCompare(b.branch);
     return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
   });
   output?.appendLine(
-    `Discovered ${found.length} worktree(s) in ${Date.now() - t0}ms`,
+    `Discovered ${found.length} worktree(s) in ${Date.now() - t0}ms (rootMode=${rootMode})`,
   );
   return found;
 }
