@@ -245,14 +245,19 @@ export class WorktreeTreeProvider
       const localBranches = new Set(
         this.worktrees.filter((w) => !w.detached).map((w) => w.branch),
       );
-      this.remotePrs = list.map((pr) => ({
+      // Hide PRs that already have a local worktree — those are reviewed via Worktrees
+      const withoutLocal = list.filter(
+        (pr) => !(pr.headRefName && localBranches.has(pr.headRefName)),
+      );
+      this.remotePrs = withoutLocal.map((pr) => ({
         ...pr,
-        hasLocalWorktree: Boolean(
-          pr.headRefName && localBranches.has(pr.headRefName),
-        ),
+        hasLocalWorktree: false,
       }));
+      const hidden = list.length - withoutLocal.length;
       this.output.appendLine(
-        `Remote PRs: ${this.remotePrs.length} open (${Date.now() - t0}ms)`,
+        `Remote PRs: ${this.remotePrs.length} open without local worktree` +
+          (hidden > 0 ? ` (hid ${hidden} already local)` : '') +
+          ` (${Date.now() - t0}ms)`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
