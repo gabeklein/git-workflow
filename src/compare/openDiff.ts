@@ -109,3 +109,32 @@ export async function openCommitFileDiff(
   const title = `${path.basename(rel)} (${commitHash.slice(0, 7)})`;
   await vscode.commands.executeCommand('vscode.diff', left, right, title);
 }
+
+/**
+ * Fully virtual, read-only PR review diff (no worktree checkout).
+ * Both sides use the content provider.
+ */
+export async function openRemotePrFileDiff(
+  repoCwd: string,
+  baseRef: string,
+  headRef: string,
+  file: FileChange,
+  titleSuffix?: string,
+): Promise<void> {
+  const rel = file.path;
+  const left = toGitContentUri(repoCwd, baseRef, file.oldPath ?? rel);
+  const right = toGitContentUri(repoCwd, headRef, rel);
+  const suffix = titleSuffix ? ` · ${titleSuffix}` : '';
+  const title = `${path.basename(rel)} (${baseRef} ↔ ${headRef})${suffix}`;
+
+  if (file.status === 'D') {
+    await vscode.commands.executeCommand('vscode.open', left);
+    return;
+  }
+  if (file.status === 'A' || file.status === '?') {
+    // Still a virtual "new file" view (read-only), not the full green wall of WT
+    await vscode.commands.executeCommand('vscode.open', right);
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.diff', left, right, title);
+}

@@ -8,9 +8,13 @@ import {
   prThemeIcon,
   type PullRequestInfo,
 } from '../github/pr';
+import {
+  formatRemotePrDescription,
+  type RemotePullRequest,
+} from '../github/remotePrs';
 import { worktreeResourceUri } from './worktreeDecorations';
 
-export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
+export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
 export type TreeNode =
   | GroupItem
@@ -20,15 +24,17 @@ export type TreeNode =
   | SectionItem
   | FolderItem
   | FileItem
+  | RemotePrItem
+  | RemotePrFileItem
   | MessageItem;
 
-/** Top-level collapsible group (Worktrees list / Ahead commits). */
+/** Top-level collapsible group (Worktrees list / Ahead commits / Remote PRs). */
 export class GroupItem extends vscode.TreeItem {
   readonly kind = 'group' as const;
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'ahead',
+    readonly group: 'worktrees' | 'ahead' | 'remotePrs',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
   ) {
@@ -38,7 +44,73 @@ export class GroupItem extends vscode.TreeItem {
     this.iconPath =
       group === 'worktrees'
         ? new vscode.ThemeIcon('repo')
-        : new vscode.ThemeIcon('git-commit');
+        : group === 'remotePrs'
+          ? new vscode.ThemeIcon('git-pull-request')
+          : new vscode.ThemeIcon('git-commit');
+  }
+}
+
+/** One open PR from GitHub — expand for read-only files; checkout via context menu. */
+export class RemotePrItem extends vscode.TreeItem {
+  readonly kind = 'remotePr' as const;
+
+  constructor(
+    readonly pr: RemotePullRequest,
+    readonly repoCwd: string,
+  ) {
+    super(
+      `#${pr.number} ${pr.title}`,
+      vscode.TreeItemCollapsibleState.Collapsed,
+    );
+    this.contextValue = pr.hasLocalWorktree
+      ? 'remotePrLocal'
+      : 'remotePr';
+    this.description = formatRemotePrDescription(pr);
+    this.iconPath = prThemeIcon(pr);
+    this.tooltip = [
+      `PR #${pr.number}: ${pr.title}`,
+      pr.authorLogin ? `Author: ${pr.authorLogin}` : undefined,
+      pr.baseRefName && pr.headRefName
+        ? `${pr.baseRefName} ← ${pr.headRefName}`
+        : undefined,
+      typeof pr.additions === 'number' && typeof pr.deletions === 'number'
+        ? `+${pr.additions} / −${pr.deletions}`
+        : undefined,
+      pr.hasLocalWorktree
+        ? 'Local worktree exists for this branch'
+        : 'Read-only — expand files, or Create Worktree to edit',
+      pr.url,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    // No default command — expand for files; open GitHub via context menu
+  }
+}
+
+/** Read-only file under a remote PR (virtual diff). */
+export class RemotePrFileItem extends vscode.TreeItem {
+  readonly kind = 'remotePrFile' as const;
+
+  constructor(
+    readonly repoCwd: string,
+    readonly pr: RemotePullRequest,
+    readonly baseRef: string,
+    readonly headRef: string,
+    readonly file: FileChange,
+  ) {
+    const basename = path.posix.basename(file.path);
+    const dir = path.posix.dirname(file.path);
+    super(basename, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'remotePrFile';
+    this.description =
+      dir === '.' ? file.status : `${dir}  ${file.status}`;
+    this.iconPath = vscode.ThemeIcon.File;
+    this.tooltip = `${file.status}  ${file.path}\nRead-only (PR #${pr.number})`;
+    this.command = {
+      command: 'worktreeCompare.openRemotePrFile',
+      title: 'Open Read-only Diff',
+      arguments: [this],
+    };
   }
 }
 

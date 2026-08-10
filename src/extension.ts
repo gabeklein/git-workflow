@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   openCommitFileDiff,
+  openRemotePrFileDiff,
   openStagedDiff,
   openUnstagedDiff,
   openWorkingTreeDiff,
@@ -15,10 +16,17 @@ import {
   removeWorktree,
   unlockWorktree,
 } from './git/worktreeAdmin';
+import {
+  createWorktreeForPr,
+  defaultPrWorktreePath,
+  type RemotePullRequest,
+} from './github/remotePrs';
 import { createFileBackedLogger } from './log';
 import {
   CommitItem,
   FileItem,
+  RemotePrFileItem,
+  RemotePrItem,
   WorktreeTreeProvider,
 } from './views/worktreeTree';
 
@@ -412,7 +420,10 @@ export function activate(context: vscode.ExtensionContext): void {
       'worktreeCompare.refreshPullRequests',
       async () => {
         treeProvider.clearPullRequestCache();
-        await treeProvider.refreshPullRequests();
+        await Promise.all([
+          treeProvider.refreshPullRequests(),
+          treeProvider.refreshRemotePrs(),
+        ]);
         void vscode.window.setStatusBarMessage(
           'Git Workflow: refreshed PR status',
           2000,
@@ -420,17 +431,32 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand(
+      'worktreeCompare.refreshRemotePrs',
+      async () => {
+        await treeProvider.refreshRemotePrs();
+        void vscode.window.setStatusBarMessage(
+          'Git Workflow: refreshed remote PRs',
+          2000,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.openPullRequest',
-      async (item?: { worktreePath?: string; pullRequest?: { url?: string } }) => {
+      async (item?: {
+        worktreePath?: string;
+        pullRequest?: { url?: string };
+        pr?: { url?: string };
+      }) => {
         const pr =
           item?.pullRequest ??
+          item?.pr ??
           (item?.worktreePath
             ? treeProvider.getPullRequest(item.worktreePath)
             : undefined);
         const url = pr?.url;
         if (!url) {
           void vscode.window.showInformationMessage(
-            'Git Workflow: no pull request linked to this worktree branch',
+            'Git Workflow: no pull request linked',
           );
           return;
         }
@@ -439,16 +465,21 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.copyPullRequestUrl',
-      async (item?: { worktreePath?: string; pullRequest?: { url?: string } }) => {
+      async (item?: {
+        worktreePath?: string;
+        pullRequest?: { url?: string };
+        pr?: { url?: string };
+      }) => {
         const pr =
           item?.pullRequest ??
+          item?.pr ??
           (item?.worktreePath
             ? treeProvider.getPullRequest(item.worktreePath)
             : undefined);
         const url = pr?.url;
         if (!url) {
           void vscode.window.showInformationMessage(
-            'Git Workflow: no pull request linked to this worktree branch',
+            'Git Workflow: no pull request linked',
           );
           return;
         }
@@ -457,6 +488,95 @@ export function activate(context: vscode.ExtensionContext): void {
           `Git Workflow: copied PR URL`,
           2000,
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.openRemotePrFile',
+      async (item?: RemotePrFileItem) => {
+        if (!item) {
+          return;
+        }
+        try {
+          await openRemotePrFileDiff(
+            item.repoCwd,
+            item.baseRef,
+            item.headRef,
+            item.file,
+            `PR #${item.pr.number}`,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Open remote PR file failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not open PR file — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.createWorktreeFromPr',
+      async (item?: RemotePrItem | { pr?: RemotePullRequest; repoCwd?: string }) => {
+        const pr = item && 'pr' in item ? item.pr : undefined;
+        const repoCwd =
+          item && 'repoCwd' in item && item.repoCwd
+            ? item.repoCwd
+            : treeProvider.getRepoCwd();
+        if (!pr || !repoCwd) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: pick a Remote PR first',
+          );
+          return;
+        }
+        if (pr.hasLocalWorktree) {
+          void vscode.window.showInformationMessage(
+            `Git Workflow: a local worktree already uses branch ${pr.headRefName}`,
+          );
+          return;
+        }
+
+        const workspaceRoot =
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
+        const suggested = defaultPrWorktreePath(workspaceRoot, pr);
+        const dest = await vscode.window.showInputBox({
+          prompt: `Create worktree for PR #${pr.number} (${pr.headRefName || 'detached head'})`,
+          value: suggested,
+          ignoreFocusOut: true,
+          validateInput: (v) =>
+            v.trim() ? undefined : 'Destination path is required',
+        });
+        if (!dest?.trim()) {
+          return;
+        }
+
+        try {
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: `Git Workflow: creating worktree for PR #${pr.number}…`,
+            },
+            async () => {
+              const created = await createWorktreeForPr(
+                repoCwd,
+                pr,
+                dest.trim(),
+              );
+              log.appendLine(
+                `Created worktree for PR #${pr.number} at ${created}`,
+              );
+              treeProvider.refresh();
+              await treeProvider.setSelectedPath(created);
+              void vscode.window.showInformationMessage(
+                `Git Workflow: worktree ready at ${created}`,
+              );
+            },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Create worktree from PR failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not create worktree — ${message}`,
+          );
+        }
       },
     ),
   );

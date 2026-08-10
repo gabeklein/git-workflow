@@ -85,7 +85,14 @@
             "Use the GitHub CLI (gh) when available to detect PRs for worktree branches",
             "Disable GitHub PR status and context actions"
           ],
-          "description": "Optional GitHub integration: show PR status on worktree rows and enable Open/Copy PR actions. Requires authenticated `gh` on PATH."
+          "description": "Optional GitHub integration: show PR status on worktree rows, Remote PRs section, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
+        },
+        "worktreeCompare.remotePrLimit": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Max open pull requests to list under Remote PRs."
         }
       }
     },
@@ -196,6 +203,22 @@
         "title": "Refresh Pull Request Status",
         "icon": "$(git-pull-request)",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.refreshRemotePrs",
+        "title": "Refresh Remote PRs",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.openRemotePrFile",
+        "title": "Open Read-only PR Diff",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.createWorktreeFromPr",
+        "title": "Create Worktree from PR…",
+        "icon": "$(repo-clone)",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -261,6 +284,26 @@
           "command": "worktreeCompare.deleteWorktree",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /Removable/",
           "group": "9_danger@1"
+        },
+        {
+          "command": "worktreeCompare.openPullRequest",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^remotePr/",
+          "group": "1_github@1"
+        },
+        {
+          "command": "worktreeCompare.copyPullRequestUrl",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^remotePr/",
+          "group": "1_github@2"
+        },
+        {
+          "command": "worktreeCompare.createWorktreeFromPr",
+          "when": "view == worktreeCompare.worktrees && viewItem == remotePr",
+          "group": "2_worktree@1"
+        },
+        {
+          "command": "worktreeCompare.refreshRemotePrs",
+          "when": "view == worktreeCompare.worktrees && viewItem == group:remotePrs",
+          "group": "inline"
         },
         {
           "command": "worktreeCompare.copyCommitSha",
