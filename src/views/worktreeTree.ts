@@ -174,6 +174,11 @@ export class WorktreeTreeProvider
     return this.worktrees[0];
   }
 
+  getWorktree(worktreePath: string): DiscoveredWorktree | undefined {
+    const key = path.normalize(worktreePath);
+    return this.worktrees.find((w) => path.normalize(w.path) === key);
+  }
+
   async setSelectedPath(worktreePath: string): Promise<void> {
     this.selectedPath = worktreePath;
     this.selectionDecorations.setSelectedPath(worktreePath);

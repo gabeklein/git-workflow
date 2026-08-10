@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git } from '../git/exec';
+import { listWorktreeAdmin } from '../git/worktreeAdmin';
 import { inspectWorktree, type WorktreeInfo } from '../git/worktree';
 
 export interface DiscoveredWorktree extends WorktreeInfo {
@@ -13,6 +14,11 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   isRootCheckout?: boolean;
   /** Working tree has uncommitted changes (best-effort; used for root visibility). */
   isDirty?: boolean;
+  /** Primary repo checkout — cannot be removed with git worktree remove. */
+  isMainWorktree?: boolean;
+  /** git worktree lock is set */
+  locked?: boolean;
+  lockReason?: string;
 }
 
 export type RootCheckoutMode = 'always' | 'dirty' | 'never';
@@ -178,6 +184,40 @@ export async function discoverWorktrees(
       worker(),
     ),
   );
+
+  // Enrich with lock / main flags from a single porcelain list
+  if (found.length > 0) {
+    try {
+      const admin = await listWorktreeAdmin(found[0]!.path);
+      for (const wt of found) {
+        const key = path.normalize(wt.path);
+        let state = admin.get(key);
+        if (!state) {
+          for (const s of admin.values()) {
+            if (path.normalize(s.path) === key) {
+              state = s;
+              break;
+            }
+          }
+        }
+        if (state) {
+          wt.isMainWorktree = state.isMain;
+          wt.locked = state.locked;
+          wt.lockReason = state.lockReason;
+        } else if (wt.isRootCheckout) {
+          wt.isMainWorktree = true;
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      output?.appendLine(`worktree list --porcelain failed: ${message}`);
+      for (const wt of found) {
+        if (wt.isRootCheckout) {
+          wt.isMainWorktree = true;
+        }
+      }
+    }
+  }
 
   // Root first, then linked worktrees by branch
   found.sort((a, b) => {

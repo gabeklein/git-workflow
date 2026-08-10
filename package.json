@@ -130,6 +130,18 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.deleteWorktree",
+        "title": "Delete Worktree…",
+        "icon": "$(trash)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.unlockWorktree",
+        "title": "Unlock Worktree",
+        "icon": "$(unlock)",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.openFileDiff",
         "title": "Open File Diff",
         "category": "Git Workflow"
@@ -227,18 +239,28 @@
         },
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr$/",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr/",
           "group": "1_github@1"
         },
         {
           "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr$/",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr/",
           "group": "1_github@2"
         },
         {
           "command": "worktreeCompare.openWorktree",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /^worktreeListItem/",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.unlockWorktree",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /Locked/",
+          "group": "1_worktree@1"
+        },
+        {
+          "command": "worktreeCompare.deleteWorktree",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /Removable/",
+          "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.copyCommitSha",

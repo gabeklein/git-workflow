@@ -62,11 +62,30 @@ export class WorktreeListItem extends vscode.TreeItem {
     // Enables FileDecoration (blue tint + ●) for the selected row
     this.resourceUri = worktreeResourceUri(worktree.path);
 
-    const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
-    this.contextValue = pullRequest ? `${baseCtx}WithPr` : baseCtx;
-
-    // PR → status icon; no PR → branch (distinct from pull-request family)
+    // Context flags for menus: WithPr, Locked, Removable (not main/root)
+    const flags: string[] = [];
     if (pullRequest) {
+      flags.push('WithPr');
+    }
+    if (worktree.locked) {
+      flags.push('Locked');
+    }
+    const removable =
+      !worktree.isRootCheckout && worktree.isMainWorktree !== true;
+    if (removable) {
+      flags.push('Removable');
+    }
+    const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
+    this.contextValue =
+      flags.length > 0 ? `${baseCtx}${flags.join('')}` : baseCtx;
+
+    // Locked takes icon priority so the padlock is visible; else PR / branch
+    if (worktree.locked) {
+      this.iconPath = new vscode.ThemeIcon(
+        'lock',
+        new vscode.ThemeColor('list.warningForeground'),
+      );
+    } else if (pullRequest) {
       this.iconPath = prThemeIcon(pullRequest);
     } else if (worktree.isRootCheckout) {
       this.iconPath = new vscode.ThemeIcon(
@@ -85,6 +104,9 @@ export class WorktreeListItem extends vscode.TreeItem {
     if (worktree.isRootCheckout) {
       bits.push(worktree.isDirty ? 'root · dirty' : 'root');
     }
+    if (worktree.locked) {
+      bits.push('locked');
+    }
     if (pullRequest) {
       bits.push(formatPrDescription(pullRequest));
     }
@@ -96,6 +118,11 @@ export class WorktreeListItem extends vscode.TreeItem {
       branchLabel,
       worktree.isRootCheckout ? `Root checkout (${rel})` : rel,
       worktree.isDirty ? 'Dirty working tree' : undefined,
+      worktree.locked
+        ? worktree.lockReason
+          ? `Locked: ${worktree.lockReason}`
+          : 'Locked (git worktree lock)'
+        : undefined,
       selected ? 'Selected' : 'Click to focus',
     ].filter((x): x is string => Boolean(x));
     if (pullRequest) {
