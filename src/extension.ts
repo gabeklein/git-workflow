@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
           treeProvider.refresh();
         }
         void vscode.window.setStatusBarMessage(
-          `Git Workflow: Squashed layout → ${next}`,
+          `Git Workflow: Full Diff layout → ${next}`,
           2500,
         );
       },
@@ -235,6 +235,57 @@ export function activate(context: vscode.ExtensionContext): void {
       const uri = vscode.Uri.file(log.logFile);
       await vscode.window.showTextDocument(uri);
     }),
+    vscode.commands.registerCommand(
+      'worktreeCompare.refreshPullRequests',
+      async () => {
+        treeProvider.clearPullRequestCache();
+        await treeProvider.refreshPullRequests();
+        void vscode.window.setStatusBarMessage(
+          'Git Workflow: refreshed PR status',
+          2000,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.openPullRequest',
+      async (item?: { worktreePath?: string; pullRequest?: { url?: string } }) => {
+        const pr =
+          item?.pullRequest ??
+          (item?.worktreePath
+            ? treeProvider.getPullRequest(item.worktreePath)
+            : undefined);
+        const url = pr?.url;
+        if (!url) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: no pull request linked to this worktree branch',
+          );
+          return;
+        }
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.copyPullRequestUrl',
+      async (item?: { worktreePath?: string; pullRequest?: { url?: string } }) => {
+        const pr =
+          item?.pullRequest ??
+          (item?.worktreePath
+            ? treeProvider.getPullRequest(item.worktreePath)
+            : undefined);
+        const url = pr?.url;
+        if (!url) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: no pull request linked to this worktree branch',
+          );
+          return;
+        }
+        await vscode.env.clipboard.writeText(url);
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: copied PR URL`,
+          2000,
+        );
+      },
+    ),
   );
 }
 

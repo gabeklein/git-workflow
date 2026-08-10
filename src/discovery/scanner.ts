@@ -26,11 +26,11 @@ function getWatchFolders(): string[] {
 function getRootCheckoutMode(): RootCheckoutMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<string>('includeRootCheckout', 'always');
-  if (v === 'dirty' || v === 'never') {
+    .get<string>('includeRootCheckout', 'dirty');
+  if (v === 'always' || v === 'never') {
     return v;
   }
-  return 'always';
+  return 'dirty';
 }
 
 /** Cheap dirty probe for root-checkout visibility. */

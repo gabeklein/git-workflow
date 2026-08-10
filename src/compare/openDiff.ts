@@ -5,7 +5,10 @@ import type { FileChange } from '../git/compare';
 
 /**
  * Editable diff: left = ref content, right = real worktree file.
- * Used for Squashed (Working Tree ↔ base).
+ * Used for Full Diff (Working Tree ↔ base).
+ *
+ * Added / untracked files open for edit (no full-file green wall). Further
+ * edits still pick up built-in Git gutter decorations on tracked files.
  */
 export async function openWorkingTreeDiff(
   worktreePath: string,
@@ -20,7 +23,7 @@ export async function openWorkingTreeDiff(
   const title = `${path.basename(rel)} (${leftRef} ↔ ${titleRightLabel})`;
 
   if (file.status === 'A' || file.status === '?') {
-    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+    await openWorkingTreeFile(worktreePath, file);
     return;
   }
 
@@ -47,7 +50,7 @@ export async function openUnstagedDiff(
   const title = `${path.basename(rel)} (Index ↔ Working Tree)`;
 
   if (file.status === 'A' || file.status === '?') {
-    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+    await openWorkingTreeFile(worktreePath, file);
     return;
   }
 
@@ -61,6 +64,7 @@ export async function openUnstagedDiff(
 
 /**
  * Staged only: HEAD ↔ Index (both virtual — no unstaged WT noise).
+ * Added files open the real worktree path for editing.
  */
 export async function openStagedDiff(
   worktreePath: string,
@@ -72,7 +76,7 @@ export async function openStagedDiff(
   const title = `${path.basename(rel)} (HEAD ↔ Index)`;
 
   if (file.status === 'A') {
-    await vscode.commands.executeCommand('vscode.diff', left, right, title);
+    await openWorkingTreeFile(worktreePath, file);
     return;
   }
 

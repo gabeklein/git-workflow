@@ -19,14 +19,37 @@ export interface FileChange {
 }
 
 export interface CompareResult {
+  /**
+   * Integration tip the user cares about (e.g. origin/main).
+   * Diffs/logs use {@link compareRef} (merge-base with HEAD by default).
+   */
   baseRef: string;
-  /** Resolved commit of base (short) */
+  /**
+   * Actual commit used for ahead/diff (usually merge-base(HEAD, baseRef)).
+   * Short or full — whatever `rev-parse` returned for the compare point.
+   */
+  compareRef: string;
+  /** Short sha of compareRef (fork / pin point) */
   baseHead: string;
+  /** Short sha of the integration tip (baseRef) */
+  baseTipHead: string;
+  /**
+   * True when compare point is the tip itself (not an older merge-base).
+   * Used to omit `@ sha` in the UI when there's nothing to pin.
+   */
+  compareIsTip: boolean;
   ahead: number;
-  behind: number;
-  /** Newest-first commits on HEAD not in base */
+  /**
+   * Commits on the integration tip that are not in HEAD.
+   * Informational only — does not mean "must rebase"; conflicts come from GitHub.
+   */
+  tipBehind: number;
+  /** Newest-first commits on HEAD not in compareRef */
   commitsAhead: CommitInfo[];
-  /** Working tree + index vs base — Full PR file list (editable WT side) */
+  /**
+   * Working tree + index vs compareRef — committed ahead *and* uncommitted.
+   * Not the same as “sum of Ahead commits” alone (those are commit-only).
+   */
   fullPrFiles: FileChange[];
 }
 
@@ -80,18 +103,119 @@ function parseNameStatus(stdout: string): FileChange[] {
   return files;
 }
 
+export interface FileChangeBreakdown {
+  added: number;
+  modified: number;
+  deleted: number;
+}
+
+/** Count A / M(etc) / D for section descriptions. Renames & copies count as modified. */
+export function breakdownFileChanges(files: FileChange[]): FileChangeBreakdown {
+  let added = 0;
+  let modified = 0;
+  let deleted = 0;
+  for (const f of files) {
+    switch (f.status) {
+      case 'A':
+      case '?':
+        added += 1;
+        break;
+      case 'D':
+        deleted += 1;
+        break;
+      default:
+        // M, T, R, C, U, etc.
+        modified += 1;
+        break;
+    }
+  }
+  return { added, modified, deleted };
+}
+
+/** e.g. `3 new · 5 modified · 1 deleted` (omits zero buckets). */
+export function formatFileChangeBreakdown(files: FileChange[]): string | undefined {
+  if (files.length === 0) {
+    return undefined;
+  }
+  const { added, modified, deleted } = breakdownFileChanges(files);
+  const parts: string[] = [];
+  if (added > 0) {
+    parts.push(`${added} new`);
+  }
+  if (modified > 0) {
+    parts.push(`${modified} modified`);
+  }
+  if (deleted > 0) {
+    parts.push(`${deleted} deleted`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : String(files.length);
+}
+
+/**
+ * Compare working tree to an integration tip.
+ *
+ * By default pins the compare point to merge-base(HEAD, baseTipRef) — the
+ * newest commit on that lineage that is still an ancestor of the worktree.
+ * That yields a PR-style file list / ahead list without treating "main moved
+ * on" as a behind/rebase warning.
+ */
 export async function compareWorkingTreeToBase(
   worktreePath: string,
-  baseRef: string,
+  baseTipRef: string,
+  options?: { pinToMergeBase?: boolean },
 ): Promise<CompareResult> {
-  const baseHead = (await git(worktreePath, ['rev-parse', '--short', baseRef])).trim();
+  const pinToMergeBase = options?.pinToMergeBase !== false;
+
+  let compareRef = baseTipRef;
+  if (pinToMergeBase) {
+    try {
+      const mb = (
+        await git(worktreePath, ['merge-base', 'HEAD', baseTipRef])
+      ).trim();
+      if (mb) {
+        compareRef = mb;
+      }
+    } catch {
+      // Detached / unrelated histories — fall back to tip
+      compareRef = baseTipRef;
+    }
+  }
+
+  const [baseHead, baseTipHead] = await Promise.all([
+    git(worktreePath, ['rev-parse', '--short', compareRef]).then((s) =>
+      s.trim(),
+    ),
+    git(worktreePath, ['rev-parse', '--short', baseTipRef]).then((s) =>
+      s.trim(),
+    ),
+  ]);
+  const compareIsTip = baseHead === baseTipHead;
+
+  // tipBehind: commits on integration tip not in HEAD (main moved forward)
+  let tipBehind = 0;
+  try {
+    const tipBehindOut = (
+      await git(worktreePath, [
+        'rev-list',
+        '--count',
+        `HEAD..${baseTipRef}`,
+      ])
+    ).trim();
+    tipBehind = Number(tipBehindOut) || 0;
+  } catch {
+    tipBehind = 0;
+  }
 
   const countOut = (
-    await git(worktreePath, ['rev-list', '--left-right', '--count', `${baseRef}...HEAD`])
+    await git(worktreePath, [
+      'rev-list',
+      '--left-right',
+      '--count',
+      `${compareRef}...HEAD`,
+    ])
   ).trim();
-  // left = commits reachable from base not HEAD (behind), right = ahead
-  const [behindStr, aheadStr] = countOut.split(/\s+/);
-  const behind = Number(behindStr) || 0;
+  // left should be 0 when compareRef is merge-base; right = ahead
+  const [, aheadStr] = countOut.split(/\s+/);
   const ahead = Number(aheadStr) || 0;
 
   const commitsAhead =
@@ -100,25 +224,28 @@ export async function compareWorkingTreeToBase(
           await git(worktreePath, [
             'log',
             '--format=' + COMMIT_FORMAT,
-            `${baseRef}..HEAD`,
+            `${compareRef}..HEAD`,
           ]),
         )
       : [];
 
-  // Working tree (and index) vs base — Full PR (includes uncommitted)
+  // Working tree (and index) vs fork point — Full Diff (includes uncommitted)
   const diffOut = await git(worktreePath, [
     'diff',
     '--name-status',
     '--find-renames',
-    baseRef,
+    compareRef,
   ]);
   const fullPrFiles = parseNameStatus(diffOut);
 
   return {
-    baseRef,
+    baseRef: baseTipRef,
+    compareRef,
     baseHead,
+    baseTipHead,
+    compareIsTip,
     ahead,
-    behind,
+    tipBehind,
     commitsAhead,
     fullPrFiles,
   };

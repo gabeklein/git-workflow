@@ -7,15 +7,24 @@ import {
 } from '../discovery/scanner';
 import {
   compareWorkingTreeToBase,
+  formatFileChangeBreakdown,
   listCommitFiles,
   type CompareResult,
+  type FileChange,
 } from '../git/compare';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
-import type { FileChange } from '../git/compare';
-import { childrenAtPrefix, countFilesUnder, joinPrefix } from './fileTree';
 import {
-  BehindWarningItem,
+  findPullRequestForBranch,
+  isGithubPrIntegrationEnabled,
+  prCacheKey,
+  prHasMergeConflicts,
+  resetGithubPrClient,
+  type PullRequestInfo,
+} from '../github/pr';
+import { childrenAtPrefix, joinPrefix } from './fileTree';
+import {
+  ConflictWarningItem,
   CommitItem,
   FileItem,
   FolderItem,
@@ -25,6 +34,7 @@ import {
   type TreeNode,
   WorktreeListItem,
 } from './nodes';
+import { WorktreeSelectionDecorationProvider } from './worktreeDecorations';
 
 export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
@@ -71,15 +81,22 @@ export class WorktreeTreeProvider
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
   private readonly baseOverrides = new Map<string, string>();
+  /** PR lookup cache keyed by worktreePath\\0branch */
+  private readonly prCache = new Map<string, PullRequestInfo | null>();
+  private prRefreshGeneration = 0;
 
   private selectedPath: string | undefined;
+  private readonly selectionDecorations =
+    new WorktreeSelectionDecorationProvider();
 
   constructor(
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
   ) {
     this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);
+    this.selectionDecorations.setSelectedPath(this.selectedPath);
     this.disposables.push(
+      this.selectionDecorations,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.rewatchFolders();
         this.refresh();
@@ -88,6 +105,11 @@ export class WorktreeTreeProvider
         if (e.affectsConfiguration('worktreeCompare')) {
           this.rewatchFolders();
           this.restartPoll();
+          if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
+            resetGithubPrClient();
+            this.prCache.clear();
+            void this.refreshPullRequests();
+          }
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
             e.affectsConfiguration('worktreeCompare.includeRootCheckout')
@@ -154,6 +176,7 @@ export class WorktreeTreeProvider
 
   async setSelectedPath(worktreePath: string): Promise<void> {
     this.selectedPath = worktreePath;
+    this.selectionDecorations.setSelectedPath(worktreePath);
     await this.context.workspaceState.update(SELECTED_PATH_KEY, worktreePath);
     this.output.appendLine(`Selected worktree → ${worktreePath}`);
     // Drop other snapshots so we don't grow unbounded; keep selected warm on next expand
@@ -173,6 +196,7 @@ export class WorktreeTreeProvider
     this.refreshTimer = setTimeout(() => {
       this.snapshotCache.clear();
       this.compareErrors.clear();
+      // Keep PR cache across list refresh; explicit refreshPullRequests clears it
       void this.load();
     }, 150);
   }
@@ -182,6 +206,86 @@ export class WorktreeTreeProvider
     this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
     this._onDidChangeTreeData.fire();
+  }
+
+  /** Cached PR for a worktree row (if looked up). */
+  getPullRequest(worktreePath: string): PullRequestInfo | undefined {
+    const wt = this.worktrees.find((w) => w.path === worktreePath);
+    if (!wt) {
+      return undefined;
+    }
+    const key = prCacheKey(wt.path, wt.branch);
+    const hit = this.prCache.get(key);
+    return hit ?? undefined;
+  }
+
+  /** Drop PR cache so the next lookup re-queries `gh`. */
+  clearPullRequestCache(): void {
+    this.prCache.clear();
+  }
+
+  /** Re-query GitHub (via `gh`) for PRs associated with each worktree branch. */
+  async refreshPullRequests(): Promise<void> {
+    if (!isGithubPrIntegrationEnabled()) {
+      if (this.prCache.size > 0) {
+        this.prCache.clear();
+        this._onDidChangeTreeData.fire();
+      }
+      return;
+    }
+    if (this.worktrees.length === 0) {
+      return;
+    }
+    const generation = ++this.prRefreshGeneration;
+    const t0 = Date.now();
+    let found = 0;
+    try {
+      // Bounded concurrency so many worktrees don't spawn a gh storm
+      const queue = this.worktrees.slice();
+      const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+        while (queue.length > 0) {
+          if (generation !== this.prRefreshGeneration) {
+            return;
+          }
+          const wt = queue.shift();
+          if (!wt) {
+            return;
+          }
+          const key = prCacheKey(wt.path, wt.branch);
+          try {
+            const pr = await findPullRequestForBranch(
+              wt.path,
+              wt.branch,
+              wt.detached,
+            );
+            if (generation !== this.prRefreshGeneration) {
+              return;
+            }
+            this.prCache.set(key, pr ?? null);
+            if (pr) {
+              found += 1;
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            this.output.appendLine(
+              `PR lookup failed for ${wt.branch}: ${message}`,
+            );
+            this.prCache.set(key, null);
+          }
+        }
+      });
+      await Promise.all(workers);
+      if (generation !== this.prRefreshGeneration) {
+        return;
+      }
+      this.output.appendLine(
+        `GitHub PR lookup: ${found}/${this.worktrees.length} branch(es) have a PR (${Date.now() - t0}ms)`,
+      );
+      this._onDidChangeTreeData.fire();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`GitHub PR lookup failed: ${message}`);
+    }
   }
 
   /**
@@ -383,6 +487,7 @@ export class WorktreeTreeProvider
     try {
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
+      this.prunePrCache();
       this.output.appendLine(
         `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
       );
@@ -390,16 +495,35 @@ export class WorktreeTreeProvider
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Discovery failed: ${message}`);
       this.worktrees = [];
+      this.prCache.clear();
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
       this._onDidChangeWorktrees.fire();
+      // Background: associate open PRs with branches (optional, non-blocking)
+      void this.refreshPullRequests();
+    }
+  }
+
+  /** Drop PR cache entries for worktrees / branches that no longer exist. */
+  private prunePrCache(): void {
+    if (this.prCache.size === 0) {
+      return;
+    }
+    const live = new Set(
+      this.worktrees.map((wt) => prCacheKey(wt.path, wt.branch)),
+    );
+    for (const key of [...this.prCache.keys()]) {
+      if (!live.has(key)) {
+        this.prCache.delete(key);
+      }
     }
   }
 
   private ensureValidSelection(): void {
     if (this.worktrees.length === 0) {
       this.selectedPath = undefined;
+      this.selectionDecorations.setSelectedPath(undefined);
       return;
     }
     if (
@@ -412,6 +536,7 @@ export class WorktreeTreeProvider
         this.selectedPath,
       );
     }
+    this.selectionDecorations.setSelectedPath(this.selectedPath);
   }
 
   private rewatchFolders(): void {
@@ -533,12 +658,20 @@ export class WorktreeTreeProvider
     }
 
     const selected = this.getSelected();
+    const n = this.worktrees.length;
+    const selectedLabel = selected
+      ? selected.branch + (selected.detached ? ' (detached)' : '')
+      : undefined;
+    // Primary: focused branch; secondary: inventory count
+    const worktreesLabel = selectedLabel ?? 'Worktrees';
+    const worktreesDesc =
+      n === 1 ? '1 · worktree' : `${n} · worktrees`;
     const nodes: TreeNode[] = [
       new GroupItem(
-        'Worktrees',
+        worktreesLabel,
         'worktrees',
         vscode.TreeItemCollapsibleState.Expanded,
-        String(this.worktrees.length),
+        worktreesDesc,
       ),
     ];
 
@@ -557,24 +690,33 @@ export class WorktreeTreeProvider
     const { compare, status } = snap;
     const worktreePath = selected.path;
 
-    // Soft warning above Ahead — only when behind > 0
-    if (compare.behind > 0) {
+    // Soft warning only when GitHub reports real merge conflicts (not tip-behind)
+    const selectedPr = this.getPullRequest(worktreePath);
+    if (selectedPr && prHasMergeConflicts(selectedPr)) {
       nodes.push(
-        new BehindWarningItem(worktreePath, compare.baseRef, compare.behind),
+        new ConflictWarningItem(
+          worktreePath,
+          selectedPr,
+          compare.baseRef,
+        ),
       );
     }
 
     const aheadCount = compare.ahead;
+    // "Ahead N commits → base[@sha]" — @ sha only when pinned off tip
+    const aheadBase = compare.compareIsTip
+      ? compare.baseRef
+      : `${compare.baseRef} @ ${compare.baseHead}`;
     nodes.push(
       new GroupItem(
         'Ahead',
         'ahead',
-        vscode.TreeItemCollapsibleState.Expanded,
-        `${aheadCount} commit${aheadCount === 1 ? '' : 's'}`,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        `${aheadCount} commit${aheadCount === 1 ? '' : 's'} → ${aheadBase}`,
       ),
     );
 
-    // File sections (siblings of Worktrees / Ahead)
+    // File sections (siblings of Worktrees / Ahead) — hide when empty
     if (status.staged.length > 0) {
       nodes.push(
         new SectionItem(
@@ -588,27 +730,28 @@ export class WorktreeTreeProvider
       );
     }
 
-    nodes.push(
-      new SectionItem(
-        'Changes',
-        'changes',
-        worktreePath,
-        compare.baseRef,
-        vscode.TreeItemCollapsibleState.Expanded,
-        status.unstaged.length > 0 ? String(status.unstaged.length) : undefined,
-      ),
-    );
+    if (status.unstaged.length > 0) {
+      nodes.push(
+        new SectionItem(
+          'Changes',
+          'changes',
+          worktreePath,
+          compare.baseRef,
+          vscode.TreeItemCollapsibleState.Expanded,
+          String(status.unstaged.length),
+        ),
+      );
+    }
 
+    // Full Diff = fork→working tree (Ahead commits + Staged + Changes), not commits alone
     nodes.push(
       new SectionItem(
-        'Squashed',
+        'Full Diff',
         'squash',
         worktreePath,
         compare.baseRef,
-        vscode.TreeItemCollapsibleState.Collapsed,
-        compare.fullPrFiles.length > 0
-          ? `${compare.fullPrFiles.length} vs ${compare.baseRef}`
-          : `0 vs ${compare.baseRef}`,
+        vscode.TreeItemCollapsibleState.Expanded,
+        formatFileChangeBreakdown(compare.fullPrFiles),
       ),
     );
 
@@ -617,12 +760,18 @@ export class WorktreeTreeProvider
 
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
-    return this.worktrees.map(
-      (wt) => new WorktreeListItem(wt, wt.path === selected),
-    );
+    return this.worktrees.map((wt) => {
+      const key = prCacheKey(wt.path, wt.branch);
+      const pr = this.prCache.get(key);
+      return new WorktreeListItem(
+        wt,
+        wt.path === selected,
+        pr ?? undefined,
+      );
+    });
   }
 
-  /** Commits ahead of base only (Behind lives above this group at root). */
+  /** Commits ahead of compare point (merge-base of integration tip by default). */
   private async getAheadChildren(): Promise<TreeNode[]> {
     const selected = this.getSelected();
     if (!selected) {
@@ -661,9 +810,6 @@ export class WorktreeTreeProvider
     }
 
     if (item.section === 'changes') {
-      if (snap.status.unstaged.length === 0) {
-        return [new MessageItem('No unstaged changes')];
-      }
       return snap.status.unstaged.map(
         (f) =>
           new FileItem(item.worktreePath, item.baseRef, f, {
@@ -673,7 +819,7 @@ export class WorktreeTreeProvider
       );
     }
 
-    // Squashed
+    // Full Diff (working tree ↔ base)
     if (snap.compare.fullPrFiles.length === 0) {
       return [new MessageItem('No differences from base', item.baseRef)];
     }
@@ -723,14 +869,7 @@ export class WorktreeTreeProvider
     const nodes: TreeNode[] = [];
     for (const dir of level.dirs) {
       const folderPath = joinPrefix(prefix, dir);
-      nodes.push(
-        new FolderItem(
-          worktreePath,
-          baseRef,
-          folderPath,
-          countFilesUnder(files, folderPath),
-        ),
-      );
+      nodes.push(new FolderItem(worktreePath, baseRef, folderPath));
     }
     for (const f of level.files) {
       nodes.push(
@@ -823,8 +962,11 @@ function snapshotFingerprint(snap: WorktreeSnapshot): string {
       .join('|');
   return [
     compare.baseRef,
+    compare.compareRef,
+    compare.baseHead,
+    compare.compareIsTip ? '1' : '0',
     compare.ahead,
-    compare.behind,
+    compare.tipBehind,
     compare.commitsAhead.map((c) => c.hash).join(','),
     fmt(status.staged),
     fmt(status.unstaged),

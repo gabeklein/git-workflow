@@ -2,13 +2,20 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { CommitInfo, FileChange } from '../git/compare';
 import type { DiscoveredWorktree } from '../discovery/scanner';
+import {
+  formatPrDescription,
+  prHasMergeConflicts,
+  prThemeIcon,
+  type PullRequestInfo,
+} from '../github/pr';
+import { worktreeResourceUri } from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit';
 
 export type TreeNode =
   | GroupItem
   | WorktreeListItem
-  | BehindWarningItem
+  | ConflictWarningItem
   | CommitItem
   | SectionItem
   | FolderItem
@@ -39,32 +46,69 @@ export class GroupItem extends vscode.TreeItem {
 export class WorktreeListItem extends vscode.TreeItem {
   readonly kind = 'worktreeList' as const;
   readonly worktreePath: string;
+  readonly pullRequest?: PullRequestInfo;
 
-  constructor(worktree: DiscoveredWorktree, selected: boolean) {
+  constructor(
+    worktree: DiscoveredWorktree,
+    selected: boolean,
+    pullRequest?: PullRequestInfo,
+  ) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
+    // TreeItems cannot be font-bold; selected rows use blue decoration tint + badge
     super(branchLabel, vscode.TreeItemCollapsibleState.None);
     this.worktreePath = worktree.path;
-    // Branch only in the row; path on hover
-    this.description = undefined;
-    this.contextValue = selected ? 'worktreeListItemActive' : 'worktreeListItem';
-    this.iconPath = new vscode.ThemeIcon(
-      selected ? 'circle-filled' : 'circle-outline',
-    );
+    this.pullRequest = pullRequest;
+    // Enables FileDecoration (blue tint + ●) for the selected row
+    this.resourceUri = worktreeResourceUri(worktree.path);
+
+    const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
+    this.contextValue = pullRequest ? `${baseCtx}WithPr` : baseCtx;
+
+    // PR → status icon; no PR → branch (distinct from pull-request family)
+    if (pullRequest) {
+      this.iconPath = prThemeIcon(pullRequest);
+    } else if (worktree.isRootCheckout) {
+      this.iconPath = new vscode.ThemeIcon(
+        'repo',
+        selected ? new vscode.ThemeColor('charts.blue') : undefined,
+      );
+    } else {
+      this.iconPath = new vscode.ThemeIcon(
+        'git-branch',
+        selected ? new vscode.ThemeColor('charts.blue') : undefined,
+      );
+    }
+
+    const bits: string[] = [];
+    // Selection is shown via blue decoration tint only (no "selected" label)
+    if (worktree.isRootCheckout) {
+      bits.push(worktree.isDirty ? 'root · dirty' : 'root');
+    }
+    if (pullRequest) {
+      bits.push(formatPrDescription(pullRequest));
+    }
+    this.description = bits.length > 0 ? bits.join(' · ') : undefined;
+
     const rel =
       worktree.relativePath || worktree.name || worktree.path;
-    this.tooltip = [
+    const tip: string[] = [
       branchLabel,
       worktree.isRootCheckout ? `Root checkout (${rel})` : rel,
       worktree.isDirty ? 'Dirty working tree' : undefined,
       selected ? 'Selected' : 'Click to focus',
-    ]
-      .filter(Boolean)
-      .join('\n');
-    // Subtle cue for root without cluttering the row with a folder name
-    if (worktree.isRootCheckout) {
-      this.description = worktree.isDirty ? 'root · dirty' : 'root';
+    ].filter((x): x is string => Boolean(x));
+    if (pullRequest) {
+      tip.push(
+        `PR #${pullRequest.number}: ${pullRequest.title}`,
+        `${formatPrDescription(pullRequest)} · ${pullRequest.url}`,
+      );
+      if (prHasMergeConflicts(pullRequest)) {
+        tip.push('GitHub reports merge conflicts with the PR base.');
+      }
     }
+    this.tooltip = tip.join('\n');
+
     this.command = {
       command: 'worktreeCompare.focusWorktree',
       title: 'Focus Worktree',
@@ -73,35 +117,43 @@ export class WorktreeListItem extends vscode.TreeItem {
   }
 }
 
-/** Soft warning when worktree tip is behind its compare base. */
-export class BehindWarningItem extends vscode.TreeItem {
-  readonly kind = 'behindWarning' as const;
+/**
+ * Warning when GitHub reports the linked PR has merge conflicts.
+ * (We no longer warn merely because the integration tip moved ahead.)
+ */
+export class ConflictWarningItem extends vscode.TreeItem {
+  readonly kind = 'conflictWarning' as const;
 
   constructor(
     readonly worktreePath: string,
+    readonly pullRequest: PullRequestInfo,
     readonly baseRef: string,
-    readonly behind: number,
   ) {
-    const n = behind;
     super(
-      `Behind ${baseRef} (${n} commit${n === 1 ? '' : 's'})`,
+      `PR #${pullRequest.number} has merge conflicts`,
       vscode.TreeItemCollapsibleState.None,
     );
-    this.contextValue = 'behindWarning';
+    this.contextValue = 'conflictWarning';
     this.iconPath = new vscode.ThemeIcon(
       'warning',
-      new vscode.ThemeColor('list.warningForeground'),
+      new vscode.ThemeColor('list.errorForeground'),
     );
-    this.description = 'rebase recommended';
+    this.description = pullRequest.baseRefName
+      ? `vs ${pullRequest.baseRefName}`
+      : 'resolve before merge';
     this.tooltip = [
-      `This worktree is ${n} commit${n === 1 ? '' : 's'} behind ${baseRef}.`,
-      'Browsing and editing still work. Consider rebasing (or merging) onto the base before adding more commits.',
-      'Use Change Base Ref if the base is wrong.',
-    ].join('\n');
+      `GitHub: pull request #${pullRequest.number} conflicts with its base.`,
+      pullRequest.title,
+      pullRequest.url,
+      baseRef ? `Local compare tip: ${baseRef}` : undefined,
+      'Being behind the base is fine until conflicts appear — rebase/merge only if needed.',
+    ]
+      .filter(Boolean)
+      .join('\n');
     this.command = {
-      command: 'worktreeCompare.changeBaseRef',
-      title: 'Change Base Ref',
-      arguments: [{ worktreePath, baseRef } satisfies { worktreePath: string; baseRef: string }],
+      command: 'worktreeCompare.openPullRequest',
+      title: 'Open Pull Request on GitHub',
+      arguments: [{ worktreePath, pullRequest }],
     };
   }
 }
@@ -125,7 +177,7 @@ export class SectionItem extends vscode.TreeItem {
     } else if (section === 'changes') {
       this.iconPath = new vscode.ThemeIcon('request-changes');
     } else {
-      // Squashed = cumulative WT ↔ base file set
+      // Full Diff = cumulative WT ↔ base file set
       this.iconPath = new vscode.ThemeIcon('git-pull-request');
     }
   }
@@ -154,7 +206,7 @@ export class CommitItem extends vscode.TreeItem {
   }
 }
 
-/** Directory node under Squashed tree layout. */
+/** Directory node under Full Diff tree layout. */
 export class FolderItem extends vscode.TreeItem {
   readonly kind = 'folder' as const;
 
@@ -163,7 +215,6 @@ export class FolderItem extends vscode.TreeItem {
     readonly baseRef: string,
     /** Posix path from worktree root */
     readonly folderPath: string,
-    fileCount: number,
   ) {
     const name = path.posix.basename(folderPath);
     super(name, vscode.TreeItemCollapsibleState.Expanded);
@@ -172,7 +223,6 @@ export class FolderItem extends vscode.TreeItem {
     this.resourceUri = vscode.Uri.file(
       path.join(worktreePath, ...folderPath.split('/')),
     );
-    this.description = fileCount > 0 ? String(fileCount) : undefined;
     this.tooltip = folderPath;
   }
 }
