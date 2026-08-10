@@ -340,6 +340,8 @@
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && node esbuild.js --production",
+    "vsix": "npm run package && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "install:local": "node scripts/install-local.mjs",
     "check-types": "tsc --noEmit",
     "lint": "eslint src"
   },
