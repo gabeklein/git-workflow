@@ -28,9 +28,10 @@ export async function getWorkingStatus(worktreePath: string): Promise<WorkingSta
   const staged = parseNameStatus(stagedOut);
   const unstaged = parseNameStatus(unstagedOut);
 
-  for (const path of parseNulPaths(untrackedOut)) {
-    if (!unstaged.some((f) => f.path === path)) {
-      unstaged.push({ path, status: 'A' });
+  // Untracked: not "A" (that is index/tree-added). Mark as '?' → UI letter U.
+  for (const filePath of parseNulPaths(untrackedOut)) {
+    if (!unstaged.some((f) => f.path === filePath)) {
+      unstaged.push({ path: filePath, status: '?' });
     }
   }
 

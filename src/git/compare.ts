@@ -132,15 +132,37 @@ export function breakdownFileChanges(files: FileChange[]): FileChangeBreakdown {
   return { added, modified, deleted };
 }
 
-/** e.g. `3 new · 5 modified · 1 deleted` (omits zero buckets). */
+/** e.g. `2 new · 1 untracked · 5 modified · 1 deleted` (omits zero buckets). */
 export function formatFileChangeBreakdown(files: FileChange[]): string | undefined {
   if (files.length === 0) {
     return undefined;
   }
-  const { added, modified, deleted } = breakdownFileChanges(files);
+  let added = 0;
+  let untracked = 0;
+  let modified = 0;
+  let deleted = 0;
+  for (const f of files) {
+    switch (f.status) {
+      case 'A':
+        added += 1;
+        break;
+      case '?':
+        untracked += 1;
+        break;
+      case 'D':
+        deleted += 1;
+        break;
+      default:
+        modified += 1;
+        break;
+    }
+  }
   const parts: string[] = [];
   if (added > 0) {
     parts.push(`${added} new`);
+  }
+  if (untracked > 0) {
+    parts.push(`${untracked} untracked`);
   }
   if (modified > 0) {
     parts.push(`${modified} modified`);
@@ -229,14 +251,34 @@ export async function compareWorkingTreeToBase(
         )
       : [];
 
-  // Working tree (and index) vs fork point — Full Diff (includes uncommitted)
-  const diffOut = await git(worktreePath, [
-    'diff',
-    '--name-status',
-    '--find-renames',
-    compareRef,
+  // Working tree (and index) vs fork point — Full Diff (includes uncommitted).
+  // `git diff <ref>` omits untracked files; merge those in as '?' (UI: U).
+  const [diffOut, untrackedOut] = await Promise.all([
+    git(worktreePath, [
+      'diff',
+      '--name-status',
+      '--find-renames',
+      compareRef,
+    ]),
+    git(worktreePath, [
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '-z',
+    ]),
   ]);
   const fullPrFiles = parseNameStatus(diffOut);
+  const seen = new Set(fullPrFiles.map((f) => f.path));
+  for (const filePath of untrackedOut
+    .split('\0')
+    .map((p) => p.trim())
+    .filter(Boolean)) {
+    if (!seen.has(filePath)) {
+      fullPrFiles.push({ path: filePath, status: '?' });
+      seen.add(filePath);
+    }
+  }
+  fullPrFiles.sort((a, b) => a.path.localeCompare(b.path));
 
   return {
     baseRef: baseTipRef,

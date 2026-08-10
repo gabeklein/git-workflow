@@ -415,10 +415,10 @@ function statusLetter(status: string): string {
 
 function statusLabel(status: string): string {
   switch (status) {
-    case 'A':
-      return 'Added';
     case '?':
       return 'Untracked';
+    case 'A':
+      return 'Added';
     case 'D':
       return 'Deleted';
     case 'R':
