@@ -680,19 +680,18 @@ export class WorktreeTreeProvider
     } else {
       const selected = this.getSelected();
       const n = this.worktrees.length;
-      const selectedLabel = selected
+      const worktreesLabel = selected
         ? selected.branch + (selected.detached ? ' (detached)' : '')
         : 'Worktrees';
-      // "{branch} · N worktrees"
-      const worktreesLabel =
-        n === 1
-          ? `${selectedLabel} · 1 worktree`
-          : `${selectedLabel} · ${n} worktrees`;
+      // Label = branch; description = "· N worktrees"
+      const worktreesDesc =
+        n === 1 ? '· 1 worktree' : `· ${n} worktrees`;
       nodes.push(
         new GroupItem(
           worktreesLabel,
           'worktrees',
           vscode.TreeItemCollapsibleState.Expanded,
+          worktreesDesc,
         ),
       );
 
