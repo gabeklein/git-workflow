@@ -36,7 +36,7 @@ Then **Developer: Reload Window** (or reconnect the SSH remote) in the windows w
 ### Notes
 
 - Extension id: **`local.git-workflow`** (from `publisher` + `name` in `package.json`).
-- VSIX path: `git-workflow-<version>.vsix` (gitignored).
+- VSIX path: `dist/git-workflow-<version>.vsix` (`dist/` and `*.vsix` are gitignored).
 - **Remote-SSH:** the extension host runs on the remote. `install:local` installs under `~/.vscode/extensions` *and* mirrors to `~/.vscode-server/extensions` so remote windows see it. Run the script **on the remote** (or wherever the worktrees live).
 - **Updates:** re-run `npm run install:local` after changes. Prefer bumping `"version"` in `package.json` when shipping a batch so VS Code clearly replaces the previous install.
 - **Dev vs installed:** F5 EDH keeps using the project tree; normal windows use the installed copy. No need to uninstall while debugging.
@@ -46,7 +46,7 @@ Manual alternative:
 
 ```bash
 npm run vsix
-code --install-extension ./git-workflow-0.0.1.vsix --force
+code --install-extension ./dist/git-workflow-0.0.1.vsix --force
 # Reload window
 ```
 
