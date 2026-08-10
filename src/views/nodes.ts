@@ -28,13 +28,13 @@ export type TreeNode =
   | RemotePrFileItem
   | MessageItem;
 
-/** Top-level collapsible group (Worktrees list / Ahead commits / Remote PRs). */
+/** Top-level collapsible group (Worktrees list / Commits ahead). */
 export class GroupItem extends vscode.TreeItem {
   readonly kind = 'group' as const;
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'ahead' | 'remotePrs',
+    readonly group: 'worktrees' | 'ahead',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
   ) {
@@ -44,9 +44,7 @@ export class GroupItem extends vscode.TreeItem {
     this.iconPath =
       group === 'worktrees'
         ? new vscode.ThemeIcon('repo')
-        : group === 'remotePrs'
-          ? new vscode.ThemeIcon('git-pull-request')
-          : new vscode.ThemeIcon('git-commit');
+        : new vscode.ThemeIcon('git-commit');
   }
 }
 
@@ -181,6 +179,9 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
     if (pullRequest) {
       bits.push(formatPrDescription(pullRequest));
+    } else if (worktree.publishState) {
+      // No PR: show whether branch exists on a remote
+      bits.push(worktree.publishState);
     }
     this.description = bits.length > 0 ? bits.join(' · ') : undefined;
 

@@ -22,11 +22,6 @@ import {
   resetGithubPrClient,
   type PullRequestInfo,
 } from '../github/pr';
-import {
-  listOpenRemotePullRequests,
-  listRemotePrFiles,
-  type RemotePullRequest,
-} from '../github/remotePrs';
 import { childrenAtPrefix, joinPrefix } from './fileTree';
 import {
   ConflictWarningItem,
@@ -35,8 +30,6 @@ import {
   FolderItem,
   GroupItem,
   MessageItem,
-  RemotePrFileItem,
-  RemotePrItem,
   SectionItem,
   type TreeNode,
   WorktreeListItem,
@@ -44,13 +37,7 @@ import {
 import { WorktreeSelectionDecorationProvider } from './worktreeDecorations';
 
 export type { TreeNode } from './nodes';
-export {
-  CommitItem,
-  FileItem,
-  RemotePrFileItem,
-  RemotePrItem,
-  WorktreeListItem,
-} from './nodes';
+export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
@@ -98,16 +85,6 @@ export class WorktreeTreeProvider
   private readonly prCache = new Map<string, PullRequestInfo | null>();
   private prRefreshGeneration = 0;
 
-  /** Open PRs for Remote PRs section (repo-level). */
-  private remotePrs: RemotePullRequest[] = [];
-  private remotePrsLoading = false;
-  private remotePrsError: string | undefined;
-  private remotePrsRepoCwd: string | undefined;
-  private readonly remotePrFilesCache = new Map<
-    number,
-    { baseRef: string; headRef: string; files: FileChange[] }
-  >();
-
   private selectedPath: string | undefined;
   private readonly selectionDecorations =
     new WorktreeSelectionDecorationProvider();
@@ -128,16 +105,10 @@ export class WorktreeTreeProvider
         if (e.affectsConfiguration('worktreeCompare')) {
           this.rewatchFolders();
           this.restartPoll();
-          if (
-            e.affectsConfiguration('worktreeCompare.githubPullRequests') ||
-            e.affectsConfiguration('worktreeCompare.remotePrLimit')
-          ) {
+          if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
             this.prCache.clear();
-            this.remotePrs = [];
-            this.remotePrFilesCache.clear();
             void this.refreshPullRequests();
-            void this.refreshRemotePrs();
           }
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
@@ -217,57 +188,9 @@ export class WorktreeTreeProvider
     );
   }
 
-  getRemotePr(prNumber: number): RemotePullRequest | undefined {
-    return this.remotePrs.find((p) => p.number === prNumber);
-  }
-
-  async refreshRemotePrs(): Promise<void> {
-    if (!isGithubPrIntegrationEnabled()) {
-      this.remotePrs = [];
-      this.remotePrsError = undefined;
-      this._onDidChangeTreeData.fire();
-      return;
-    }
-    const cwd = this.getRepoCwd();
-    if (!cwd) {
-      this.remotePrs = [];
-      this.remotePrsError = 'No repository folder open';
-      this._onDidChangeTreeData.fire();
-      return;
-    }
-    this.remotePrsLoading = true;
-    this.remotePrsError = undefined;
-    this.remotePrsRepoCwd = cwd;
-    this._onDidChangeTreeData.fire();
-    const t0 = Date.now();
-    try {
-      const list = await listOpenRemotePullRequests(cwd);
-      const localBranches = new Set(
-        this.worktrees.filter((w) => !w.detached).map((w) => w.branch),
-      );
-      // Hide PRs that already have a local worktree — those are reviewed via Worktrees
-      const withoutLocal = list.filter(
-        (pr) => !(pr.headRefName && localBranches.has(pr.headRefName)),
-      );
-      this.remotePrs = withoutLocal.map((pr) => ({
-        ...pr,
-        hasLocalWorktree: false,
-      }));
-      const hidden = list.length - withoutLocal.length;
-      this.output.appendLine(
-        `Remote PRs: ${this.remotePrs.length} open without local worktree` +
-          (hidden > 0 ? ` (hid ${hidden} already local)` : '') +
-          ` (${Date.now() - t0}ms)`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.remotePrsError = message;
-      this.remotePrs = [];
-      this.output.appendLine(`Remote PRs list failed: ${message}`);
-    } finally {
-      this.remotePrsLoading = false;
-      this._onDidChangeTreeData.fire();
-    }
+  /** Branch names currently checked out (for Remote PRs panel hide filter). */
+  getLocalBranchNames(): string[] {
+    return this.worktrees.filter((w) => !w.detached).map((w) => w.branch);
   }
 
   async setSelectedPath(worktreePath: string): Promise<void> {
@@ -596,9 +519,8 @@ export class WorktreeTreeProvider
       this.loading = false;
       this._onDidChangeTreeData.fire();
       this._onDidChangeWorktrees.fire();
-      // Background: associate open PRs with branches + remote PR list
+      // Background: associate open PRs with worktree branches
       void this.refreshPullRequests();
-      void this.refreshRemotePrs();
     }
   }
 
@@ -724,12 +646,7 @@ export class WorktreeTreeProvider
           if (element.group === 'worktrees') {
             return this.getWorktreeListChildren();
           }
-          if (element.group === 'remotePrs') {
-            return this.getRemotePrListChildren();
-          }
           return await this.getAheadChildren();
-        case 'remotePr':
-          return await this.getRemotePrChildren(element);
         case 'section':
           return await this.getSectionChildren(element);
         case 'folder':
@@ -765,17 +682,17 @@ export class WorktreeTreeProvider
       const n = this.worktrees.length;
       const selectedLabel = selected
         ? selected.branch + (selected.detached ? ' (detached)' : '')
-        : undefined;
-      // Primary: focused branch; secondary: inventory count
-      const worktreesLabel = selectedLabel ?? 'Worktrees';
-      const worktreesDesc =
-        n === 1 ? '1 · worktree' : `${n} · worktrees`;
+        : 'Worktrees';
+      // "{branch} · N worktrees"
+      const worktreesLabel =
+        n === 1
+          ? `${selectedLabel} · 1 worktree`
+          : `${selectedLabel} · ${n} worktrees`;
       nodes.push(
         new GroupItem(
           worktreesLabel,
           'worktrees',
           vscode.TreeItemCollapsibleState.Expanded,
-          worktreesDesc,
         ),
       );
 
@@ -801,16 +718,17 @@ export class WorktreeTreeProvider
             );
           }
 
+          // "Commits · N → branch (@ SHA)" — @ sha only when pinned off tip
           const aheadCount = compare.ahead;
-          const aheadBase = compare.compareIsTip
-            ? compare.baseRef
-            : `${compare.baseRef} @ ${compare.baseHead}`;
+          const aheadTarget = compare.compareIsTip
+            ? `→ ${compare.baseRef}`
+            : `→ ${compare.baseRef} @ ${compare.baseHead}`;
           nodes.push(
             new GroupItem(
-              'Ahead',
+              `Commits · ${aheadCount}`,
               'ahead',
               vscode.TreeItemCollapsibleState.Collapsed,
-              `${aheadCount} commit${aheadCount === 1 ? '' : 's'} → ${aheadBase}`,
+              aheadTarget,
             ),
           );
 
@@ -854,83 +772,7 @@ export class WorktreeTreeProvider
       }
     }
 
-    // Remote PRs — always available when GitHub integration is on
-    if (isGithubPrIntegrationEnabled()) {
-      let remoteDesc: string | undefined;
-      if (this.remotePrsLoading && this.remotePrs.length === 0) {
-        remoteDesc = 'loading…';
-      } else if (this.remotePrsError) {
-        remoteDesc = 'error';
-      } else {
-        const n = this.remotePrs.length;
-        remoteDesc = n === 1 ? '1 · open' : `${n} · open`;
-      }
-      nodes.push(
-        new GroupItem(
-          'Remote PRs',
-          'remotePrs',
-          vscode.TreeItemCollapsibleState.Collapsed,
-          remoteDesc,
-        ),
-      );
-    }
-
     return nodes;
-  }
-
-  private getRemotePrListChildren(): TreeNode[] {
-    if (this.remotePrsLoading && this.remotePrs.length === 0) {
-      return [new MessageItem('Loading pull requests…', undefined, 'loading~spin')];
-    }
-    if (this.remotePrsError) {
-      return [
-        new MessageItem('Could not list PRs', this.remotePrsError, 'error'),
-      ];
-    }
-    const cwd = this.remotePrsRepoCwd ?? this.getRepoCwd();
-    if (!cwd) {
-      return [new MessageItem('No repository folder open')];
-    }
-    if (this.remotePrs.length === 0) {
-      return [new MessageItem('No open pull requests')];
-    }
-    return this.remotePrs.map((pr) => new RemotePrItem(pr, cwd));
-  }
-
-  private async getRemotePrChildren(item: RemotePrItem): Promise<TreeNode[]> {
-    const cwd = item.repoCwd;
-    try {
-      let cached = this.remotePrFilesCache.get(item.pr.number);
-      if (!cached) {
-        this.output.appendLine(
-          `Fetching PR #${item.pr.number} head for read-only review…`,
-        );
-        cached = await listRemotePrFiles(cwd, item.pr);
-        this.remotePrFilesCache.set(item.pr.number, cached);
-        this.output.appendLine(
-          `PR #${item.pr.number}: ${cached.files.length} file(s) (${cached.baseRef}...${cached.headRef})`,
-        );
-      }
-      if (cached.files.length === 0) {
-        return [new MessageItem('No file changes', item.pr.baseRefName)];
-      }
-      return cached.files.map(
-        (f) =>
-          new RemotePrFileItem(
-            cwd,
-            item.pr,
-            cached!.baseRef,
-            cached!.headRef,
-            f,
-          ),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(
-        `Remote PR #${item.pr.number} files failed: ${message}`,
-      );
-      return [new MessageItem('Could not load PR files', message, 'error')];
-    }
   }
 
   private getWorktreeListChildren(): TreeNode[] {

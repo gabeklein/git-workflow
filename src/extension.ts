@@ -22,13 +22,13 @@ import {
   type RemotePullRequest,
 } from './github/remotePrs';
 import { createFileBackedLogger } from './log';
+import { RemotePrsTreeProvider } from './views/remotePrsTree';
 import {
   CommitItem,
   FileItem,
-  RemotePrFileItem,
-  RemotePrItem,
   WorktreeTreeProvider,
 } from './views/worktreeTree';
+import type { RemotePrFileItem, RemotePrItem } from './views/nodes';
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Git Workflow');
@@ -49,11 +49,31 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeProvider = new WorktreeTreeProvider(log, context);
   context.subscriptions.push(treeProvider);
 
+  const remotePrsProvider = new RemotePrsTreeProvider(log);
+  context.subscriptions.push(remotePrsProvider);
+  // Keep Remote PRs hide-filter in sync with discovered worktrees
+  const syncRemoteLocalBranches = () => {
+    remotePrsProvider.setLocalBranches(treeProvider.getLocalBranchNames());
+  };
+  context.subscriptions.push(
+    treeProvider.onDidChangeWorktrees(syncRemoteLocalBranches),
+  );
+  syncRemoteLocalBranches();
+
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
+
+  const remotePrsView = vscode.window.createTreeView(
+    'worktreeCompare.remotePrs',
+    {
+      treeDataProvider: remotePrsProvider,
+      showCollapseAll: true,
+    },
+  );
+  context.subscriptions.push(remotePrsView);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('worktreeCompare.refresh', () => {
@@ -420,10 +440,7 @@ export function activate(context: vscode.ExtensionContext): void {
       'worktreeCompare.refreshPullRequests',
       async () => {
         treeProvider.clearPullRequestCache();
-        await Promise.all([
-          treeProvider.refreshPullRequests(),
-          treeProvider.refreshRemotePrs(),
-        ]);
+        await treeProvider.refreshPullRequests();
         void vscode.window.setStatusBarMessage(
           'Git Workflow: refreshed PR status',
           2000,
@@ -433,7 +450,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'worktreeCompare.refreshRemotePrs',
       async () => {
-        await treeProvider.refreshRemotePrs();
+        remotePrsProvider.setLocalBranches(treeProvider.getLocalBranchNames());
+        remotePrsProvider.refresh();
         void vscode.window.setStatusBarMessage(
           'Git Workflow: refreshed remote PRs',
           2000,
@@ -564,6 +582,10 @@ export function activate(context: vscode.ExtensionContext): void {
                 `Created worktree for PR #${pr.number} at ${created}`,
               );
               treeProvider.refresh();
+              remotePrsProvider.setLocalBranches(
+                treeProvider.getLocalBranchNames(),
+              );
+              remotePrsProvider.refresh();
               await treeProvider.setSelectedPath(created);
               void vscode.window.showInformationMessage(
                 `Git Workflow: worktree ready at ${created}`,

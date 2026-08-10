@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { git } from '../git/exec';
+import { git, gitOk } from '../git/exec';
 import { listWorktreeAdmin } from '../git/worktreeAdmin';
 import { inspectWorktree, type WorktreeInfo } from '../git/worktree';
 
@@ -19,6 +19,11 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   /** git worktree lock is set */
   locked?: boolean;
   lockReason?: string;
+  /**
+   * Whether the branch has a remote-tracking tip (origin/<branch> or @{upstream}).
+   * Used for no-PR row labels: pushed vs local.
+   */
+  publishState?: 'pushed' | 'local';
 }
 
 export type RootCheckoutMode = 'always' | 'dirty' | 'never';
@@ -52,6 +57,36 @@ async function probeDirty(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Branch has remote tip → pushed; else local-only. */
+async function probePublishState(
+  dir: string,
+  branch: string,
+  detached: boolean,
+): Promise<'pushed' | 'local' | undefined> {
+  if (detached || !branch || branch === 'HEAD' || branch === 'unknown') {
+    return undefined;
+  }
+  try {
+    if (await gitOk(dir, ['rev-parse', '--verify', `@{upstream}^{commit}`])) {
+      return 'pushed';
+    }
+  } catch {
+    // no upstream
+  }
+  for (const remote of ['origin', 'upstream']) {
+    if (
+      await gitOk(dir, [
+        'rev-parse',
+        '--verify',
+        `${remote}/${branch}^{commit}`,
+      ])
+    ) {
+      return 'pushed';
+    }
+  }
+  return 'local';
 }
 
 async function listDirectChildDirs(dir: string): Promise<string[]> {
@@ -104,6 +139,11 @@ export async function discoverWorktrees(
           continue;
         }
         seen.add(rootPath);
+        const publishState = await probePublishState(
+          rootPath,
+          info.branch,
+          info.detached,
+        );
         found.push({
           ...info,
           // Prefer stable label for root vs folder basename alone
@@ -112,6 +152,7 @@ export async function discoverWorktrees(
           relativePath: '.',
           isRootCheckout: true,
           isDirty: dirty,
+          publishState,
         });
         output?.appendLine(
           `Root checkout: ${info.branch} @ ${rootPath}${dirty ? ' (dirty)' : ''}`,
@@ -163,6 +204,11 @@ export async function discoverWorktrees(
           job.workspaceFolder.uri.fsPath,
           normalized,
         );
+        const publishState = await probePublishState(
+          normalized,
+          info.branch,
+          info.detached,
+        );
         found.push({
           ...info,
           workspaceFolder: job.workspaceFolder,
@@ -171,6 +217,7 @@ export async function discoverWorktrees(
               ? relativePath
               : undefined,
           isRootCheckout: false,
+          publishState,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

@@ -20,7 +20,8 @@
     "claude"
   ],
   "activationEvents": [
-    "onView:worktreeCompare.worktrees"
+    "onView:worktreeCompare.worktrees",
+    "onView:worktreeCompare.remotePrs"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -85,14 +86,14 @@
             "Use the GitHub CLI (gh) when available to detect PRs for worktree branches",
             "Disable GitHub PR status and context actions"
           ],
-          "description": "Optional GitHub integration: show PR status on worktree rows, Remote PRs section, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
+          "description": "Optional GitHub integration: PR badges on worktrees, Remote PRs panel, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
         },
         "worktreeCompare.remotePrLimit": {
           "type": "number",
           "default": 30,
           "minimum": 1,
           "maximum": 100,
-          "description": "Max open pull requests to list under Remote PRs."
+          "description": "Max open pull requests to list in the Remote PRs panel."
         }
       }
     },
@@ -110,6 +111,11 @@
         {
           "id": "worktreeCompare.worktrees",
           "name": "Worktree"
+        },
+        {
+          "id": "worktreeCompare.remotePrs",
+          "name": "Remote PRs",
+          "when": "config.worktreeCompare.githubPullRequests != off"
         }
       ]
     },
@@ -242,6 +248,11 @@
           "command": "worktreeCompare.refresh",
           "when": "view == worktreeCompare.worktrees",
           "group": "navigation@4"
+        },
+        {
+          "command": "worktreeCompare.refreshRemotePrs",
+          "when": "view == worktreeCompare.remotePrs",
+          "group": "navigation@1"
         }
       ],
       "view/item/context": [
@@ -287,23 +298,18 @@
         },
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^remotePr/",
+          "when": "view == worktreeCompare.remotePrs && viewItem =~ /^remotePr/",
           "group": "1_github@1"
         },
         {
           "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^remotePr/",
+          "when": "view == worktreeCompare.remotePrs && viewItem =~ /^remotePr/",
           "group": "1_github@2"
         },
         {
           "command": "worktreeCompare.createWorktreeFromPr",
-          "when": "view == worktreeCompare.worktrees && viewItem == remotePr",
+          "when": "view == worktreeCompare.remotePrs && viewItem == remotePr",
           "group": "2_worktree@1"
-        },
-        {
-          "command": "worktreeCompare.refreshRemotePrs",
-          "when": "view == worktreeCompare.worktrees && viewItem == group:remotePrs",
-          "group": "inline"
         },
         {
           "command": "worktreeCompare.copyCommitSha",
