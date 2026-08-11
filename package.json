@@ -287,6 +287,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "worktreeCompare.changeBaseRef",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^worktreeListItem/",
+          "group": "0_compare@1"
+        },
+        {
           "command": "worktreeCompare.unlockWorktree",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /Locked/",
           "group": "1_worktree@1"
