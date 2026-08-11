@@ -30,9 +30,9 @@ const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const extId = `${pkg.publisher}.${pkg.name}`;
 const extFolderName = `${extId}-${pkg.version}`;
 const vsixName = `${pkg.name}-${pkg.version}.vsix`;
-// Keep repo root clean — VSIX lands next to production bundle
-const distDir = path.join(root, 'dist');
-const vsixPath = path.join(distDir, vsixName);
+// Keep out of dist/ (dist is shipped inside the VSIX) and off the repo root
+const artifactsDir = path.join(root, 'artifacts');
+const vsixPath = path.join(artifactsDir, vsixName);
 
 function log(msg) {
   console.log(`[install:local] ${msg}`);
@@ -58,20 +58,18 @@ function which(bin) {
 
 // 1) Production build
 run('npm run package');
-mkdirSync(distDir, { recursive: true });
-// Remove prior VSIX so vsce does not try to zip it into the new package
-if (existsSync(vsixPath)) {
-  rmSync(vsixPath, { force: true });
-}
+mkdirSync(artifactsDir, { recursive: true });
 
-// 2) VSIX into dist/ (vsce runs vscode:prepublish again — fine)
+// 2) VSIX into artifacts/ (not dist — dist is included in the package)
 run(
   `npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license -o "${vsixPath}"`,
 );
-// Drop any legacy root-level VSIX from earlier packaging
-for (const name of [vsixName, `${pkg.name}-${pkg.version}.vsix`]) {
-  const legacy = path.join(root, name);
-  if (existsSync(legacy) && legacy !== vsixPath) {
+// Drop legacy locations from earlier packaging attempts
+for (const legacy of [
+  path.join(root, vsixName),
+  path.join(root, 'dist', vsixName),
+]) {
+  if (existsSync(legacy)) {
     rmSync(legacy, { force: true });
     log(`Removed legacy ${legacy}`);
   }

@@ -10,8 +10,7 @@ esbuild.js
 **/*.map
 **/*.ts
 !dist/**
-# VSIX lives under dist/ for cleanliness but must not be nested inside itself
-dist/**/*.vsix
+artifacts/**
 **/*.vsix
 .git/**
 .vsix-unpack-tmp/**
