@@ -59,6 +59,10 @@ function which(bin) {
 // 1) Production build
 run('npm run package');
 mkdirSync(distDir, { recursive: true });
+// Remove prior VSIX so vsce does not try to zip it into the new package
+if (existsSync(vsixPath)) {
+  rmSync(vsixPath, { force: true });
+}
 
 // 2) VSIX into dist/ (vsce runs vscode:prepublish again — fine)
 run(
