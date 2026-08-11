@@ -288,7 +288,7 @@
         },
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^worktreeListItem/",
+          "when": "view == worktreeCompare.worktrees && viewItem == group:ahead",
           "group": "0_compare@1"
         },
         {

@@ -31,16 +31,22 @@ export type TreeNode =
 /** Top-level collapsible group (Worktrees list / Commits ahead). */
 export class GroupItem extends vscode.TreeItem {
   readonly kind = 'group' as const;
+  /** Set on Commits group so Change Base Ref knows which worktree. */
+  readonly worktreePath?: string;
+  readonly baseRef?: string;
 
   constructor(
     label: string,
     readonly group: 'worktrees' | 'ahead',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
+    opts?: { worktreePath?: string; baseRef?: string },
   ) {
     super(label, collapsible);
     this.contextValue = `group:${group}`;
     this.description = description;
+    this.worktreePath = opts?.worktreePath;
+    this.baseRef = opts?.baseRef;
     this.iconPath =
       group === 'worktrees'
         ? new vscode.ThemeIcon('repo')

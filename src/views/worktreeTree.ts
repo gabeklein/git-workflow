@@ -728,6 +728,7 @@ export class WorktreeTreeProvider
               'ahead',
               vscode.TreeItemCollapsibleState.Collapsed,
               aheadTarget,
+              { worktreePath, baseRef: compare.baseRef },
             ),
           );
 
