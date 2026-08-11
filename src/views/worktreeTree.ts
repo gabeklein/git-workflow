@@ -748,8 +748,8 @@ export class WorktreeTreeProvider
           if (status.unstaged.length > 0) {
             nodes.push(
               new SectionItem(
-                'Changes',
-                'changes',
+                'Unstaged',
+                'unstaged',
                 worktreePath,
                 compare.baseRef,
                 vscode.TreeItemCollapsibleState.Expanded,
@@ -757,6 +757,18 @@ export class WorktreeTreeProvider
               ),
             );
           }
+
+          // Context keys for Commit menu enablement
+          void vscode.commands.executeCommand(
+            'setContext',
+            'worktreeCompare.hasStaged',
+            status.staged.length > 0,
+          );
+          void vscode.commands.executeCommand(
+            'setContext',
+            'worktreeCompare.hasUnstaged',
+            status.unstaged.length > 0,
+          );
 
           nodes.push(
             new SectionItem(
@@ -826,7 +838,7 @@ export class WorktreeTreeProvider
       );
     }
 
-    if (item.section === 'changes') {
+    if (item.section === 'unstaged') {
       return snap.status.unstaged.map(
         (f) =>
           new FileItem(item.worktreePath, item.baseRef, f, {

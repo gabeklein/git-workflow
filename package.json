@@ -178,6 +178,20 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.commitStaged",
+        "title": "Commit Staged…",
+        "icon": "$(check)",
+        "category": "Git Workflow",
+        "enablement": "worktreeCompare.hasStaged"
+      },
+      {
+        "command": "worktreeCompare.commitUnstaged",
+        "title": "Commit Unstaged…",
+        "icon": "$(check)",
+        "category": "Git Workflow",
+        "enablement": "worktreeCompare.hasUnstaged && !worktreeCompare.hasStaged"
+      },
+      {
         "command": "worktreeCompare.copyCommitSha",
         "title": "Copy Commit SHA",
         "category": "Git Workflow"
@@ -340,6 +354,16 @@
           "command": "worktreeCompare.unstageFile",
           "when": "view == worktreeCompare.worktrees && viewItem == stagedFile",
           "group": "1_scm"
+        },
+        {
+          "command": "worktreeCompare.commitStaged",
+          "when": "view == worktreeCompare.worktrees && viewItem == section:staged",
+          "group": "1_scm@1"
+        },
+        {
+          "command": "worktreeCompare.commitUnstaged",
+          "when": "view == worktreeCompare.worktrees && viewItem == section:unstaged",
+          "group": "1_scm@1"
         }
       ]
     }

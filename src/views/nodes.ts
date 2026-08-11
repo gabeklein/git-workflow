@@ -269,7 +269,7 @@ export class SectionItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly section: 'staged' | 'changes' | 'squash',
+    readonly section: 'staged' | 'unstaged' | 'squash',
     readonly worktreePath: string,
     readonly baseRef: string,
     collapsible: vscode.TreeItemCollapsibleState,
@@ -280,7 +280,7 @@ export class SectionItem extends vscode.TreeItem {
     this.description = description;
     if (section === 'staged') {
       this.iconPath = new vscode.ThemeIcon('check');
-    } else if (section === 'changes') {
+    } else if (section === 'unstaged') {
       this.iconPath = new vscode.ThemeIcon('request-changes');
     } else {
       // Full Diff = cumulative WT ↔ base file set

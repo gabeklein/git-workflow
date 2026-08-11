@@ -10,7 +10,10 @@ import {
 import { pickBaseRef } from './compare/pickBaseRef';
 import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
+import { commitStaged, commitUnstagedPaths } from './git/commit';
+import { getWorkingStatus } from './git/status';
 import { stagePaths, unstagePaths } from './git/stage';
+import type { SectionItem } from './views/nodes';
 import { git } from './git/exec';
 import {
   removeWorktree,
@@ -405,6 +408,93 @@ export function activate(context: vscode.ExtensionContext): void {
           log.appendLine(`Stage failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not stage — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.commitStaged',
+      async (item?: SectionItem | { worktreePath?: string }) => {
+        const worktreePath =
+          item?.worktreePath ?? treeProvider.getSelectedPath();
+        if (!worktreePath) {
+          return;
+        }
+        const message = await vscode.window.showInputBox({
+          prompt: 'Commit message (staged files only)',
+          placeHolder: 'Commit message',
+          ignoreFocusOut: true,
+          validateInput: (v) =>
+            v.trim() ? undefined : 'Message is required',
+        });
+        if (message === undefined) {
+          return;
+        }
+        try {
+          await commitStaged(worktreePath, message);
+          treeProvider.refreshCompare(worktreePath);
+          log.appendLine(`Committed staged in ${worktreePath}`);
+          void vscode.window.setStatusBarMessage(
+            'Git Workflow: committed staged changes',
+            3000,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Commit staged failed: ${msg}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: commit failed — ${msg}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.commitUnstaged',
+      async (item?: SectionItem | { worktreePath?: string }) => {
+        const worktreePath =
+          item?.worktreePath ?? treeProvider.getSelectedPath();
+        if (!worktreePath) {
+          return;
+        }
+        const status = await getWorkingStatus(worktreePath);
+        if (status.staged.length > 0) {
+          void vscode.window.showWarningMessage(
+            'Git Workflow: unstage or commit staged files first — Commit Unstaged is disabled while the index has staged changes',
+          );
+          return;
+        }
+        if (status.unstaged.length === 0) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: nothing unstaged to commit',
+          );
+          return;
+        }
+        const message = await vscode.window.showInputBox({
+          prompt:
+            'Commit message (will stage all unstaged/untracked, then commit)',
+          placeHolder: 'Commit message',
+          ignoreFocusOut: true,
+          validateInput: (v) =>
+            v.trim() ? undefined : 'Message is required',
+        });
+        if (message === undefined) {
+          return;
+        }
+        try {
+          const paths = status.unstaged.flatMap((f) =>
+            f.oldPath ? [f.path, f.oldPath] : [f.path],
+          );
+          await commitUnstagedPaths(worktreePath, paths, message);
+          treeProvider.refreshCompare(worktreePath);
+          log.appendLine(`Committed unstaged in ${worktreePath}`);
+          void vscode.window.setStatusBarMessage(
+            'Git Workflow: committed unstaged changes',
+            3000,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Commit unstaged failed: ${msg}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: commit failed — ${msg}`,
           );
         }
       },
