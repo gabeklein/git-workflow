@@ -2,6 +2,82 @@
 
 VS Code / Cursor extension that auto-discovers git worktrees (e.g. under `.claude/worktrees`) and surfaces a GitLens-style **Working Tree ↔ base ref** comparison with **editable** working-tree diffs.
 
+**Repo:** https://github.com/gabeklein/git-workflow  
+**Extension id:** `local.git-workflow`  
+**License:** MIT
+
+## Install (humans & coding agents)
+
+Run this **on the machine that hosts the worktrees** (for Remote-SSH, that is the **remote**, not the local laptop UI).
+
+### One-shot install from GitHub
+
+```bash
+# Prerequisites: Node.js 20+, npm, git
+# Optional but recommended: `code` or `cursor` CLI on PATH
+# Optional for PR features: GitHub CLI `gh` authenticated
+
+git clone https://github.com/gabeklein/git-workflow.git
+cd git-workflow
+npm install
+npm run install:local
+```
+
+Then in VS Code / Cursor: **Developer: Reload Window** (or reconnect the SSH remote).
+
+You should see **Git Workflow** in the activity bar. Open a repo that has linked worktrees (default scan: `.claude/worktrees`).
+
+### Agent checklist
+
+Copy-paste for an agent with shell access on the target host:
+
+1. `git clone https://github.com/gabeklein/git-workflow.git && cd git-workflow`
+2. `npm install`
+3. `npm run install:local`  
+   - Builds production `dist/`
+   - Packages `artifacts/git-workflow-<version>.vsix`
+   - Runs `code` / `cursor` `--install-extension … --force` when a CLI is found
+   - Mirrors into `~/.vscode/extensions` **and** `~/.vscode-server/extensions` (Remote-SSH)
+4. Tell the user to **Reload Window**, or run a host reload if you control the editor
+5. Verify: Extensions view lists **Git Workflow** (`local.git-workflow`); sidebar icon appears
+
+**Do not** rely on F5 / Extension Development Host for end-user install. That only loads the extension in a temporary debug window.
+
+### Update to latest
+
+```bash
+cd git-workflow   # existing clone
+git pull
+npm install
+npm run install:local
+# Reload Window
+```
+
+### Scripts
+
+| Script | What it does |
+|--------|----------------|
+| `npm run package` | Production `dist/` only |
+| `npm run vsix` | Production build + `artifacts/*.vsix` |
+| `npm run install:local` | Build → VSIX → editor install → vscode-server mirror |
+
+### Install notes
+
+- VSIX path: `artifacts/git-workflow-<version>.vsix` (gitignored). Runtime bundle is `dist/` (packaged inside the VSIX).
+- **Remote-SSH:** run install on the remote. The extension host does not use the client’s `~/.vscode/extensions` alone.
+- **Cursor:** if `code` is missing, ensure `cursor` is on PATH, or set `VSCODE_CLI=/path/to/cursor`.
+- Env overrides: `SKIP_CODE_CLI=1`, `SKIP_SERVER=1`.
+- **PR features** need authenticated `gh` (`gh auth login`). Without it, worktree compare still works; Remote PRs / PR badges stay empty.
+- **Dev vs installed:** F5 EDH overrides the installed copy **only in the debug window**. Daily use = installed VSIX.
+
+### Manual alternative
+
+```bash
+npm run vsix
+code --install-extension ./artifacts/git-workflow-0.0.1.vsix --force
+# Reload window
+```
+
 ## Develop (fast iteration)
 
 ```bash
@@ -15,40 +91,6 @@ npm run watch   # or press F5 (one-shot compile via preLaunchTask)
 4. After source changes: save / recompile → **Developer: Reload Window** in the EDH.
 
 The EDH window loads the project via `--extensionDevelopmentPath` and **overrides** any installed copy **only in that window**.
-
-## Install for daily use (other projects)
-
-Use this when you want **Git Workflow** in normal VS Code windows (not F5), including other repos on the same machine / Remote-SSH host.
-
-```bash
-# From this repo — build, package VSIX, install locally + mirror to vscode-server
-npm run install:local
-```
-
-Then **Developer: Reload Window** (or reconnect the SSH remote) in the windows where you want the new build.
-
-| Script | What it does |
-|--------|----------------|
-| `npm run package` | Production `dist/` only |
-| `npm run vsix` | Production build + `.vsix` file |
-| `npm run install:local` | Build → VSIX → `code --install-extension` → copy into `~/.vscode-server/extensions` and register `extensions.json` |
-
-### Notes
-
-- Extension id: **`local.git-workflow`** (from `publisher` + `name` in `package.json`).
-- VSIX path: `artifacts/git-workflow-<version>.vsix` (`artifacts/` and `*.vsix` are gitignored; `dist/` holds the runtime bundle only).
-- **Remote-SSH:** the extension host runs on the remote. `install:local` installs under `~/.vscode/extensions` *and* mirrors to `~/.vscode-server/extensions` so remote windows see it. Run the script **on the remote** (or wherever the worktrees live).
-- **Updates:** re-run `npm run install:local` after changes. Prefer bumping `"version"` in `package.json` when shipping a batch so VS Code clearly replaces the previous install.
-- **Dev vs installed:** F5 EDH keeps using the project tree; normal windows use the installed copy. No need to uninstall while debugging.
-- Env overrides: `SKIP_CODE_CLI=1` (skip `code --install-extension`), `SKIP_SERVER=1` (skip vscode-server mirror).
-
-Manual alternative:
-
-```bash
-npm run vsix
-code --install-extension ./artifacts/git-workflow-0.0.1.vsix --force
-# Reload window
-```
 
 ## Settings
 
@@ -79,17 +121,20 @@ Picking a bare local name like `staging` upgrades to `origin/staging` when that 
 
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
-## Sidebar layout (single TreeView)
+## Sidebar layout
+
+**Worktree** panel:
 
 ```
-▼ <selected-branch> · N worktrees
-  branch rows (PR / lock icons)   ← click to focus
-⚠ PR #N has merge conflicts       ← GitHub conflicts only
-▼ Ahead · N commits → base[@sha]
-▼ Staged / Changes                ← hidden if empty
+▼ <selected-branch>                 description: · N worktrees
+  branch rows (PR / pushed / local)  ← click to focus
+⚠ PR #N has merge conflicts          ← GitHub conflicts only
+▼ Commits · N                        description: → base [@sha]
+▼ Staged / Unstaged                  ← hidden if empty; commit via context menu
 ▼ Full Diff · N new · M modified · …
-▼ Remote PRs · N open             ← no local worktree yet; expand = RO review
 ```
+
+**Remote PRs** panel (separate): open PRs without a local worktree; expand for read-only files; context menu to create a worktree.
 
 Selection is persisted per workspace. Compare defaults to merge-base of the integration tip (not “must rebase” when main moves).
 

@@ -81,14 +81,20 @@ if (!existsSync(vsixPath)) {
 }
 log(`VSIX: ${vsixPath}`);
 
-// 3) Install via Code CLI when available
-const codeBin = which('code');
-if (!process.env.SKIP_CODE_CLI && codeBin) {
-  run(`"${codeBin}" --install-extension "${vsixPath}" --force`);
-} else if (!codeBin) {
-  log('code CLI not found — skipping CLI install (will still mirror folders)');
+// 3) Install via Code / Cursor CLI when available
+const editorBin =
+  process.env.VSCODE_CLI ||
+  which('code') ||
+  which('cursor') ||
+  which('code-insiders');
+if (!process.env.SKIP_CODE_CLI && editorBin) {
+  run(`"${editorBin}" --install-extension "${vsixPath}" --force`);
+} else if (!editorBin) {
+  log(
+    'No code/cursor CLI found — skipping CLI install (will still mirror folders)',
+  );
 } else {
-  log('SKIP_CODE_CLI set — skipping code --install-extension');
+  log('SKIP_CODE_CLI set — skipping editor --install-extension');
 }
 
 // Source tree after CLI install (preferred) or unpack from VSIX zip

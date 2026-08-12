@@ -4,6 +4,11 @@
   "description": "Discover git worktrees and compare each Working Tree against its base ref — GitLens-style, editable diffs.",
   "version": "0.0.1",
   "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabeklein/git-workflow.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
