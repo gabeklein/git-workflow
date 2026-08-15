@@ -12,7 +12,7 @@ import {
   formatRemotePrDescription,
   type RemotePullRequest,
 } from '../github/remotePrs';
-import { worktreeResourceUri } from './worktreeDecorations';
+import { worktreeFileUri, worktreeResourceUri } from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
@@ -323,10 +323,10 @@ export class FolderItem extends vscode.TreeItem {
     readonly folderPath: string,
   ) {
     const name = path.posix.basename(folderPath);
-    super(name, vscode.TreeItemCollapsibleState.Expanded);
+    super(name, vscode.TreeItemCollapsibleState.Collapsed);
     this.contextValue = 'squashFolder';
     this.iconPath = vscode.ThemeIcon.Folder;
-    this.resourceUri = vscode.Uri.file(
+    this.resourceUri = worktreeFileUri(
       path.join(worktreePath, ...folderPath.split('/')),
     );
     this.tooltip = folderPath;
@@ -368,8 +368,8 @@ export class FileItem extends vscode.TreeItem {
               ? 'unstagedFile'
               : 'workingFile';
 
-    // File-type icon from product/file icon theme
-    this.resourceUri = vscode.Uri.file(
+    // Icon theme keys off the path; fake scheme avoids git/GitLens repo-open
+    this.resourceUri = worktreeFileUri(
       path.join(worktreePath, ...file.path.split('/')),
     );
     this.iconPath = vscode.ThemeIcon.File;

@@ -280,7 +280,7 @@ export async function discoverWorktrees(
   return found;
 }
 
-/** Absolute directories that should be watched for create/delete of worktrees. */
+/** Absolute directories scanned for linked-worktree children. */
 export function resolveWatchRoots(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
@@ -295,4 +295,26 @@ export function resolveWatchRoots(): string[] {
     }
   }
   return roots;
+}
+
+/** Sorted child-dir lists of each watch root — cheap, no git. */
+export async function watchRootsFingerprint(): Promise<string> {
+  const parts: string[] = [];
+  for (const root of resolveWatchRoots()) {
+    const children = await listDirectChildDirs(root);
+    parts.push(`${path.normalize(root)}\0${children.sort().join('\0')}`);
+  }
+  return parts.join('\n');
+}
+
+/** True when `fsPath` is a direct child of a configured watch root. */
+export function isDirectChildOfWatchRoot(fsPath: string): boolean {
+  const resolved = path.resolve(fsPath);
+  const parent = path.dirname(resolved);
+  for (const root of resolveWatchRoots()) {
+    if (parent === path.resolve(root)) {
+      return true;
+    }
+  }
+  return false;
 }

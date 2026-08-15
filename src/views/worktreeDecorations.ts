@@ -3,11 +3,26 @@ import * as vscode from 'vscode';
 /** Custom scheme so FileDecoration can tint / badge worktree rows. */
 export const WORKTREE_URI_SCHEME = 'git-workflow-wt';
 
+/**
+ * File/folder rows in the tree. Same path as the checkout so the icon theme
+ * still keys off the extension, but not `file:` — git / GitLens must not
+ * open a repository (and a recursive watcher) for every listed path.
+ */
+export const WORKTREE_FILE_URI_SCHEME = 'git-workflow-file';
+
 export function worktreeResourceUri(fsPath: string): vscode.Uri {
   // Normalize to a stable path form for Uri equality
   const asFile = vscode.Uri.file(fsPath);
   return vscode.Uri.from({
     scheme: WORKTREE_URI_SCHEME,
+    path: asFile.path,
+  });
+}
+
+export function worktreeFileUri(fsPath: string): vscode.Uri {
+  const asFile = vscode.Uri.file(fsPath);
+  return vscode.Uri.from({
+    scheme: WORKTREE_FILE_URI_SCHEME,
     path: asFile.path,
   });
 }

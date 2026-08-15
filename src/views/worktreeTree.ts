@@ -2,7 +2,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   discoverWorktrees,
-  resolveWatchRoots,
+  isDirectChildOfWatchRoot,
+  watchRootsFingerprint,
   type DiscoveredWorktree,
 } from '../discovery/scanner';
 import {
@@ -40,6 +41,8 @@ export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
+/** readdir of watch-root children only — not a host FileSystemWatcher. */
+const WATCH_ROOT_POLL_MS = 4000;
 
 interface WorktreeSnapshot {
   compare: CompareResult;
@@ -52,7 +55,8 @@ interface WorktreeSnapshot {
  *   ▼ Ahead / file sections for the selected worktree
  *
  * Hot-follow (safe): poll selected worktree only + VS Code file events
- * under that path. No recursive glob FileSystemWatchers.
+ * under that path. Watch-root membership is a cheap readdir poll — do not
+ * createFileSystemWatcher on `.claude/worktrees` (the host watches recursively).
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -69,9 +73,10 @@ export class WorktreeTreeProvider
   private worktrees: DiscoveredWorktree[] = [];
   private loading = false;
   private readonly disposables: vscode.Disposable[] = [];
-  private folderWatchers: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
+  private watchRootTimer: NodeJS.Timeout | undefined;
+  private watchRootFingerprint: string | undefined;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
   /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
@@ -98,12 +103,14 @@ export class WorktreeTreeProvider
     this.disposables.push(
       this.selectionDecorations,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        this.rewatchFolders();
+        this.restartWatchRootPoll();
         this.refresh();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('worktreeCompare')) {
-          this.rewatchFolders();
+          if (e.affectsConfiguration('worktreeCompare.watchFolders')) {
+            this.restartWatchRootPoll();
+          }
           this.restartPoll();
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
@@ -132,22 +139,26 @@ export class WorktreeTreeProvider
       }),
       vscode.workspace.onDidCreateFiles((e) => {
         for (const u of e.files) {
+          this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
         }
       }),
       vscode.workspace.onDidDeleteFiles((e) => {
         for (const u of e.files) {
+          this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
         }
       }),
       vscode.workspace.onDidRenameFiles((e) => {
         for (const f of e.files) {
+          this.scheduleDiscoverIfWatchRootChild(f.newUri);
+          this.scheduleDiscoverIfWatchRootChild(f.oldUri);
           this.scheduleSoftRefreshIfUnderSelected(f.newUri);
           this.scheduleSoftRefreshIfUnderSelected(f.oldUri);
         }
       }),
     );
-    this.rewatchFolders();
+    this.restartWatchRootPoll();
     this.restartPoll();
     void this.refresh();
   }
@@ -558,30 +569,57 @@ export class WorktreeTreeProvider
     this.selectionDecorations.setSelectedPath(this.selectedPath);
   }
 
-  private rewatchFolders(): void {
-    for (const w of this.folderWatchers) {
-      w.dispose();
+  /**
+   * New/removed linked worktrees: VS Code file events when the editor did
+   * the create/delete, plus a readdir poll for `git worktree add` outside VS Code.
+   */
+  private scheduleDiscoverIfWatchRootChild(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file') {
+      return;
     }
-    this.folderWatchers = [];
+    if (!isDirectChildOfWatchRoot(uri.fsPath)) {
+      return;
+    }
+    this.refresh();
+  }
 
-    for (const root of resolveWatchRoots()) {
-      const pattern = new vscode.RelativePattern(root, '*');
-      try {
-        const watcher = vscode.workspace.createFileSystemWatcher(
-          pattern,
-          false,
-          true,
-          false,
-        );
-        this.folderWatchers.push(
-          watcher,
-          watcher.onDidCreate(() => this.refresh()),
-          watcher.onDidDelete(() => this.refresh()),
-        );
-        this.output.appendLine(`Watching (create/delete only): ${root}`);
-      } catch {
-        this.output.appendLine(`Watch root not ready: ${root}`);
+  private restartWatchRootPoll(): void {
+    if (this.watchRootTimer) {
+      clearTimeout(this.watchRootTimer);
+      this.watchRootTimer = undefined;
+    }
+    this.watchRootFingerprint = undefined;
+    this.output.appendLine(
+      `Watch-root poll: ${WATCH_ROOT_POLL_MS}ms (readdir of children only)`,
+    );
+    this.scheduleWatchRootPoll();
+  }
+
+  private scheduleWatchRootPoll(): void {
+    if (this.watchRootTimer) {
+      clearTimeout(this.watchRootTimer);
+    }
+    this.watchRootTimer = setTimeout(() => {
+      this.watchRootTimer = undefined;
+      void this.tickWatchRoots();
+    }, WATCH_ROOT_POLL_MS);
+  }
+
+  private async tickWatchRoots(): Promise<void> {
+    try {
+      const next = await watchRootsFingerprint();
+      if (this.watchRootFingerprint === undefined) {
+        this.watchRootFingerprint = next;
+      } else if (next !== this.watchRootFingerprint) {
+        this.watchRootFingerprint = next;
+        this.output.appendLine('Watch-root children changed — rediscover');
+        this.refresh();
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Watch-root poll failed: ${message}`);
+    } finally {
+      this.scheduleWatchRootPoll();
     }
   }
 
@@ -776,7 +814,7 @@ export class WorktreeTreeProvider
               'squash',
               worktreePath,
               compare.baseRef,
-              vscode.TreeItemCollapsibleState.Expanded,
+              vscode.TreeItemCollapsibleState.Collapsed,
               formatFileChangeBreakdown(compare.fullPrFiles),
             ),
           );
@@ -938,8 +976,9 @@ export class WorktreeTreeProvider
     if (this.contentDebounce) {
       clearTimeout(this.contentDebounce);
     }
-    for (const w of this.folderWatchers) {
-      w.dispose();
+    if (this.watchRootTimer) {
+      clearTimeout(this.watchRootTimer);
+      this.watchRootTimer = undefined;
     }
     for (const d of this.disposables) {
       d.dispose();

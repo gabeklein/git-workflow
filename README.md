@@ -96,7 +96,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees |
+| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees (readdir poll of children; no host FileSystemWatcher) |
 | `worktreeCompare.includeRootCheckout` | `dirty` | `dirty` / `always` / `never` — root checkout in the list (hide when clean by default) |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.squashLayout` | `list` | Full Diff files: `list` or `tree` |
@@ -131,7 +131,7 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 ⚠ PR #N has merge conflicts          ← GitHub conflicts only
 ▼ Commits · N                        description: → base [@sha]
 ▼ Staged / Unstaged                  ← hidden if empty; commit via context menu
-▼ Full Diff · N new · M modified · …
+▶ Full Diff · N new · M modified · …  ← collapsed until opened
 ```
 
 **Remote PRs** panel (separate): open PRs without a local worktree; expand for read-only files; context menu to create a worktree.
