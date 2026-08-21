@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import {
   discoverWorktrees,
   isDirectChildOfWatchRoot,
-  watchRootsFingerprint,
+  worktreeListFingerprint,
   type DiscoveredWorktree,
 } from '../discovery/scanner';
 import {
@@ -590,7 +590,7 @@ export class WorktreeTreeProvider
     }
     this.watchRootFingerprint = undefined;
     this.output.appendLine(
-      `Watch-root poll: ${WATCH_ROOT_POLL_MS}ms (readdir of children only)`,
+      `Worktree-list poll: ${WATCH_ROOT_POLL_MS}ms (git worktree list)`,
     );
     this.scheduleWatchRootPoll();
   }
@@ -607,17 +607,17 @@ export class WorktreeTreeProvider
 
   private async tickWatchRoots(): Promise<void> {
     try {
-      const next = await watchRootsFingerprint();
+      const next = await worktreeListFingerprint();
       if (this.watchRootFingerprint === undefined) {
         this.watchRootFingerprint = next;
       } else if (next !== this.watchRootFingerprint) {
         this.watchRootFingerprint = next;
-        this.output.appendLine('Watch-root children changed — rediscover');
+        this.output.appendLine('Worktree list changed — rediscover');
         this.refresh();
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Watch-root poll failed: ${message}`);
+      this.output.appendLine(`Worktree-list poll failed: ${message}`);
     } finally {
       this.scheduleWatchRootPoll();
     }
@@ -709,12 +709,12 @@ export class WorktreeTreeProvider
         new MessageItem('Scanning worktrees…', undefined, 'loading~spin'),
       );
     } else if (this.worktrees.length === 0) {
-      const folders =
-        vscode.workspace
-          .getConfiguration('worktreeCompare')
-          .get<string[]>('watchFolders', ['.claude/worktrees'])
-          .join(', ') || '.claude/worktrees';
-      nodes.push(new MessageItem('No worktrees found', `Watched: ${folders}`));
+      nodes.push(
+        new MessageItem(
+          'No worktrees found',
+          'No worktrees registered with this repo (git worktree list)',
+        ),
+      );
     } else {
       const selected = this.getSelected();
       const n = this.worktrees.length;

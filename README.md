@@ -25,7 +25,7 @@ npm run install:local
 
 Then in VS Code / Cursor: **Developer: Reload Window** (or reconnect the SSH remote).
 
-You should see **Git Workflow** in the activity bar. Open a repo that has linked worktrees (default scan: `.claude/worktrees`).
+You should see **Git Workflow** in the activity bar. Open a repo that has linked worktrees — they are discovered via `git worktree list`, wherever they live on disk.
 
 ### Agent checklist
 
@@ -96,7 +96,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Folders to scan for linked worktrees (readdir poll of children; no host FileSystemWatcher) |
+| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Where new worktrees (PR checkouts) are created; discovery uses `git worktree list` |
 | `worktreeCompare.includeRootCheckout` | `dirty` | `dirty` / `always` / `never` — root checkout in the list (hide when clean by default) |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.squashLayout` | `list` | Full Diff files: `list` or `tree` |

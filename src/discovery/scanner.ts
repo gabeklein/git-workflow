@@ -2,13 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from '../git/exec';
-import { listWorktreeAdmin } from '../git/worktreeAdmin';
-import { inspectWorktree, type WorktreeInfo } from '../git/worktree';
+import { listWorktreeAdmin, type WorktreeAdminState } from '../git/worktreeAdmin';
+import type { WorktreeInfo } from '../git/worktree';
 
 export interface DiscoveredWorktree extends WorktreeInfo {
-  /** Workspace folder this worktree was found under (if any) */
+  /** Workspace folder this worktree belongs to (repo opened in it) */
   workspaceFolder?: vscode.WorkspaceFolder;
-  /** Relative path from workspace folder, when applicable */
+  /** Relative path from workspace folder, when the worktree is inside it */
   relativePath?: string;
   /** True when this is the workspace root checkout (not under watchFolders). */
   isRootCheckout?: boolean;
@@ -89,134 +89,143 @@ async function probePublishState(
   return 'local';
 }
 
-async function listDirectChildDirs(dir: string): Promise<string[]> {
-  try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-      .map((e) => path.join(dir, e.name));
-  } catch {
-    return [];
+/**
+ * All worktrees registered with the repo(s) opened in the workspace,
+ * from `git worktree list --porcelain` — regardless of where they live
+ * on disk. Repos are deduped when multiple workspace folders share one.
+ */
+async function listRegisteredWorktrees(
+  output?: { appendLine(value: string): void },
+): Promise<
+  Array<{ admin: WorktreeAdminState; workspaceFolder: vscode.WorkspaceFolder }>
+> {
+  const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+  const seenRepos = new Set<string>();
+  const entries: Array<{
+    admin: WorktreeAdminState;
+    workspaceFolder: vscode.WorkspaceFolder;
+  }> = [];
+
+  for (const folder of workspaceFolders) {
+    const rootPath = path.normalize(folder.uri.fsPath);
+    let admin: Map<string, WorktreeAdminState>;
+    try {
+      admin = await listWorktreeAdmin(rootPath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      output?.appendLine(`Not a git repo, skipped: ${rootPath} (${message})`);
+      continue;
+    }
+    // Dedup repos: the main worktree path identifies the repo
+    const mainPath =
+      [...admin.values()].find((s) => s.isMain)?.path ?? rootPath;
+    if (seenRepos.has(mainPath)) {
+      continue;
+    }
+    seenRepos.add(mainPath);
+    for (const state of admin.values()) {
+      entries.push({ admin: state, workspaceFolder: folder });
+    }
   }
+  return entries;
 }
 
 /**
- * Scan workspace roots + configured watch folders for git worktrees.
- * Inspects children with limited concurrency (avoids serial git storms).
+ * Discover worktrees via `git worktree list` from each workspace folder's
+ * repo. Every registered worktree is listed no matter where it lives on
+ * disk; the workspace-root / main checkout is gated by includeRootCheckout.
  */
 export async function discoverWorktrees(
   output?: { appendLine(value: string): void },
 ): Promise<DiscoveredWorktree[]> {
   const t0 = Date.now();
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-  const watchFolders = getWatchFolders();
   const rootMode = getRootCheckoutMode();
   const found: DiscoveredWorktree[] = [];
-  const seen = new Set<string>();
 
   if (workspaceFolders.length === 0) {
-    output?.appendLine('No workspace folder open — nothing to scan');
+    output?.appendLine('No workspace folder open — nothing to list');
     return found;
   }
 
-  // 1) Workspace root checkouts (main repo) — optional via setting
-  if (rootMode !== 'never') {
-    for (const folder of workspaceFolders) {
-      const rootPath = path.normalize(folder.uri.fsPath);
-      if (seen.has(rootPath)) {
-        continue;
-      }
-      try {
-        const info = await inspectWorktree(rootPath);
-        if (!info) {
-          continue;
-        }
-        const dirty = await probeDirty(rootPath);
-        if (rootMode === 'dirty' && !dirty) {
-          output?.appendLine(
-            `Root checkout clean, omitted (includeRootCheckout=dirty): ${rootPath}`,
-          );
-          continue;
-        }
-        seen.add(rootPath);
-        const publishState = await probePublishState(
-          rootPath,
-          info.branch,
-          info.detached,
-        );
-        found.push({
-          ...info,
-          // Prefer stable label for root vs folder basename alone
-          name: info.name,
-          workspaceFolder: folder,
-          relativePath: '.',
-          isRootCheckout: true,
-          isDirty: dirty,
-          publishState,
-        });
-        output?.appendLine(
-          `Root checkout: ${info.branch} @ ${rootPath}${dirty ? ' (dirty)' : ''}`,
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        output?.appendLine(`Root checkout skip ${rootPath}: ${message}`);
-      }
-    }
-  }
+  const workspaceRoots = new Set(
+    workspaceFolders.map((f) => path.normalize(f.uri.fsPath)),
+  );
 
-  // 2) Linked / agent worktrees under watch folders
-  type Job = { absPath: string; workspaceFolder: vscode.WorkspaceFolder };
-  const jobs: Job[] = [];
-
-  for (const folder of workspaceFolders) {
-    for (const watch of watchFolders) {
-      const watchAbs = path.isAbsolute(watch)
-        ? watch
-        : path.join(folder.uri.fsPath, watch);
-      output?.appendLine(`Scanning ${watchAbs}`);
-      const children = await listDirectChildDirs(watchAbs);
-      for (const child of children) {
-        jobs.push({ absPath: child, workspaceFolder: folder });
-      }
-    }
-  }
-
-  output?.appendLine(`Discovery: ${jobs.length} linked-worktree candidate(s)`);
+  const entries = await listRegisteredWorktrees(output);
+  output?.appendLine(
+    `Discovery: ${entries.length} registered worktree(s) from git worktree list`,
+  );
 
   const concurrency = 6;
   let next = 0;
 
   async function worker(): Promise<void> {
-    while (next < jobs.length) {
+    while (next < entries.length) {
       const i = next++;
-      const job = jobs[i]!;
-      const normalized = path.normalize(job.absPath);
-      if (seen.has(normalized)) {
+      const { admin, workspaceFolder } = entries[i]!;
+      const normalized = path.normalize(admin.path);
+      if (admin.bare) {
+        continue;
+      }
+      if (admin.prunable) {
+        output?.appendLine(`Skipping prunable worktree: ${normalized}`);
         continue;
       }
       try {
-        const info = await inspectWorktree(normalized);
-        if (!info) {
-          continue;
+        await fs.access(normalized);
+      } catch {
+        output?.appendLine(`Skipping missing worktree dir: ${normalized}`);
+        continue;
+      }
+
+      const isRootCheckout = workspaceRoots.has(normalized);
+      const branch = admin.detached
+        ? (admin.head ?? 'unknown').slice(0, 7) || 'unknown'
+        : (admin.branch ?? 'unknown');
+
+      try {
+        let dirty: boolean | undefined;
+        // Root / main checkouts are gated by includeRootCheckout
+        if (isRootCheckout || admin.isMain) {
+          if (rootMode === 'never') {
+            continue;
+          }
+          dirty = await probeDirty(normalized);
+          if (rootMode === 'dirty' && !dirty) {
+            output?.appendLine(
+              `Root checkout clean, omitted (includeRootCheckout=dirty): ${normalized}`,
+            );
+            continue;
+          }
         }
-        seen.add(normalized);
-        const relativePath = path.relative(
-          job.workspaceFolder.uri.fsPath,
-          normalized,
-        );
         const publishState = await probePublishState(
           normalized,
-          info.branch,
-          info.detached,
+          branch,
+          admin.detached,
+        );
+        const relativePath = path.relative(
+          workspaceFolder.uri.fsPath,
+          normalized,
         );
         found.push({
-          ...info,
-          workspaceFolder: job.workspaceFolder,
+          path: normalized,
+          name: path.basename(normalized),
+          branch,
+          detached: admin.detached,
+          workspaceFolder,
           relativePath:
-            relativePath && !relativePath.startsWith('..')
-              ? relativePath
-              : undefined,
-          isRootCheckout: false,
+            relativePath === ''
+              ? '.'
+              : !relativePath.startsWith('..') &&
+                  !path.isAbsolute(relativePath)
+                ? relativePath
+                : undefined,
+          isRootCheckout,
+          isDirty: dirty,
+          isMainWorktree: admin.isMain,
+          locked: admin.locked,
+          lockReason: admin.lockReason,
           publishState,
         });
       } catch (err) {
@@ -227,44 +236,11 @@ export async function discoverWorktrees(
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, Math.max(jobs.length, 1)) }, () =>
-      worker(),
+    Array.from(
+      { length: Math.min(concurrency, Math.max(entries.length, 1)) },
+      () => worker(),
     ),
   );
-
-  // Enrich with lock / main flags from a single porcelain list
-  if (found.length > 0) {
-    try {
-      const admin = await listWorktreeAdmin(found[0]!.path);
-      for (const wt of found) {
-        const key = path.normalize(wt.path);
-        let state = admin.get(key);
-        if (!state) {
-          for (const s of admin.values()) {
-            if (path.normalize(s.path) === key) {
-              state = s;
-              break;
-            }
-          }
-        }
-        if (state) {
-          wt.isMainWorktree = state.isMain;
-          wt.locked = state.locked;
-          wt.lockReason = state.lockReason;
-        } else if (wt.isRootCheckout) {
-          wt.isMainWorktree = true;
-        }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      output?.appendLine(`worktree list --porcelain failed: ${message}`);
-      for (const wt of found) {
-        if (wt.isRootCheckout) {
-          wt.isMainWorktree = true;
-        }
-      }
-    }
-  }
 
   // Root first, then linked worktrees by branch
   found.sort((a, b) => {
@@ -280,7 +256,8 @@ export async function discoverWorktrees(
   return found;
 }
 
-/** Absolute directories scanned for linked-worktree children. */
+/** Absolute watch-folder dirs — still used as the default creation location
+ *  for new (PR) worktrees and as an event fast-path hint. */
 export function resolveWatchRoots(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
@@ -297,14 +274,20 @@ export function resolveWatchRoots(): string[] {
   return roots;
 }
 
-/** Sorted child-dir lists of each watch root — cheap, no git. */
-export async function watchRootsFingerprint(): Promise<string> {
-  const parts: string[] = [];
-  for (const root of resolveWatchRoots()) {
-    const children = await listDirectChildDirs(root);
-    parts.push(`${path.normalize(root)}\0${children.sort().join('\0')}`);
-  }
-  return parts.join('\n');
+/**
+ * Membership fingerprint: paths + branches from `git worktree list`.
+ * One git call per repo — cheap enough for the poll interval, and it sees
+ * worktrees added or removed anywhere on disk.
+ */
+export async function worktreeListFingerprint(): Promise<string> {
+  const entries = await listRegisteredWorktrees();
+  return entries
+    .map(
+      ({ admin }) =>
+        `${path.normalize(admin.path)}\0${admin.branch ?? admin.head ?? ''}`,
+    )
+    .sort()
+    .join('\n');
 }
 
 /** True when `fsPath` is a direct child of a configured watch root. */

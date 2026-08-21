@@ -41,7 +41,7 @@
           "default": [
             ".claude/worktrees"
           ],
-          "description": "Workspace-relative folders to scan for git worktrees. Each direct child directory that is a git worktree is listed. Membership is polled (readdir of children only), not registered with the host file watcher."
+          "description": "Workspace-relative folders where new worktrees (e.g. PR checkouts) are created. Discovery itself uses `git worktree list`, so worktrees are found no matter where they live on disk."
         },
         "worktreeCompare.defaultBaseRef": {
           "type": "string",

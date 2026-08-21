@@ -1,5 +1,3 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { git, gitOk } from './exec';
 
 export interface WorktreeInfo {
@@ -25,53 +23,6 @@ const INTEGRATION_NAMES = [
   'trunk',
   'release',
 ];
-
-export async function isGitWorktree(dir: string): Promise<boolean> {
-  return gitOk(dir, ['rev-parse', '--is-inside-work-tree']);
-}
-
-/**
- * Lightweight inspect for discovery (few git calls).
- * Skips mainWorktreePath — not needed for the picker list.
- */
-export async function inspectWorktree(dir: string): Promise<WorktreeInfo | undefined> {
-  // Cheap filesystem probe before spawning git
-  try {
-    const gitPath = path.join(dir, '.git');
-    await fs.access(gitPath);
-  } catch {
-    return undefined;
-  }
-
-  if (!(await isGitWorktree(dir))) {
-    return undefined;
-  }
-
-  const name = path.basename(dir);
-  let branch = 'HEAD';
-  let detached = false;
-
-  try {
-    const symbolic = (await git(dir, ['symbolic-ref', '-q', '--short', 'HEAD'])).trim();
-    if (symbolic) {
-      branch = symbolic;
-    }
-  } catch {
-    detached = true;
-    try {
-      branch = (await git(dir, ['rev-parse', '--short', 'HEAD'])).trim();
-    } catch {
-      branch = 'unknown';
-    }
-  }
-
-  return {
-    path: dir,
-    name,
-    branch,
-    detached,
-  };
-}
 
 async function refResolves(worktreePath: string, ref: string): Promise<boolean> {
   if (!ref) {
