@@ -113,9 +113,9 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 Integration lives in its own **Integration** panel below the Worktree view. Its description shows mode status (`off`, `→ main`, or an error state); when off, the panel offers an **Enable Integration Mode** button. Enabling asks you to pick:
 
 - **Use this checkout** (default) — the workspace root switches to the integration branch (default `integration/{base}`, e.g. `integration/main`) and becomes the integration surface; disabling switches it back to the branch it was on.
+- **Create a separate worktree…** — a dedicated checkout holds the combined lanes.
 
 Disabling also **deletes the integration branch** — it is derived state, and the lane lists survive in `focus-applied`/`focus-candidates`, so re-enabling restores the same setup. Changing the base renames the branch to match (`integration/main` → `integration/staging`).
-- **Create a separate worktree…** — a dedicated checkout holds the combined lanes.
 
 The integration checkout is rebuilt as **base + a merge of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean. Only **landed commits** are merged — a dirty feature worktree never leaks into the integration tree.
 
