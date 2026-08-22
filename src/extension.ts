@@ -11,7 +11,11 @@ import { pickBaseRef } from './compare/pickBaseRef';
 import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { commitStaged, commitUnstagedPaths } from './git/commit';
-import type { RebuildResult } from './git/integration';
+import {
+  createIntegrationWorktree,
+  integrationBranch,
+  type RebuildResult,
+} from './git/integration';
 import { getWorkingStatus } from './git/status';
 import { stagePaths, unstagePaths } from './git/stage';
 import type { SectionItem } from './views/nodes';
@@ -69,6 +73,31 @@ export function activate(context: vscode.ExtensionContext): void {
     showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
+
+  // Lane checkboxes: checked = branch applied to the integration tree
+  context.subscriptions.push(
+    treeView.onDidChangeCheckboxState(async (e) => {
+      for (const [item, state] of e.items) {
+        if (item.kind !== 'worktreeList') {
+          continue;
+        }
+        const wt = treeProvider.getWorktree(item.worktreePath);
+        if (!wt) {
+          continue;
+        }
+        const result =
+          state === vscode.TreeItemCheckboxState.Checked
+            ? await treeProvider.applyToIntegration(wt.branch)
+            : await treeProvider.hideFromIntegration(wt.branch);
+        reportIntegrationResult(
+          result,
+          state === vscode.TreeItemCheckboxState.Checked
+            ? `applied ${wt.branch}`
+            : `hid ${wt.branch}`,
+        );
+      }
+    }),
+  );
 
   const remotePrsView = vscode.window.createTreeView(
     'worktreeCompare.remotePrs',
@@ -521,6 +550,102 @@ export function activate(context: vscode.ExtensionContext): void {
             `Git Workflow: could not unstage — ${message}`,
           );
         }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.enableIntegration',
+      async () => {
+        if (treeProvider.getIntegration()) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: integration mode is already on',
+          );
+          return;
+        }
+        const repoCwd = treeProvider.getRepoCwd();
+        if (!repoCwd) {
+          void vscode.window.showErrorMessage(
+            'Git Workflow: no git repository found in this workspace',
+          );
+          return;
+        }
+        const branch = integrationBranch();
+        const workspaceRoot =
+          vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
+        const watch =
+          vscode.workspace
+            .getConfiguration('worktreeCompare')
+            .get<string[]>('watchFolders', ['.claude/worktrees'])[0] ||
+          '.claude/worktrees';
+        const suggested = path.join(
+          path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
+          'working',
+        );
+        const dest = await vscode.window.showInputBox({
+          prompt: `Enable integration mode: create a worktree on ${branch}`,
+          value: suggested,
+          ignoreFocusOut: true,
+          validateInput: (v) =>
+            v.trim() ? undefined : 'Destination path is required',
+        });
+        if (!dest?.trim()) {
+          return;
+        }
+        try {
+          const baseRef = vscode.workspace
+            .getConfiguration('worktreeCompare')
+            .get<string>('defaultBaseRef', 'main');
+          await createIntegrationWorktree(repoCwd, dest.trim(), baseRef);
+          log.appendLine(`Integration worktree created at ${dest.trim()}`);
+          treeProvider.refresh();
+          void vscode.window.showInformationMessage(
+            `Git Workflow: integration mode on — check worktrees to apply them (${branch} at ${dest.trim()})`,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Enable integration failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not enable integration — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.disableIntegration',
+      async () => {
+        const integration = treeProvider.getIntegration();
+        if (!integration) {
+          return;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+          [
+            'Disable integration mode?',
+            '',
+            `This removes the ${integration.branch} worktree at:`,
+            integration.path,
+            '',
+            'The branch and the applied-lanes list are kept — enabling again restores the same lanes.',
+          ].join('\n'),
+          { modal: true },
+          'Disable',
+        );
+        if (confirm !== 'Disable') {
+          return;
+        }
+        // Integration tree contents are always derived — force is safe here
+        const result = await removeWorktree(integration.path, { force: true });
+        if (!result.ok) {
+          log.appendLine(`Disable integration failed: ${result.message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not disable integration — ${result.message}`,
+          );
+          return;
+        }
+        log.appendLine(`Integration worktree removed: ${integration.path}`);
+        treeProvider.refresh();
+        void vscode.window.setStatusBarMessage(
+          'Git Workflow: integration mode off',
+          3000,
+        );
       },
     ),
     vscode.commands.registerCommand(
