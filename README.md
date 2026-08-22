@@ -140,6 +140,8 @@ When you expand a worktree, the compare base is resolved in order:
 
 Picking a bare local name like `staging` upgrades to `origin/staging` when that remote-tracking ref exists (local integration branches are often stale).
 
+While integration mode is active, step 6's configured default is the **integration base** — lanes land there, so when inference has nothing better, Commits/Full Diff compare against the same base the integration tree is built from.
+
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout

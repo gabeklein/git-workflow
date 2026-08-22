@@ -136,6 +136,8 @@ export class IntegrationStatusItem extends vscode.TreeItem {
           worktreePath: string;
           baseRef: string;
           lanes: string[];
+          /** Bumped per activation — fresh id ⇒ renders expanded */
+          activation: number;
           error?: string;
           conflict?: boolean;
         },
@@ -146,6 +148,11 @@ export class IntegrationStatusItem extends vscode.TreeItem {
         ? vscode.TreeItemCollapsibleState.Expanded
         : vscode.TreeItemCollapsibleState.None,
     );
+    // VS Code persists collapse state per item id; a per-activation id
+    // guarantees the row opens expanded each time integration turns on.
+    if (state.on) {
+      this.id = `worktreeCompare.integration:${state.activation}`;
+    }
     if (!state.on) {
       this.contextValue = 'integrationStatusOff';
       this.description = 'off';
