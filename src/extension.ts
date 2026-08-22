@@ -13,6 +13,7 @@ import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { commitStaged, commitUnstagedPaths } from './git/commit';
 import {
   createIntegrationWorktree,
+  deleteIntegrationBranch,
   integrationBaseRef,
   integrationBranch,
   switchAwayFromIntegration,
@@ -677,7 +678,7 @@ export function activate(context: vscode.ExtensionContext): void {
               ? `This switches ${integration.path} off ${integration.branch} (back to your previous branch), discarding derived state.`
               : `This removes the ${integration.branch} worktree at:\n${integration.path}`,
             '',
-            'The branch and the lane list are kept — enabling again restores the same lanes.',
+            `The ${integration.branch} branch is deleted (it is derived state). The lane list is kept — enabling again restores the same lanes.`,
           ].join('\n'),
           { modal: true },
           'Disable',
@@ -711,6 +712,17 @@ export function activate(context: vscode.ExtensionContext): void {
             log.appendLine(
               `Integration worktree removed: ${integration.path}`,
             );
+          }
+          // Branch is derived state — delete so nothing straggles.
+          // (Best-effort; cwd must be a surviving checkout.)
+          const repoCwd = treeProvider.getRepoCwd();
+          const cwd = onMainCheckout
+            ? integration.path
+            : repoCwd !== integration.path
+              ? repoCwd
+              : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+          if (cwd && (await deleteIntegrationBranch(cwd))) {
+            log.appendLine(`Integration branch deleted: ${integration.branch}`);
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

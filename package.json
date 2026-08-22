@@ -95,8 +95,8 @@
         },
         "worktreeCompare.integrationBranch": {
           "type": "string",
-          "default": "focus/working",
-          "description": "Branch name of the integration overlay. Checking this branch out in a worktree opts in: that checkout is rebuilt as defaultBaseRef plus a --no-ff merge of each applied lane. Compatible with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
+          "default": "integration/{base}",
+          "description": "Branch name of the integration overlay; {base} expands to the short base name (integration/main). Checking this branch out opts in: that checkout is rebuilt as the base plus a merge of each applied lane. Set to focus/working for interop with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
         },
         "worktreeCompare.integrationBaseRef": {
           "type": "string",
