@@ -8,6 +8,8 @@ export class GitError extends Error {
     message: string,
     readonly stderr: string,
     readonly code: number | null,
+    /** stdout emitted before failure (merge-tree prints conflicts here) */
+    readonly stdout: string = '',
   ) {
     super(message);
     this.name = 'GitError';
@@ -33,6 +35,7 @@ export async function git(
   } catch (err: unknown) {
     const e = err as {
       stderr?: Buffer | string;
+      stdout?: Buffer | string;
       code?: number;
       message?: string;
     };
@@ -41,6 +44,7 @@ export async function git(
       e.message ?? `git ${args.join(' ')} failed`,
       stderr,
       e.code ?? null,
+      e.stdout?.toString() ?? '',
     );
   }
 }

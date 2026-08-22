@@ -5,17 +5,25 @@ import { git, GitError, gitOk } from './exec';
 
 /**
  * Integration-worktree overlay (interop with agent-focus's
- * scripts/focus-working.sh): a worktree checked out on the integration
- * branch is never worked in directly — it is rebuilt as <base> plus a
- * --no-ff merge of each "applied" lane (feature branch).
+ * scripts/focus-working.sh): a checkout on the integration branch is never
+ * worked in directly — it is rebuilt as <base> plus a merge of each
+ * "applied" lane (feature branch). Lanes merge landed commits only; dirty
+ * feature worktrees never affect the integration tree.
+ *
+ * The merge chain is computed OFF-TREE (`git merge-tree --write-tree` +
+ * `commit-tree`), then applied with a single `reset --hard`, so:
+ *   - a conflicting lane never leaves the checkout mid-merge, and
+ *   - a running dev server sees one burst of only the files that changed.
  *
  * Shared on-disk protocol (same files the shell script / post-commit
  * hook use, so both can coexist):
- *   <git-common-dir>/focus-applied       one lane per line, # comments
+ *   <git-common-dir>/focus-applied       applied lanes, one per line
+ *   <git-common-dir>/focus-candidates    lanes offered in the UI (superset)
  *   <git-common-dir>/focus-working.lock  mkdir lock around rebuilds
  */
 
 const APPLIED_FILE = 'focus-applied';
+const CANDIDATES_FILE = 'focus-candidates';
 const LOCK_DIR = 'focus-working.lock';
 
 export function integrationBranch(): string {
@@ -52,11 +60,11 @@ async function commonDir(cwd: string): Promise<string> {
   return path.resolve(cwd, out);
 }
 
-export async function listAppliedLanes(cwd: string): Promise<string[]> {
-  const file = path.join(await commonDir(cwd), APPLIED_FILE);
+async function readLaneFile(cwd: string, file: string): Promise<string[]> {
+  const abs = path.join(await commonDir(cwd), file);
   let raw: string;
   try {
-    raw = await fs.readFile(file, 'utf8');
+    raw = await fs.readFile(abs, 'utf8');
   } catch {
     return [];
   }
@@ -66,17 +74,25 @@ export async function listAppliedLanes(cwd: string): Promise<string[]> {
     .filter((l) => l && !l.startsWith('#'));
 }
 
-async function saveAppliedLanes(cwd: string, lanes: string[]): Promise<void> {
-  const file = path.join(await commonDir(cwd), APPLIED_FILE);
+async function writeLaneFile(
+  cwd: string,
+  file: string,
+  lanes: string[],
+): Promise<void> {
+  const abs = path.join(await commonDir(cwd), file);
   const unique = [...new Set(lanes.filter(Boolean))].sort();
-  await fs.writeFile(file, unique.length > 0 ? `${unique.join('\n')}\n` : '');
+  await fs.writeFile(abs, unique.length > 0 ? `${unique.join('\n')}\n` : '');
+}
+
+export async function listAppliedLanes(cwd: string): Promise<string[]> {
+  return readLaneFile(cwd, APPLIED_FILE);
 }
 
 export async function addAppliedLane(cwd: string, lane: string): Promise<void> {
   const lanes = await listAppliedLanes(cwd);
   if (!lanes.includes(lane)) {
     lanes.push(lane);
-    await saveAppliedLanes(cwd, lanes);
+    await writeLaneFile(cwd, APPLIED_FILE, lanes);
   }
 }
 
@@ -85,8 +101,37 @@ export async function dropAppliedLane(
   lane: string,
 ): Promise<void> {
   const lanes = await listAppliedLanes(cwd);
-  await saveAppliedLanes(
+  await writeLaneFile(
     cwd,
+    APPLIED_FILE,
+    lanes.filter((l) => l !== lane),
+  );
+}
+
+/** Candidates: lanes shown (checkable) under the Integration row. */
+export async function listCandidateLanes(cwd: string): Promise<string[]> {
+  return readLaneFile(cwd, CANDIDATES_FILE);
+}
+
+export async function addCandidateLane(
+  cwd: string,
+  lane: string,
+): Promise<void> {
+  const lanes = await listCandidateLanes(cwd);
+  if (!lanes.includes(lane)) {
+    lanes.push(lane);
+    await writeLaneFile(cwd, CANDIDATES_FILE, lanes);
+  }
+}
+
+export async function dropCandidateLane(
+  cwd: string,
+  lane: string,
+): Promise<void> {
+  const lanes = await listCandidateLanes(cwd);
+  await writeLaneFile(
+    cwd,
+    CANDIDATES_FILE,
     lanes.filter((l) => l !== lane),
   );
 }
@@ -116,10 +161,61 @@ async function resolveBaseSha(
 }
 
 /**
- * Rebuild the integration worktree: reset --hard to base, then merge each
- * applied lane with --no-ff. Refuses when the tree is dirty or carries
- * commits that belong to no lane; a merge conflict leaves the tree in
- * place (resolve there or Abort Integration Merge).
+ * Merge two commits without touching any working tree.
+ * Returns the merged tree oid, a conflict (with the files), or
+ * 'unsupported' when git predates merge-tree --write-tree (< 2.38).
+ */
+async function mergeOffTree(
+  cwd: string,
+  ours: string,
+  theirs: string,
+): Promise<
+  | { kind: 'tree'; tree: string }
+  | { kind: 'conflict'; files: string[] }
+  | { kind: 'unsupported' }
+> {
+  try {
+    const out = await git(cwd, [
+      'merge-tree',
+      '--write-tree',
+      '--name-only',
+      ours,
+      theirs,
+    ]);
+    return { kind: 'tree', tree: out.trim().split('\n')[0]!.trim() };
+  } catch (err) {
+    if (err instanceof GitError) {
+      // Exit 1 = clean run, conflicts found. Stdout sections are separated
+      // by a blank line: oid, conflicted file names, informational messages.
+      if (err.code === 1 && err.stdout.trim()) {
+        const lines = err.stdout.split('\n').map((l) => l.trim());
+        const files: string[] = [];
+        for (const line of lines.slice(1)) {
+          if (!line) {
+            break;
+          }
+          files.push(line);
+        }
+        return { kind: 'conflict', files };
+      }
+      if (
+        err.stderr.includes('usage:') ||
+        err.stderr.includes('--write-tree') ||
+        err.code === 129
+      ) {
+        return { kind: 'unsupported' };
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Rebuild the integration checkout: compute base + `--no-ff`-style merge
+ * of each applied lane off-tree, then apply the result with one
+ * `reset --hard`. Refuses when the checkout is dirty or carries commits
+ * that belong to no lane. A conflicting lane fails the rebuild WITHOUT
+ * touching the working tree.
  */
 export async function rebuildIntegration(
   workingPath: string,
@@ -138,6 +234,12 @@ export async function rebuildIntegration(
   }
 
   try {
+    // Recover from a mid-merge state left by the shell script / old engine.
+    // The tree is derived, so aborting is always safe.
+    if (await gitOk(workingPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
+      await git(workingPath, ['merge', '--abort']);
+    }
+
     const porcelain = await git(workingPath, [
       'status',
       '--porcelain=v1',
@@ -148,7 +250,7 @@ export async function rebuildIntegration(
       return {
         ok: false,
         code: 'dirty',
-        message: 'integration worktree is dirty; not rebuilding',
+        message: 'integration checkout is dirty; not rebuilding',
       };
     }
 
@@ -163,14 +265,14 @@ export async function rebuildIntegration(
     }
 
     // Unique-commit guard: nothing on HEAD may be outside base + lanes
-    const not = [baseSha, ...lanes];
     const unique = (
       await git(workingPath, [
         'rev-list',
         '--no-merges',
         'HEAD',
         '--not',
-        ...not,
+        baseSha,
+        ...lanes,
       ]).catch(() => '')
     ).trim();
     if (unique) {
@@ -178,45 +280,60 @@ export async function rebuildIntegration(
         ok: false,
         code: 'unique',
         message:
-          'integration worktree has unique commits; move them to a feature branch first',
+          'integration checkout has unique commits; move them to a feature branch first',
       };
     }
 
-    await git(workingPath, ['reset', '--hard', baseSha]);
-
+    // Compute the whole chain off-tree, then apply once
+    let current = baseSha;
     const skipped: string[] = [];
     const merged: string[] = [];
     for (const lane of lanes) {
-      if (
-        !(await gitOk(workingPath, [
-          'rev-parse',
-          '--verify',
-          `refs/heads/${lane}`,
-        ]))
-      ) {
+      let laneSha: string;
+      try {
+        laneSha = (
+          await git(workingPath, [
+            'rev-parse',
+            '--verify',
+            `refs/heads/${lane}^{commit}`,
+          ])
+        ).trim();
+      } catch {
         skipped.push(lane);
         continue;
       }
-      try {
+      const result = await mergeOffTree(workingPath, current, laneSha);
+      if (result.kind === 'unsupported') {
+        return rebuildInWorktree(workingPath, baseSha, lanes);
+      }
+      if (result.kind === 'conflict') {
+        const files = result.files.slice(0, 5).join(', ');
+        return {
+          ok: false,
+          code: 'conflict',
+          lane,
+          message: `lane ${lane} conflicts${files ? `: ${files}` : ''}${
+            result.files.length > 5 ? ', …' : ''
+          } (checkout untouched)`,
+        };
+      }
+      current = (
         await git(workingPath, [
-          'merge',
-          '--no-edit',
-          '--no-ff',
+          'commit-tree',
+          result.tree,
+          '-p',
+          current,
+          '-p',
+          laneSha,
           '-m',
           `${integrationBranch()}: ${lane}`,
-          lane,
-        ]);
-        merged.push(lane);
-      } catch (err) {
-        const message =
-          err instanceof GitError
-            ? err.stderr.trim() || err.message
-            : err instanceof Error
-              ? err.message
-              : String(err);
-        return { ok: false, code: 'conflict', message, lane };
-      }
+        ])
+      ).trim();
+      merged.push(lane);
     }
+
+    // Single working-tree update; git rewrites only files whose content changed
+    await git(workingPath, ['reset', '--hard', current]);
     return { ok: true, lanes: merged, skipped };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -226,9 +343,54 @@ export async function rebuildIntegration(
   }
 }
 
+/** Legacy path for git < 2.38 (no merge-tree --write-tree): merge in-tree. */
+async function rebuildInWorktree(
+  workingPath: string,
+  baseSha: string,
+  lanes: string[],
+): Promise<RebuildResult> {
+  await git(workingPath, ['reset', '--hard', baseSha]);
+  const skipped: string[] = [];
+  const merged: string[] = [];
+  for (const lane of lanes) {
+    if (
+      !(await gitOk(workingPath, [
+        'rev-parse',
+        '--verify',
+        `refs/heads/${lane}`,
+      ]))
+    ) {
+      skipped.push(lane);
+      continue;
+    }
+    try {
+      await git(workingPath, [
+        'merge',
+        '--no-edit',
+        '--no-ff',
+        '-m',
+        `${integrationBranch()}: ${lane}`,
+        lane,
+      ]);
+      merged.push(lane);
+    } catch (err) {
+      // Leave nothing half-merged on this fallback path either
+      await git(workingPath, ['merge', '--abort']).catch(() => {});
+      const message =
+        err instanceof GitError
+          ? err.stderr.trim() || err.message
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      return { ok: false, code: 'conflict', message, lane };
+    }
+  }
+  return { ok: true, lanes: merged, skipped };
+}
+
 /**
- * Enable the overlay: create a worktree on the integration branch.
- * Reuses the branch when it already exists; otherwise branches off base.
+ * Enable the overlay in a separate worktree: create one on the integration
+ * branch. Reuses the branch when it already exists; else branches off base.
  */
 export async function createIntegrationWorktree(
   repoCwd: string,
@@ -247,6 +409,90 @@ export async function createIntegrationWorktree(
   await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
 }
 
+export async function currentBranch(cwd: string): Promise<string | undefined> {
+  try {
+    const out = (
+      await git(cwd, ['symbolic-ref', '-q', '--short', 'HEAD'])
+    ).trim();
+    return out || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Enable the overlay on an existing checkout (usually the workspace root):
+ * switch it to the integration branch. Requires a clean tree — the caller
+ * checks and reports. Returns the branch that was checked out before.
+ */
+export async function switchToIntegrationBranch(
+  checkoutPath: string,
+  baseRef: string,
+): Promise<string | undefined> {
+  const branch = integrationBranch();
+  const previous = await currentBranch(checkoutPath);
+  if (
+    await gitOk(checkoutPath, ['rev-parse', '--verify', `refs/heads/${branch}`])
+  ) {
+    try {
+      await git(checkoutPath, ['switch', branch]);
+    } catch (err) {
+      const stderr = err instanceof GitError ? err.stderr : '';
+      if (stderr.includes('already used by worktree')) {
+        throw new Error(
+          `${branch} is already checked out in another worktree — integration mode is on there`,
+        );
+      }
+      throw err;
+    }
+    return previous;
+  }
+  const baseSha = await resolveBaseSha(checkoutPath, baseRef);
+  if (!baseSha) {
+    throw new Error(`base ref ${baseRef} does not resolve`);
+  }
+  await git(checkoutPath, ['switch', '-c', branch, baseSha]);
+  return previous;
+}
+
+/**
+ * Disable on a checkout that must stay: leave the integration branch.
+ * The tree is derived, so any local state is discarded first.
+ */
+export async function switchAwayFromIntegration(
+  checkoutPath: string,
+  returnBranch: string | undefined,
+  baseRef: string,
+): Promise<string> {
+  if (await gitOk(checkoutPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
+    await git(checkoutPath, ['merge', '--abort']).catch(() => {});
+  }
+  await git(checkoutPath, ['reset', '--hard']);
+  const fallback = baseRef.replace(/^origin\//, '');
+  for (const target of [returnBranch, fallback]) {
+    if (!target || target === integrationBranch()) {
+      continue;
+    }
+    if (
+      await gitOk(checkoutPath, [
+        'rev-parse',
+        '--verify',
+        `refs/heads/${target}`,
+      ])
+    ) {
+      await git(checkoutPath, ['switch', target]);
+      return target;
+    }
+  }
+  // Last resort: detach at base so the checkout leaves the derived branch
+  const baseSha = await resolveBaseSha(checkoutPath, baseRef);
+  if (!baseSha) {
+    throw new Error(`no branch to return to and ${baseRef} does not resolve`);
+  }
+  await git(checkoutPath, ['switch', '--detach', baseSha]);
+  return baseSha.slice(0, 7);
+}
+
 export async function abortIntegrationMerge(
   workingPath: string,
 ): Promise<void> {
@@ -255,7 +501,7 @@ export async function abortIntegrationMerge(
 
 /**
  * Change signal for auto-rebuild: base + applied lane tips. When this
- * moves, the integration tree is stale. The integration worktree's own
+ * moves, the integration tree is stale. The integration checkout's own
  * HEAD is deliberately excluded (the rebuild itself moves it).
  */
 export async function integrationFingerprint(

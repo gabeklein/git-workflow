@@ -19,12 +19,15 @@ import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
   abortIntegrationMerge,
   addAppliedLane,
+  addCandidateLane,
   dropAppliedLane,
+  dropCandidateLane,
   integrationBranch,
   integrationFingerprint,
   isIntegrationAutoRebuildEnabled,
   isLaneBranch,
   listAppliedLanes,
+  listCandidateLanes,
   rebuildIntegration,
   type RebuildResult,
 } from '../git/integration';
@@ -44,6 +47,7 @@ import {
   FileItem,
   FolderItem,
   GroupItem,
+  IntegrationLaneItem,
   type IntegrationRowInfo,
   IntegrationStatusItem,
   MessageItem,
@@ -124,6 +128,8 @@ export class WorktreeTreeProvider
   /** Integration overlay (focus/working) state, refreshed on load/tick. */
   private integrationPath: string | undefined;
   private integrationLanes: string[] = [];
+  /** Union of the candidates file and applied lanes — rows under Integration. */
+  private integrationCandidates: string[] = [];
   private integrationError:
     | { code: string; message: string; lane?: string }
     | undefined;
@@ -763,6 +769,7 @@ export class WorktreeTreeProvider
       }
       this.integrationPath = undefined;
       this.integrationLanes = [];
+      this.integrationCandidates = [];
       this.integrationError = undefined;
       this.integrationFp = undefined;
       return;
@@ -777,10 +784,16 @@ export class WorktreeTreeProvider
     this.integrationPath = wt.path;
     try {
       this.integrationLanes = await listAppliedLanes(wt.path);
+      const candidates = await listCandidateLanes(wt.path);
+      // Applied lanes (e.g. from the shell script) always show as candidates
+      this.integrationCandidates = [
+        ...new Set([...candidates, ...this.integrationLanes]),
+      ].sort();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Read applied lanes failed: ${message}`);
+      this.output.appendLine(`Read lanes failed: ${message}`);
       this.integrationLanes = [];
+      this.integrationCandidates = [];
     }
   }
 
@@ -796,10 +809,8 @@ export class WorktreeTreeProvider
       this.integrationFp = undefined;
       return;
     }
-    // Never auto-touch a tree left mid-merge; user resolves or aborts first
-    if (this.integrationError?.code === 'conflict') {
-      return;
-    }
+    // Conflicts no longer dirty the checkout (off-tree merge), so keep
+    // retrying — a new commit on the conflicting lane may resolve it.
     let fp: string;
     try {
       fp = await integrationFingerprint(
@@ -873,6 +884,33 @@ export class WorktreeTreeProvider
     }
   }
 
+  /** Offer a branch under the Integration row (unchecked; no rebuild). */
+  async addIntegrationCandidate(branch: string): Promise<void> {
+    if (!this.integrationPath) {
+      return;
+    }
+    if (!isLaneBranch(branch, this.defaultBaseRef())) {
+      throw new Error(`${branch} cannot be an integration lane`);
+    }
+    await addCandidateLane(this.integrationPath, branch);
+    await this.refreshIntegrationState();
+    this._onDidChangeTreeData.fire();
+  }
+
+  /** Drop a branch from the Integration row; rebuild if it was applied. */
+  async removeIntegrationCandidate(branch: string): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    await dropCandidateLane(this.integrationPath, branch);
+    if (this.integrationLanes.includes(branch)) {
+      return this.hideFromIntegration(branch);
+    }
+    await this.refreshIntegrationState();
+    this._onDidChangeTreeData.fire();
+    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [] };
+  }
+
   /** Add this worktree's branch as a lane and rebuild. */
   async applyToIntegration(branch: string): Promise<RebuildResult> {
     if (!this.integrationPath) {
@@ -885,6 +923,8 @@ export class WorktreeTreeProvider
         message: `will not apply ${branch} as a lane`,
       };
     }
+    // Persist candidacy too, so unchecking later keeps the row visible
+    await addCandidateLane(this.integrationPath, branch);
     await addAppliedLane(this.integrationPath, branch);
     return this.runIntegrationRebuild(`apply ${branch}`);
   }
@@ -967,6 +1007,8 @@ export class WorktreeTreeProvider
         return await this.getRootChildren();
       }
       switch (element.kind) {
+        case 'integrationStatus':
+          return this.getIntegrationLaneChildren();
         case 'group':
           if (element.group === 'worktrees') {
             return this.getWorktreeListChildren();
@@ -1012,6 +1054,7 @@ export class WorktreeTreeProvider
                 on: true,
                 worktreePath: this.integrationPath,
                 lanes: this.integrationLanes,
+                candidates: this.integrationCandidates,
                 error: this.integrationError
                   ? this.integrationError.lane
                     ? `${this.integrationError.message} (${this.integrationError.lane})`
@@ -1132,6 +1175,35 @@ export class WorktreeTreeProvider
     return nodes;
   }
 
+  /** Candidate lanes under the Integration row (checked = applied). */
+  private getIntegrationLaneChildren(): TreeNode[] {
+    if (!this.integrationPath) {
+      return [];
+    }
+    if (this.integrationCandidates.length === 0) {
+      return [
+        new MessageItem(
+          'No lanes yet',
+          'Right-click a worktree → Add to Integration',
+        ),
+      ];
+    }
+    const branchToPath = new Map(
+      this.worktrees
+        .filter((w) => !w.detached)
+        .map((w) => [w.branch, w.path] as const),
+    );
+    return this.integrationCandidates.map(
+      (branch) =>
+        new IntegrationLaneItem(branch, this.integrationLanes.includes(branch), {
+          conflicted:
+            this.integrationError?.code === 'conflict' &&
+            this.integrationError.lane === branch,
+          worktreePath: branchToPath.get(branch),
+        }),
+    );
+  }
+
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
     const baseRef = this.defaultBaseRef();
@@ -1155,6 +1227,7 @@ export class WorktreeTreeProvider
           integration = {
             role: 'lane',
             applied: this.integrationLanes.includes(wt.branch),
+            candidate: this.integrationCandidates.includes(wt.branch),
           };
         }
       }

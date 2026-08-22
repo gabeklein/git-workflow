@@ -110,19 +110,18 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 ## Integration worktree (overlay)
 
-The **Integration** row at the top of the panel always shows mode status. Off → click it (or **Enable Integration Mode…**) to create a worktree on the integration branch (default `focus/working`); the equivalent manual opt-in is:
+The **Integration** row at the top of the panel always shows mode status. Off → click it (or **Enable Integration Mode…**) and pick:
 
-```bash
-git worktree add ../working -b focus/working main
-```
+- **Use this checkout** (default) — the workspace root switches to the integration branch (default `focus/working`) and becomes the integration surface; disabling switches it back to the branch it was on.
+- **Create a separate worktree…** — a dedicated checkout holds the combined lanes.
 
-That checkout is never worked in directly. It is rebuilt as **base + `merge --no-ff` of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean.
+The integration checkout is rebuilt as **base + a merge of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean. Only **landed commits** are merged — a dirty feature worktree never leaks into the integration tree.
 
-- When on, lane-eligible worktree rows get a **checkbox**: checked = branch is merged into the integration tree. Toggle to apply/hide (context-menu **Apply to Integration** / **Hide from Integration** do the same). The Integration row lists the applied lanes and surfaces rebuild errors.
-- **Disable Integration Mode…** (context menu on the Integration row) removes the integration worktree; the branch and lane list are kept, so re-enabling restores the same lanes.
-- With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds the tree automatically — no git hooks needed. Change detection is event-driven: Node `fs.watch` on each repo's `.git` (`refs/`, `logs/`, `worktrees/`, `packed-refs` — never `objects/`, and not the VS Code host watcher), with a slow 30s poll as fallback for filesystems that drop events; if watch setup fails entirely, the poll runs at 4s.
-- Guard rails: a rebuild refuses when the integration tree is dirty or carries commits that belong to no lane. A conflicting lane leaves the tree mid-merge with a warning on the row — resolve it there or run **Abort Integration Merge**.
-- Lanes live in `<git-common-dir>/focus-applied` and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
+- Make a worktree a candidate via its context menu → **Add to Integration**. Candidates appear as rows **under** the Integration item, each with a **checkbox**: checked = its branch is merged in. **Remove from Integration** drops the row.
+- The merge chain is computed **off-tree** (`git merge-tree --write-tree` + `commit-tree`, git ≥ 2.38; older git falls back to in-tree merges) and applied with a single `reset --hard`. A conflicting lane fails the rebuild **without touching the checkout** — the lane shows `conflict`, and unchecking it (or landing a fix on it) recovers. Files that didn't change aren't rewritten, so a running dev server sees one small burst, not lane-by-lane churn.
+- With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds automatically — no git hooks needed. Change detection is event-driven: Node `fs.watch` on each repo's `.git` (`refs/`, `logs/`, `worktrees/`, `packed-refs` — never `objects/`, and not the VS Code host watcher), with a slow 30s poll as fallback for filesystems that drop events; if watch setup fails entirely, the poll runs at 4s.
+- Guard rails: a rebuild refuses when the integration checkout itself is dirty or carries commits that belong to no lane.
+- Applied lanes live in `<git-common-dir>/focus-applied` (candidates in `focus-candidates`) and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
 
 ## Base ref inference
 
