@@ -36,7 +36,7 @@
             "type": "string"
           },
           "default": [
-            ".claude/worktrees"
+            ".worktrees"
           ],
           "description": "Workspace-relative folders where new worktrees (e.g. PR checkouts) are created. Discovery itself uses `git worktree list`, so worktrees are found no matter where they live on disk."
         },

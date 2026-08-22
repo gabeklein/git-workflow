@@ -1,6 +1,6 @@
 # Git Workflow
 
-VS Code / Cursor extension that auto-discovers git worktrees (e.g. under `.claude/worktrees`) and surfaces a GitLens-style **Working Tree ↔ base ref** comparison with **editable** working-tree diffs.
+VS Code / Cursor extension that auto-discovers git worktrees (e.g. under `.worktrees`) and surfaces a GitLens-style **Working Tree ↔ base ref** comparison with **editable** working-tree diffs.
 
 **Repo:** https://github.com/gabeklein/git-workflow  
 **Extension id:** `local.git-workflow`  
@@ -96,7 +96,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `worktreeCompare.watchFolders` | `[".claude/worktrees"]` | Where new worktrees (PR checkouts) are created; discovery uses `git worktree list` |
+| `worktreeCompare.watchFolders` | `[".worktrees"]` | Where new worktrees (PR checkouts) are created; discovery uses `git worktree list` |
 | `worktreeCompare.includeRootCheckout` | `dirty` | `dirty` / `always` / `never` — root checkout in the list (hide when clean by default) |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.squashLayout` | `list` | Full Diff files: `list` or `tree` |
