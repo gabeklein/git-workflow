@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from '../git/exec';
+import { integrationBranch } from '../git/integration';
 import { listWorktreeAdmin, type WorktreeAdminState } from '../git/worktreeAdmin';
 import type { WorktreeInfo } from '../git/worktree';
 
@@ -186,8 +187,11 @@ export async function discoverWorktrees(
 
       try {
         let dirty: boolean | undefined;
-        // Root / main checkouts are gated by includeRootCheckout
-        if (isRootCheckout || admin.isMain) {
+        // Root / main checkouts are gated by includeRootCheckout — except on
+        // the integration branch (integration mode must stay visible)
+        const isIntegration =
+          !admin.detached && branch === integrationBranch();
+        if ((isRootCheckout || admin.isMain) && !isIntegration) {
           if (rootMode === 'never') {
             continue;
           }

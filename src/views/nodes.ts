@@ -19,6 +19,7 @@ export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 export type TreeNode =
   | GroupItem
   | IntegrationStatusItem
+  | IntegrationLaneItem
   | WorktreeListItem
   | ConflictWarningItem
   | CommitItem
@@ -134,11 +135,17 @@ export class IntegrationStatusItem extends vscode.TreeItem {
           on: true;
           worktreePath: string;
           lanes: string[];
+          candidates: string[];
           error?: string;
           conflict?: boolean;
         },
   ) {
-    super('Integration', vscode.TreeItemCollapsibleState.None);
+    super(
+      'Integration',
+      state.on
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.None,
+    );
     if (!state.on) {
       this.contextValue = 'integrationStatusOff';
       this.description = 'off';
@@ -164,11 +171,11 @@ export class IntegrationStatusItem extends vscode.TreeItem {
       ? 'integrationStatusOnConflict'
       : 'integrationStatusOn';
     this.description = state.conflict
-      ? 'merge conflict'
+      ? 'lane conflict'
       : failed
         ? 'rebuild failed'
-        : state.lanes.length > 0
-          ? `${state.lanes.length} lane${state.lanes.length === 1 ? '' : 's'} · ${state.lanes.join(', ')}`
+        : state.candidates.length > 0
+          ? `${state.lanes.length} of ${state.candidates.length} applied`
           : 'on · no lanes';
     this.iconPath = new vscode.ThemeIcon(
       failed ? 'warning' : 'combine',
@@ -180,11 +187,11 @@ export class IntegrationStatusItem extends vscode.TreeItem {
       `Integration mode: on (${branch})`,
       `Checkout: ${state.worktreePath}`,
       state.lanes.length > 0
-        ? `Lanes: ${state.lanes.join(', ')}`
-        : 'No lanes applied — check a worktree below to include it.',
+        ? `Applied: ${state.lanes.join(', ')}`
+        : 'No lanes applied — check a lane below to merge it in.',
       state.error ? `Last rebuild: ${state.error}` : undefined,
       state.conflict
-        ? 'Resolve in the integration checkout or run Abort Integration Merge.'
+        ? 'The checkout was left untouched — uncheck a conflicting lane or land a fix on it.'
         : undefined,
       'Click to focus the integration worktree.',
     ]
@@ -198,6 +205,72 @@ export class IntegrationStatusItem extends vscode.TreeItem {
   }
 }
 
+/**
+ * One candidate lane under the Integration row. Checked = the branch is
+ * merged into the integration tree; unchecked = candidate only.
+ */
+export class IntegrationLaneItem extends vscode.TreeItem {
+  readonly kind = 'integrationLane' as const;
+
+  constructor(
+    readonly branch: string,
+    readonly applied: boolean,
+    opts?: {
+      /** This lane failed the last rebuild (merge conflict) */
+      conflicted?: boolean;
+      /** Worktree checkout of this branch, for click-to-focus */
+      worktreePath?: string;
+      /** Lane branch no longer exists */
+      missing?: boolean;
+    },
+  ) {
+    super(branch, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = applied ? 'integrationLaneApplied' : 'integrationLane';
+    this.checkboxState = {
+      state: applied
+        ? vscode.TreeItemCheckboxState.Checked
+        : vscode.TreeItemCheckboxState.Unchecked,
+      tooltip: applied
+        ? `${branch} is merged into the integration tree — uncheck to remove`
+        : `Merge ${branch} into the integration tree`,
+    };
+    if (opts?.conflicted) {
+      this.description = 'conflict';
+      this.iconPath = new vscode.ThemeIcon(
+        'warning',
+        new vscode.ThemeColor('list.errorForeground'),
+      );
+    } else if (opts?.missing) {
+      this.description = 'branch missing';
+      this.iconPath = new vscode.ThemeIcon(
+        'question',
+        new vscode.ThemeColor('disabledForeground'),
+      );
+    } else {
+      this.iconPath = new vscode.ThemeIcon('git-branch');
+    }
+    this.tooltip = [
+      branch,
+      applied
+        ? 'Applied — merged into the integration tree (landed commits only).'
+        : 'Candidate — check to merge its landed commits in.',
+      opts?.conflicted
+        ? 'This lane conflicted on the last rebuild; the checkout was left untouched.'
+        : undefined,
+      opts?.missing ? 'The branch no longer exists.' : undefined,
+    ]
+      .filter((x): x is string => Boolean(x))
+      .join('\n');
+    if (opts?.worktreePath) {
+      this.command = {
+        command: 'worktreeCompare.focusWorktree',
+        title: 'Focus Worktree',
+        arguments: [opts.worktreePath],
+      };
+    }
+  }
+}
+
 /** How a worktree row relates to the integration overlay (focus/working). */
 export interface IntegrationRowInfo {
   role: 'integration' | 'lane';
@@ -205,10 +278,12 @@ export interface IntegrationRowInfo {
   lanes?: string[];
   /** integration role: last rebuild failure to surface */
   error?: string;
-  /** integration role: a lane merge conflicted; tree left mid-merge */
+  /** integration role: a lane merge conflicted */
   conflict?: boolean;
   /** lane role: branch is in the applied set */
   applied?: boolean;
+  /** lane role: branch is offered under the Integration row */
+  candidate?: boolean;
 }
 
 /** One row in the Worktrees group — click focuses the sections below. */
@@ -251,16 +326,8 @@ export class WorktreeListItem extends vscode.TreeItem {
         flags.push('IntegrationConflict');
       }
     } else if (integration?.role === 'lane') {
-      flags.push(integration.applied ? 'LaneApplied' : 'LaneAppliable');
-      // See-and-toggle: checked = branch is merged into the integration tree
-      this.checkboxState = {
-        state: integration.applied
-          ? vscode.TreeItemCheckboxState.Checked
-          : vscode.TreeItemCheckboxState.Unchecked,
-        tooltip: integration.applied
-          ? `${worktree.branch} is applied to the integration tree — uncheck to hide`
-          : `Apply ${worktree.branch} to the integration tree`,
-      };
+      // Candidates are managed under the Integration row; here only add/remove
+      flags.push(integration.candidate ? 'LaneCandidate' : 'LaneAddable');
     }
     const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
     this.contextValue =

@@ -284,6 +284,16 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.addToIntegration",
+        "title": "Add to Integration",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.removeFromIntegration",
+        "title": "Remove from Integration",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.disableIntegration",
         "title": "Disable Integration Mode…",
         "category": "Git Workflow"
@@ -359,13 +369,18 @@
           "group": "1_worktree@1"
         },
         {
-          "command": "worktreeCompare.applyToIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneAppliable/",
+          "command": "worktreeCompare.addToIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneAddable/",
           "group": "2_integration@1"
         },
         {
-          "command": "worktreeCompare.hideFromIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneApplied/",
+          "command": "worktreeCompare.removeFromIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneCandidate/",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.removeFromIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationLane/",
           "group": "2_integration@1"
         },
         {
