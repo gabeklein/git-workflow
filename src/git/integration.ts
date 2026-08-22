@@ -41,6 +41,17 @@ export function isIntegrationAutoRebuildEnabled(): boolean {
     .get<boolean>('integrationAutoRebuild', true);
 }
 
+/**
+ * Base ref for integration rebuilds: integrationBaseRef when set,
+ * else defaultBaseRef. Kept separate so changing the integration base
+ * (header context menu) does not affect compare-base fallbacks.
+ */
+export function integrationBaseRef(): string {
+  const config = vscode.workspace.getConfiguration('worktreeCompare');
+  const dedicated = config.get<string>('integrationBaseRef', '').trim();
+  return dedicated || config.get<string>('defaultBaseRef', 'main');
+}
+
 export type AutoResolveMode = 'off' | 'whitespace' | 'lane-wins';
 
 /**
