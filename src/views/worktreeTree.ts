@@ -45,6 +45,7 @@ import {
   FolderItem,
   GroupItem,
   type IntegrationRowInfo,
+  IntegrationStatusItem,
   MessageItem,
   SectionItem,
   type TreeNode,
@@ -1002,6 +1003,26 @@ export class WorktreeTreeProvider
         ),
       );
     } else {
+      // Integration mode status — always visible so on/off is never a guess
+      nodes.push(
+        new IntegrationStatusItem(
+          integrationBranch(),
+          this.integrationPath
+            ? {
+                on: true,
+                worktreePath: this.integrationPath,
+                lanes: this.integrationLanes,
+                error: this.integrationError
+                  ? this.integrationError.lane
+                    ? `${this.integrationError.message} (${this.integrationError.lane})`
+                    : this.integrationError.message
+                  : undefined,
+                conflict: this.integrationError?.code === 'conflict',
+              }
+            : { on: false },
+        ),
+      );
+
       const selected = this.getSelected();
       const n = this.worktrees.length;
       const worktreesLabel = selected

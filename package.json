@@ -276,6 +276,17 @@
         "command": "worktreeCompare.abortIntegrationMerge",
         "title": "Abort Integration Merge",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.enableIntegration",
+        "title": "Enable Integration Mode…",
+        "icon": "$(combine)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.disableIntegration",
+        "title": "Disable Integration Mode…",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -366,6 +377,26 @@
           "command": "worktreeCompare.abortIntegrationMerge",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /IntegrationConflict/",
           "group": "2_integration@2"
+        },
+        {
+          "command": "worktreeCompare.enableIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem == integrationStatusOff",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.rebuildIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.abortIntegrationMerge",
+          "when": "view == worktreeCompare.worktrees && viewItem == integrationStatusOnConflict",
+          "group": "2_integration@2"
+        },
+        {
+          "command": "worktreeCompare.disableIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
+          "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.deleteWorktree",

@@ -226,6 +226,27 @@ export async function rebuildIntegration(
   }
 }
 
+/**
+ * Enable the overlay: create a worktree on the integration branch.
+ * Reuses the branch when it already exists; otherwise branches off base.
+ */
+export async function createIntegrationWorktree(
+  repoCwd: string,
+  destDir: string,
+  baseRef: string,
+): Promise<void> {
+  const branch = integrationBranch();
+  if (await gitOk(repoCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])) {
+    await git(repoCwd, ['worktree', 'add', destDir, branch]);
+    return;
+  }
+  const baseSha = await resolveBaseSha(repoCwd, baseRef);
+  if (!baseSha) {
+    throw new Error(`base ref ${baseRef} does not resolve`);
+  }
+  await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
+}
+
 export async function abortIntegrationMerge(
   workingPath: string,
 ): Promise<void> {
