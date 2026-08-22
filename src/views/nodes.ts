@@ -118,6 +118,19 @@ export class RemotePrFileItem extends vscode.TreeItem {
   }
 }
 
+/** How a worktree row relates to the integration overlay (focus/working). */
+export interface IntegrationRowInfo {
+  role: 'integration' | 'lane';
+  /** integration role: lanes currently merged in */
+  lanes?: string[];
+  /** integration role: last rebuild failure to surface */
+  error?: string;
+  /** integration role: a lane merge conflicted; tree left mid-merge */
+  conflict?: boolean;
+  /** lane role: branch is in the applied set */
+  applied?: boolean;
+}
+
 /** One row in the Worktrees group — click focuses the sections below. */
 export class WorktreeListItem extends vscode.TreeItem {
   readonly kind = 'worktreeList' as const;
@@ -128,6 +141,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     worktree: DiscoveredWorktree,
     selected: boolean,
     pullRequest?: PullRequestInfo,
+    integration?: IntegrationRowInfo,
   ) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
@@ -151,12 +165,29 @@ export class WorktreeListItem extends vscode.TreeItem {
     if (removable) {
       flags.push('Removable');
     }
+    if (integration?.role === 'integration') {
+      flags.push('Integration');
+      if (integration.conflict) {
+        flags.push('IntegrationConflict');
+      }
+    } else if (integration?.role === 'lane') {
+      flags.push(integration.applied ? 'LaneApplied' : 'LaneAppliable');
+    }
     const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
     this.contextValue =
       flags.length > 0 ? `${baseCtx}${flags.join('')}` : baseCtx;
 
     // Locked takes icon priority so the padlock is visible; else PR / branch
-    if (worktree.locked) {
+    if (integration?.role === 'integration') {
+      this.iconPath = new vscode.ThemeIcon(
+        integration.conflict || integration.error ? 'warning' : 'combine',
+        integration.conflict || integration.error
+          ? new vscode.ThemeColor('list.errorForeground')
+          : selected
+            ? new vscode.ThemeColor('charts.blue')
+            : undefined,
+      );
+    } else if (worktree.locked) {
       this.iconPath = new vscode.ThemeIcon(
         'lock',
         new vscode.ThemeColor('list.warningForeground'),
@@ -177,6 +208,20 @@ export class WorktreeListItem extends vscode.TreeItem {
 
     const bits: string[] = [];
     // Selection is shown via blue decoration tint only (no "selected" label)
+    if (integration?.role === 'integration') {
+      if (integration.conflict) {
+        bits.push('merge conflict');
+      } else if (integration.error) {
+        bits.push('rebuild failed');
+      } else {
+        const lanes = integration.lanes ?? [];
+        bits.push(
+          lanes.length > 0 ? `integration · ${lanes.join(', ')}` : 'integration · no lanes',
+        );
+      }
+    } else if (integration?.role === 'lane' && integration.applied) {
+      bits.push('applied');
+    }
     if (worktree.isRootCheckout) {
       bits.push(worktree.isDirty ? 'root · dirty' : 'root');
     }
@@ -201,6 +246,19 @@ export class WorktreeListItem extends vscode.TreeItem {
         ? worktree.lockReason
           ? `Locked: ${worktree.lockReason}`
           : 'Locked (git worktree lock)'
+        : undefined,
+      integration?.role === 'integration'
+        ? `Integration checkout — rebuilt as base + applied lanes${
+            (integration.lanes?.length ?? 0) > 0
+              ? `: ${integration.lanes!.join(', ')}`
+              : ' (none applied)'
+          }`
+        : undefined,
+      integration?.role === 'integration' && integration.error
+        ? `Last rebuild: ${integration.error}`
+        : undefined,
+      integration?.role === 'lane' && integration.applied
+        ? 'Applied to the integration worktree'
         : undefined,
       selected ? 'Selected' : 'Click to focus',
     ].filter((x): x is string => Boolean(x));

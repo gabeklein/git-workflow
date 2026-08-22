@@ -105,6 +105,23 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
 | `worktreeCompare.githubPullRequests` | `auto` | `auto` / `off` — PR badges, Remote PRs, needs `gh` |
 | `worktreeCompare.remotePrLimit` | `30` | Max open PRs in Remote PRs section |
+| `worktreeCompare.integrationBranch` | `focus/working` | Branch that opts a worktree into the integration overlay |
+| `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
+
+## Integration worktree (overlay)
+
+Opt-in: check out the integration branch (default `focus/working`) in a worktree —
+
+```bash
+git worktree add ../working -b focus/working main
+```
+
+That checkout is never worked in directly. It is rebuilt as **base + `merge --no-ff` of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean.
+
+- **Apply to Integration** on a worktree row adds its branch as a lane and rebuilds; **Hide from Integration** drops it.
+- With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds the tree automatically within the poll tick — no git hooks needed.
+- Guard rails: a rebuild refuses when the integration tree is dirty or carries commits that belong to no lane. A conflicting lane leaves the tree mid-merge with a warning on the row — resolve it there or run **Abort Integration Merge**.
+- Lanes live in `<git-common-dir>/focus-applied` and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
 
 ## Base ref inference
 

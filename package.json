@@ -93,6 +93,16 @@
           ],
           "description": "Optional GitHub integration: PR badges on worktrees, Remote PRs panel, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
         },
+        "worktreeCompare.integrationBranch": {
+          "type": "string",
+          "default": "focus/working",
+          "description": "Branch name of the integration overlay. Checking this branch out in a worktree opts in: that checkout is rebuilt as defaultBaseRef plus a --no-ff merge of each applied lane. Compatible with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
+        },
+        "worktreeCompare.integrationAutoRebuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically rebuild the integration worktree when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Integration command or external hooks."
+        },
         "worktreeCompare.remotePrLimit": {
           "type": "number",
           "default": 30,
@@ -244,6 +254,28 @@
         "title": "Create Worktree from PR…",
         "icon": "$(repo-clone)",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.applyToIntegration",
+        "title": "Apply to Integration",
+        "icon": "$(combine)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.hideFromIntegration",
+        "title": "Hide from Integration",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.rebuildIntegration",
+        "title": "Rebuild Integration Worktree",
+        "icon": "$(sync)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.abortIntegrationMerge",
+        "title": "Abort Integration Merge",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -314,6 +346,26 @@
           "command": "worktreeCompare.unlockWorktree",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /Locked/",
           "group": "1_worktree@1"
+        },
+        {
+          "command": "worktreeCompare.applyToIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneAppliable/",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.hideFromIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneApplied/",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.rebuildIntegration",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /Integration/",
+          "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.abortIntegrationMerge",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /IntegrationConflict/",
+          "group": "2_integration@2"
         },
         {
           "command": "worktreeCompare.deleteWorktree",
