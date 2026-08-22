@@ -23,6 +23,7 @@ import {
   dropAppliedLane,
   dropCandidateLane,
   ensureIntegrationPushBlocked,
+  integrationBaseRef,
   integrationBranch,
   integrationFingerprint,
   isIntegrationAutoRebuildEnabled,
@@ -48,7 +49,6 @@ import {
   FileItem,
   FolderItem,
   GroupItem,
-  IntegrationBaseItem,
   IntegrationLaneItem,
   type IntegrationRowInfo,
   IntegrationStatusItem,
@@ -167,6 +167,13 @@ export class WorktreeTreeProvider
             e.affectsConfiguration('worktreeCompare.integrationBranch')
           ) {
             this.refresh();
+          } else if (
+            e.affectsConfiguration('worktreeCompare.integrationBaseRef')
+          ) {
+            if (this.integrationPath) {
+              void this.runIntegrationRebuild('base changed');
+            }
+            this._onDidChangeTreeData.fire();
           } else if (
             e.affectsConfiguration('worktreeCompare.squashLayout') ||
             e.affectsConfiguration('worktreeCompare.defaultBaseRef')
@@ -827,7 +834,7 @@ export class WorktreeTreeProvider
     try {
       fp = await integrationFingerprint(
         this.integrationPath,
-        this.defaultBaseRef(),
+        integrationBaseRef(),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -859,7 +866,7 @@ export class WorktreeTreeProvider
     try {
       const result = await rebuildIntegration(
         workingPath,
-        this.defaultBaseRef(),
+        integrationBaseRef(),
       );
       if (result.ok) {
         this.integrationError = undefined;
@@ -901,7 +908,7 @@ export class WorktreeTreeProvider
     if (!this.integrationPath) {
       return;
     }
-    if (!isLaneBranch(branch, this.defaultBaseRef())) {
+    if (!isLaneBranch(branch, integrationBaseRef())) {
       throw new Error(`${branch} cannot be an integration lane`);
     }
     await addCandidateLane(this.integrationPath, branch);
@@ -928,7 +935,7 @@ export class WorktreeTreeProvider
     if (!this.integrationPath) {
       return { ok: false, code: 'error', message: 'no integration worktree' };
     }
-    if (!isLaneBranch(branch, this.defaultBaseRef())) {
+    if (!isLaneBranch(branch, integrationBaseRef())) {
       return {
         ok: false,
         code: 'error',
@@ -1065,8 +1072,8 @@ export class WorktreeTreeProvider
             ? {
                 on: true,
                 worktreePath: this.integrationPath,
+                baseRef: integrationBaseRef(),
                 lanes: this.integrationLanes,
-                candidates: this.integrationCandidates,
                 error: this.integrationError
                   ? this.integrationError.lane
                     ? `${this.integrationError.message} (${this.integrationError.lane})`
@@ -1192,7 +1199,7 @@ export class WorktreeTreeProvider
     if (!this.integrationPath) {
       return [];
     }
-    const nodes: TreeNode[] = [new IntegrationBaseItem(this.defaultBaseRef())];
+    const nodes: TreeNode[] = [];
     if (this.integrationCandidates.length === 0) {
       nodes.push(
         new MessageItem(
@@ -1228,7 +1235,7 @@ export class WorktreeTreeProvider
 
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
-    const baseRef = this.defaultBaseRef();
+    const baseRef = integrationBaseRef();
     return this.listedWorktrees().map((wt) => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);

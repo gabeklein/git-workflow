@@ -13,6 +13,7 @@ import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { commitStaged, commitUnstagedPaths } from './git/commit';
 import {
   createIntegrationWorktree,
+  integrationBaseRef,
   integrationBranch,
   switchAwayFromIntegration,
   switchToIntegrationBranch,
@@ -83,17 +84,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
-        if (item.kind === 'integrationBase') {
-          // The base is permanently included — snap the checkbox back
-          if (state === vscode.TreeItemCheckboxState.Unchecked) {
-            void vscode.window.setStatusBarMessage(
-              `Git Workflow: ${item.baseRef} is the base — always included`,
-              3000,
-            );
-            treeProvider.redraw();
-          }
-          continue;
-        }
         if (item.kind !== 'integrationLane') {
           continue;
         }
@@ -581,9 +571,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const branch = integrationBranch();
-        const baseRef = vscode.workspace
-          .getConfiguration('worktreeCompare')
-          .get<string>('defaultBaseRef', 'main');
+        const baseRef = integrationBaseRef();
         const workspaceRoot =
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
 
@@ -699,9 +687,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         try {
           if (onMainCheckout) {
-            const baseRef = vscode.workspace
-              .getConfiguration('worktreeCompare')
-              .get<string>('defaultBaseRef', 'main');
+            const baseRef = integrationBaseRef();
             const returned = await switchAwayFromIntegration(
               integration.path,
               context.workspaceState.get<string>(INTEGRATION_RETURN_KEY),
@@ -739,6 +725,40 @@ export function activate(context: vscode.ExtensionContext): void {
           'Git Workflow: integration mode off',
           3000,
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.changeIntegrationBase',
+      async () => {
+        const integration = treeProvider.getIntegration();
+        if (!integration) {
+          return;
+        }
+        try {
+          const picked = await pickBaseRef(
+            integration.path,
+            integrationBaseRef(),
+          );
+          if (!picked) {
+            return;
+          }
+          // Workspace-scoped: the integration base is a property of this repo
+          await vscode.workspace
+            .getConfiguration('worktreeCompare')
+            .update(
+              'integrationBaseRef',
+              picked,
+              vscode.ConfigurationTarget.Workspace,
+            );
+          log.appendLine(`Integration base → ${picked}`);
+          // The config-change handler triggers the rebuild
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Change integration base failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not change base — ${message}`,
+          );
+        }
       },
     ),
     vscode.commands.registerCommand(

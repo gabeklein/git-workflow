@@ -98,6 +98,11 @@
           "default": "focus/working",
           "description": "Branch name of the integration overlay. Checking this branch out in a worktree opts in: that checkout is rebuilt as defaultBaseRef plus a --no-ff merge of each applied lane. Compatible with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
         },
+        "worktreeCompare.integrationBaseRef": {
+          "type": "string",
+          "default": "",
+          "description": "Base ref integration rebuilds start from (origin/… preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
+        },
         "worktreeCompare.integrationAutoResolve": {
           "type": "string",
           "enum": ["off", "whitespace", "lane-wins"],
@@ -308,6 +313,12 @@
         "command": "worktreeCompare.disableIntegration",
         "title": "Disable Integration Mode…",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.changeIntegrationBase",
+        "title": "Change Integration Base…",
+        "icon": "$(git-compare)",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -403,6 +414,11 @@
           "command": "worktreeCompare.rebuildIntegration",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
           "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.changeIntegrationBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
+          "group": "2_integration@2"
         },
         {
           "command": "worktreeCompare.abortIntegrationMerge",
