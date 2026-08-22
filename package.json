@@ -98,6 +98,17 @@
           "default": "focus/working",
           "description": "Branch name of the integration overlay. Checking this branch out in a worktree opts in: that checkout is rebuilt as defaultBaseRef plus a --no-ff merge of each applied lane. Compatible with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
         },
+        "worktreeCompare.integrationAutoResolve": {
+          "type": "string",
+          "enum": ["off", "whitespace", "lane-wins"],
+          "default": "whitespace",
+          "enumDescriptions": [
+            "Strict: any clash fails the rebuild. Non-overlapping edits to the same file still merge (git default).",
+            "Also resolve clashes where both sides differ only in whitespace — e.g. two lanes applied the same change with different formatting (-X ignore-space-change).",
+            "Resolve every remaining text clash toward the incoming lane (-X theirs) — covers adjacent-line edits; the other side's clashing hunk is dropped."
+          ],
+          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable — but resolved-away edits silently miss from the combined tree."
+        },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
           "default": true,

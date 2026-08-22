@@ -41,6 +41,34 @@ export function isIntegrationAutoRebuildEnabled(): boolean {
     .get<boolean>('integrationAutoRebuild', true);
 }
 
+export type AutoResolveMode = 'off' | 'whitespace' | 'lane-wins';
+
+/**
+ * How far a lane merge may auto-resolve clashes. Non-overlapping hunks in
+ * the same file always merge — git does that by default. This governs the
+ * rest: 'whitespace' resolves formatting-only clashes; 'lane-wins' resolves
+ * every text clash toward the incoming lane (covers adjacent-line edits,
+ * at the cost of possibly dropping the other side's neighboring edit).
+ */
+export function integrationAutoResolve(): AutoResolveMode {
+  const v = vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<string>('integrationAutoResolve', 'whitespace');
+  return v === 'off' || v === 'lane-wins' ? v : 'whitespace';
+}
+
+function autoResolveArgs(): string[] {
+  switch (integrationAutoResolve()) {
+    case 'lane-wins':
+      // theirs implies whitespace clashes resolve too
+      return ['-X', 'theirs', '-X', 'ignore-space-change'];
+    case 'whitespace':
+      return ['-X', 'ignore-space-change'];
+    default:
+      return [];
+  }
+}
+
 /** Branches that must never be applied as a lane. */
 export function isLaneBranch(branch: string, baseRef: string): boolean {
   if (!branch || branch === 'HEAD' || branch === 'unknown') {
@@ -200,6 +228,7 @@ async function mergeOffTree(
       'merge-tree',
       '--write-tree',
       '--name-only',
+      ...autoResolveArgs(),
       ours,
       theirs,
     ]);
@@ -393,6 +422,7 @@ async function rebuildInWorktree(
         'merge',
         '--no-edit',
         '--no-ff',
+        ...autoResolveArgs(),
         '-m',
         `${integrationBranch()}: ${lane}`,
         lane,
