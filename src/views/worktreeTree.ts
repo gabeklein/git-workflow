@@ -83,7 +83,7 @@ interface WorktreeSnapshot {
  *
  * Hot-follow (safe): poll selected worktree only + VS Code file events
  * under that path. Watch-root membership is a cheap readdir poll — do not
- * createFileSystemWatcher on `.claude/worktrees` (the host watches recursively).
+ * createFileSystemWatcher on `.worktrees` (the host watches recursively).
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable

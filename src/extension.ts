@@ -662,8 +662,8 @@ export function activate(context: vscode.ExtensionContext): void {
             const watch =
               vscode.workspace
                 .getConfiguration('worktreeCompare')
-                .get<string[]>('watchFolders', ['.claude/worktrees'])[0] ||
-              '.claude/worktrees';
+                .get<string[]>('watchFolders', ['.worktrees'])[0] ||
+              '.worktrees';
             const suggested = path.join(
               path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
               'working',
@@ -1016,8 +1016,8 @@ export function activate(context: vscode.ExtensionContext): void {
         const watch =
           vscode.workspace
             .getConfiguration('worktreeCompare')
-            .get<string[]>('watchFolders', ['.claude/worktrees'])[0] ||
-          '.claude/worktrees';
+            .get<string[]>('watchFolders', ['.worktrees'])[0] ||
+          '.worktrees';
         const suggested = path.join(
           path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
           sanitizeWorktreeDirName(item.branch),

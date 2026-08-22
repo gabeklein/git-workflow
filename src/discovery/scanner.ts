@@ -31,8 +31,8 @@ export type RootCheckoutMode = 'always' | 'dirty' | 'never';
 
 function getWatchFolders(): string[] {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
-  const folders = config.get<string[]>('watchFolders', ['.claude/worktrees']);
-  return folders.length > 0 ? folders : ['.claude/worktrees'];
+  const folders = config.get<string[]>('watchFolders', ['.worktrees']);
+  return folders.length > 0 ? folders : ['.worktrees'];
 }
 
 function getRootCheckoutMode(): RootCheckoutMode {

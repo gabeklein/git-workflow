@@ -288,8 +288,8 @@ export function defaultPrWorktreePath(
   const watch =
     vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<string[]>('watchFolders', ['.claude/worktrees'])[0] ||
-    '.claude/worktrees';
+      .get<string[]>('watchFolders', ['.worktrees'])[0] ||
+    '.worktrees';
   const folder = path.isAbsolute(watch)
     ? watch
     : path.join(workspaceRoot, watch);
