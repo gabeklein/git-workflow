@@ -3,9 +3,11 @@ import * as vscode from 'vscode';
 import {
   discoverWorktrees,
   isDirectChildOfWatchRoot,
+  resolveRepoCommonDirs,
   worktreeListFingerprint,
   type DiscoveredWorktree,
 } from '../discovery/scanner';
+import { GitDirWatcher } from '../git/gitWatcher';
 import {
   compareWorkingTreeToBase,
   formatFileChangeBreakdown,
@@ -54,8 +56,14 @@ export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
-/** readdir of watch-root children only — not a host FileSystemWatcher. */
-const WATCH_ROOT_POLL_MS = 4000;
+/**
+ * Worktree-list / integration check cadence. Primary signal is the .git
+ * fs.watch (GitDirWatcher); while that is active the poll is only a slow
+ * fallback for filesystems that drop events. Without watchers (watch setup
+ * failed) the poll carries detection alone at the fast interval.
+ */
+const WATCH_ROOT_POLL_FALLBACK_MS = 30000;
+const WATCH_ROOT_POLL_NO_WATCHER_MS = 4000;
 
 interface WorktreeSnapshot {
   compare: CompareResult;
@@ -90,6 +98,11 @@ export class WorktreeTreeProvider
   private pollTimer: NodeJS.Timeout | undefined;
   private watchRootTimer: NodeJS.Timeout | undefined;
   private watchRootFingerprint: string | undefined;
+  /** Node fs.watch on each repo's .git — primary change signal. */
+  private gitWatchers: GitDirWatcher[] = [];
+  private gitWatcherGeneration = 0;
+  private stateCheckInFlight = false;
+  private stateCheckQueued = false;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
   /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
@@ -125,7 +138,7 @@ export class WorktreeTreeProvider
     this.disposables.push(
       this.selectionDecorations,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        this.restartWatchRootPoll();
+        void this.restartGitWatchers();
         this.refresh();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -181,7 +194,7 @@ export class WorktreeTreeProvider
         }
       }),
     );
-    this.restartWatchRootPoll();
+    void this.restartGitWatchers();
     this.restartPoll();
     void this.refresh();
   }
@@ -607,15 +620,62 @@ export class WorktreeTreeProvider
     this.refresh();
   }
 
+  /**
+   * (Re)attach Node fs.watch to each repo's .git (refs/, logs/, worktrees/,
+   * packed-refs). Events run the same state check the poll does — the poll
+   * stays on as a slow fallback for filesystems that drop events.
+   */
+  private async restartGitWatchers(): Promise<void> {
+    const generation = ++this.gitWatcherGeneration;
+    for (const w of this.gitWatchers) {
+      w.dispose();
+    }
+    this.gitWatchers = [];
+    try {
+      const commonDirs = await resolveRepoCommonDirs();
+      if (generation !== this.gitWatcherGeneration) {
+        return;
+      }
+      for (const dir of commonDirs) {
+        const watcher = new GitDirWatcher(
+          dir,
+          () => void this.checkWorktreeState('.git event'),
+          this.output,
+        );
+        if ((await watcher.start()) && generation === this.gitWatcherGeneration) {
+          this.gitWatchers.push(watcher);
+        } else {
+          watcher.dispose();
+        }
+      }
+      this.output.appendLine(
+        this.gitWatchers.length > 0
+          ? `.git watch active on ${this.gitWatchers.length} repo(s); poll fallback ${WATCH_ROOT_POLL_FALLBACK_MS}ms`
+          : `.git watch unavailable — polling every ${WATCH_ROOT_POLL_NO_WATCHER_MS}ms`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`.git watch setup failed: ${message}`);
+    }
+    this.restartWatchRootPoll();
+  }
+
+  private hasActiveGitWatchers(): boolean {
+    return this.gitWatchers.some((w) => w.active);
+  }
+
+  private watchRootPollMs(): number {
+    return this.hasActiveGitWatchers()
+      ? WATCH_ROOT_POLL_FALLBACK_MS
+      : WATCH_ROOT_POLL_NO_WATCHER_MS;
+  }
+
   private restartWatchRootPoll(): void {
     if (this.watchRootTimer) {
       clearTimeout(this.watchRootTimer);
       this.watchRootTimer = undefined;
     }
     this.watchRootFingerprint = undefined;
-    this.output.appendLine(
-      `Worktree-list poll: ${WATCH_ROOT_POLL_MS}ms (git worktree list)`,
-    );
     this.scheduleWatchRootPoll();
   }
 
@@ -626,25 +686,48 @@ export class WorktreeTreeProvider
     this.watchRootTimer = setTimeout(() => {
       this.watchRootTimer = undefined;
       void this.tickWatchRoots();
-    }, WATCH_ROOT_POLL_MS);
+    }, this.watchRootPollMs());
   }
 
   private async tickWatchRoots(): Promise<void> {
+    try {
+      await this.checkWorktreeState('poll');
+    } finally {
+      this.scheduleWatchRootPoll();
+    }
+  }
+
+  /**
+   * Shared state check for .git events and the fallback poll: rediscover
+   * when worktree membership changed, then run the integration tick.
+   */
+  private async checkWorktreeState(reason: string): Promise<void> {
+    if (this.stateCheckInFlight) {
+      // An event landed mid-check: its change may predate this run's reads,
+      // so run once more when the current check finishes.
+      this.stateCheckQueued = true;
+      return;
+    }
+    this.stateCheckInFlight = true;
     try {
       const next = await worktreeListFingerprint();
       if (this.watchRootFingerprint === undefined) {
         this.watchRootFingerprint = next;
       } else if (next !== this.watchRootFingerprint) {
         this.watchRootFingerprint = next;
-        this.output.appendLine('Worktree list changed — rediscover');
+        this.output.appendLine(`Worktree list changed (${reason}) — rediscover`);
         this.refresh();
       }
       await this.tickIntegration();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Worktree-list poll failed: ${message}`);
+      this.output.appendLine(`Worktree state check failed (${reason}): ${message}`);
     } finally {
-      this.scheduleWatchRootPoll();
+      this.stateCheckInFlight = false;
+      if (this.stateCheckQueued) {
+        this.stateCheckQueued = false;
+        void this.checkWorktreeState(`${reason} (queued)`);
+      }
     }
   }
 
@@ -1205,6 +1288,11 @@ export class WorktreeTreeProvider
       clearTimeout(this.watchRootTimer);
       this.watchRootTimer = undefined;
     }
+    this.gitWatcherGeneration++;
+    for (const w of this.gitWatchers) {
+      w.dispose();
+    }
+    this.gitWatchers = [];
     for (const d of this.disposables) {
       d.dispose();
     }

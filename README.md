@@ -119,7 +119,7 @@ git worktree add ../working -b focus/working main
 That checkout is never worked in directly. It is rebuilt as **base + `merge --no-ff` of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean.
 
 - **Apply to Integration** on a worktree row adds its branch as a lane and rebuilds; **Hide from Integration** drops it.
-- With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds the tree automatically within the poll tick — no git hooks needed.
+- With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds the tree automatically — no git hooks needed. Change detection is event-driven: Node `fs.watch` on each repo's `.git` (`refs/`, `logs/`, `worktrees/`, `packed-refs` — never `objects/`, and not the VS Code host watcher), with a slow 30s poll as fallback for filesystems that drop events; if watch setup fails entirely, the poll runs at 4s.
 - Guard rails: a rebuild refuses when the integration tree is dirty or carries commits that belong to no lane. A conflicting lane leaves the tree mid-merge with a warning on the row — resolve it there or run **Abort Integration Merge**.
 - Lanes live in `<git-common-dir>/focus-applied` and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
 
