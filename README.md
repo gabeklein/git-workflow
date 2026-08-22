@@ -96,7 +96,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `worktreeCompare.watchFolders` | `[".worktrees"]` | Where new worktrees (PR checkouts) are created; discovery uses `git worktree list` |
+| `worktreeCompare.watchFolders` | `[".worktrees"]` | Where new worktrees are created (auto-added to `.git/info/exclude`); discovery uses `git worktree list` |
 | `worktreeCompare.includeRootCheckout` | `dirty` | `dirty` / `always` / `never` — root checkout in the list (hide when clean by default) |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.squashLayout` | `list` | Full Diff files: `list` or `tree` |

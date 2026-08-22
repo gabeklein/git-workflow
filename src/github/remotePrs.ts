@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import type { FileChange } from '../git/compare';
+import { ensureExcludedFromStatus } from '../git/exclude';
 import { git, gitOk } from '../git/exec';
 import {
   isGithubPrIntegrationEnabled,
@@ -253,6 +254,8 @@ export async function createWorktreeForPr(
     // ENOENT — free to create
   }
 
+  // Repo-local ignore before creation, so status never flashes dirty
+  await ensureExcludedFromStatus(destDir).catch(() => undefined);
   const headRef = await ensurePrHeadFetched(repoCwd, pr.number);
   const branch = pr.headRefName || `pr-${pr.number}`;
 
