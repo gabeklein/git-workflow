@@ -1073,7 +1073,7 @@ export class WorktreeTreeProvider
       );
 
       const selected = this.getSelected();
-      const n = this.worktrees.length;
+      const n = this.listedWorktrees().length;
       const worktreesLabel = selected
         ? selected.branch + (selected.detached ? ' (detached)' : '')
         : 'Worktrees';
@@ -1210,32 +1210,29 @@ export class WorktreeTreeProvider
     );
   }
 
+  /** Worktrees shown in the list — the integration checkout lives under
+   *  the Integration row instead. */
+  private listedWorktrees(): DiscoveredWorktree[] {
+    return this.worktrees.filter((wt) => wt.path !== this.integrationPath);
+  }
+
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
     const baseRef = this.defaultBaseRef();
-    return this.worktrees.map((wt) => {
+    return this.listedWorktrees().map((wt) => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);
       let integration: IntegrationRowInfo | undefined;
-      if (this.integrationPath) {
-        if (wt.path === this.integrationPath) {
-          integration = {
-            role: 'integration',
-            lanes: this.integrationLanes,
-            error: this.integrationError
-              ? this.integrationError.lane
-                ? `${this.integrationError.message} (${this.integrationError.lane})`
-                : this.integrationError.message
-              : undefined,
-            conflict: this.integrationError?.code === 'conflict',
-          };
-        } else if (!wt.detached && isLaneBranch(wt.branch, baseRef)) {
-          integration = {
-            role: 'lane',
-            applied: this.integrationLanes.includes(wt.branch),
-            candidate: this.integrationCandidates.includes(wt.branch),
-          };
-        }
+      if (
+        this.integrationPath &&
+        !wt.detached &&
+        isLaneBranch(wt.branch, baseRef)
+      ) {
+        integration = {
+          role: 'lane',
+          applied: this.integrationLanes.includes(wt.branch),
+          candidate: this.integrationCandidates.includes(wt.branch),
+        };
       }
       return new WorktreeListItem(
         wt,

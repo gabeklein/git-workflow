@@ -285,7 +285,10 @@ export async function rebuildIntegration(
       };
     }
 
-    // Unique-commit guard: nothing on HEAD may be outside base + lanes
+    // Unique-commit guard: refuse only when HEAD carries non-merge commits
+    // that exist on NO other branch — i.e. work that would truly be lost.
+    // Commits from formerly-applied lanes still live on their branches, so
+    // they must not block the rebuild.
     const unique = (
       await git(workingPath, [
         'rev-list',
@@ -293,7 +296,8 @@ export async function rebuildIntegration(
         'HEAD',
         '--not',
         baseSha,
-        ...lanes,
+        `--exclude=${integrationBranch()}`,
+        '--branches',
       ]).catch(() => '')
     ).trim();
     if (unique) {
@@ -301,7 +305,7 @@ export async function rebuildIntegration(
         ok: false,
         code: 'unique',
         message:
-          'integration checkout has unique commits; move them to a feature branch first',
+          'integration checkout has commits that exist on no other branch; move them to a feature branch first',
       };
     }
 
