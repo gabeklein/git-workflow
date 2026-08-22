@@ -11,6 +11,7 @@ import { pickBaseRef } from './compare/pickBaseRef';
 import { pickWorktree } from './compare/pickWorktree';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { commitStaged, commitUnstagedPaths } from './git/commit';
+import type { RebuildResult } from './git/integration';
 import { getWorkingStatus } from './git/status';
 import { stagePaths, unstagePaths } from './git/stage';
 import type { SectionItem } from './views/nodes';
@@ -522,6 +523,61 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.applyToIntegration',
+      async (item?: { worktreePath?: string }) => {
+        const target = item?.worktreePath ?? treeProvider.getSelectedPath();
+        const wt = target ? treeProvider.getWorktree(target) : undefined;
+        if (!wt) {
+          return;
+        }
+        const result = await treeProvider.applyToIntegration(wt.branch);
+        reportIntegrationResult(result, `applied ${wt.branch}`);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.hideFromIntegration',
+      async (item?: { worktreePath?: string }) => {
+        const target = item?.worktreePath ?? treeProvider.getSelectedPath();
+        const wt = target ? treeProvider.getWorktree(target) : undefined;
+        if (!wt) {
+          return;
+        }
+        const result = await treeProvider.hideFromIntegration(wt.branch);
+        reportIntegrationResult(result, `hid ${wt.branch}`);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.rebuildIntegration',
+      async () => {
+        if (!treeProvider.getIntegration()) {
+          void vscode.window.showInformationMessage(
+            'Git Workflow: no integration worktree — check out the integration branch (default focus/working) in a worktree first',
+          );
+          return;
+        }
+        const result = await treeProvider.runIntegrationRebuild('manual');
+        reportIntegrationResult(result, 'integration rebuilt');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.abortIntegrationMerge',
+      async () => {
+        try {
+          await treeProvider.abortIntegrationMerge();
+          void vscode.window.setStatusBarMessage(
+            'Git Workflow: integration merge aborted',
+            3000,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Abort integration merge failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not abort merge — ${message}`,
+          );
+        }
+      },
+    ),
     vscode.commands.registerCommand('worktreeCompare.openLogFile', async () => {
       const uri = vscode.Uri.file(log.logFile);
       await vscode.window.showTextDocument(uri);
@@ -691,6 +747,37 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ),
+  );
+}
+
+function reportIntegrationResult(
+  result: RebuildResult,
+  successMessage: string,
+): void {
+  if (result.ok) {
+    void vscode.window.setStatusBarMessage(
+      `Git Workflow: ${successMessage} · lanes: ${
+        result.lanes.length > 0 ? result.lanes.join(', ') : '(none)'
+      }`,
+      4000,
+    );
+    return;
+  }
+  if (result.code === 'busy') {
+    void vscode.window.setStatusBarMessage(
+      'Git Workflow: integration rebuild already running',
+      3000,
+    );
+    return;
+  }
+  if (result.code === 'conflict') {
+    void vscode.window.showWarningMessage(
+      `Git Workflow: lane ${result.lane ?? ''} conflicts — resolve in the integration worktree or run Abort Integration Merge. ${result.message}`,
+    );
+    return;
+  }
+  void vscode.window.showErrorMessage(
+    `Git Workflow: integration rebuild failed — ${result.message}`,
   );
 }
 

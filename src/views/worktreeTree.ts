@@ -14,6 +14,18 @@ import {
   type FileChange,
 } from '../git/compare';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
+import {
+  abortIntegrationMerge,
+  addAppliedLane,
+  dropAppliedLane,
+  integrationBranch,
+  integrationFingerprint,
+  isIntegrationAutoRebuildEnabled,
+  isLaneBranch,
+  listAppliedLanes,
+  rebuildIntegration,
+  type RebuildResult,
+} from '../git/integration';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
 import {
   findPullRequestForBranch,
@@ -30,6 +42,7 @@ import {
   FileItem,
   FolderItem,
   GroupItem,
+  type IntegrationRowInfo,
   MessageItem,
   SectionItem,
   type TreeNode,
@@ -94,6 +107,15 @@ export class WorktreeTreeProvider
   private readonly selectionDecorations =
     new WorktreeSelectionDecorationProvider();
 
+  /** Integration overlay (focus/working) state, refreshed on load/tick. */
+  private integrationPath: string | undefined;
+  private integrationLanes: string[] = [];
+  private integrationError:
+    | { code: string; message: string; lane?: string }
+    | undefined;
+  private integrationFp: string | undefined;
+  private integrationRebuildInFlight = false;
+
   constructor(
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
@@ -119,7 +141,8 @@ export class WorktreeTreeProvider
           }
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
-            e.affectsConfiguration('worktreeCompare.includeRootCheckout')
+            e.affectsConfiguration('worktreeCompare.includeRootCheckout') ||
+            e.affectsConfiguration('worktreeCompare.integrationBranch')
           ) {
             this.refresh();
           } else if (
@@ -518,6 +541,7 @@ export class WorktreeTreeProvider
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
       this.prunePrCache();
+      await this.refreshIntegrationState();
       this.output.appendLine(
         `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
       );
@@ -615,12 +639,191 @@ export class WorktreeTreeProvider
         this.output.appendLine('Worktree list changed — rediscover');
         this.refresh();
       }
+      await this.tickIntegration();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Worktree-list poll failed: ${message}`);
     } finally {
       this.scheduleWatchRootPoll();
     }
+  }
+
+  // ---- Integration overlay (focus/working) -------------------------------
+
+  /** Integration worktree row + lanes, if one is checked out. */
+  getIntegration():
+    | {
+        path: string;
+        branch: string;
+        lanes: string[];
+        error?: { code: string; message: string; lane?: string };
+      }
+    | undefined {
+    if (!this.integrationPath) {
+      return undefined;
+    }
+    return {
+      path: this.integrationPath,
+      branch: integrationBranch(),
+      lanes: this.integrationLanes.slice(),
+      error: this.integrationError,
+    };
+  }
+
+  private async refreshIntegrationState(): Promise<void> {
+    const branch = integrationBranch();
+    const wt = this.worktrees.find((w) => !w.detached && w.branch === branch);
+    if (!wt) {
+      if (this.integrationPath) {
+        this.output.appendLine('Integration worktree gone — overlay off');
+      }
+      this.integrationPath = undefined;
+      this.integrationLanes = [];
+      this.integrationError = undefined;
+      this.integrationFp = undefined;
+      return;
+    }
+    if (this.integrationPath !== wt.path) {
+      this.integrationError = undefined;
+      this.integrationFp = undefined;
+      this.output.appendLine(
+        `Integration worktree: ${wt.path} (${branch})`,
+      );
+    }
+    this.integrationPath = wt.path;
+    try {
+      this.integrationLanes = await listAppliedLanes(wt.path);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Read applied lanes failed: ${message}`);
+      this.integrationLanes = [];
+    }
+  }
+
+  /**
+   * Auto-rebuild: rebuild the integration tree when the base or an applied
+   * lane tip moves (commit/amend/rebase anywhere — no git hook needed).
+   */
+  private async tickIntegration(): Promise<void> {
+    if (!this.integrationPath || this.integrationRebuildInFlight) {
+      return;
+    }
+    if (!isIntegrationAutoRebuildEnabled()) {
+      this.integrationFp = undefined;
+      return;
+    }
+    // Never auto-touch a tree left mid-merge; user resolves or aborts first
+    if (this.integrationError?.code === 'conflict') {
+      return;
+    }
+    let fp: string;
+    try {
+      fp = await integrationFingerprint(
+        this.integrationPath,
+        this.defaultBaseRef(),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Integration fingerprint failed: ${message}`);
+      return;
+    }
+    if (this.integrationFp === undefined) {
+      this.integrationFp = fp;
+      return;
+    }
+    if (fp === this.integrationFp) {
+      return;
+    }
+    this.integrationFp = fp;
+    await this.runIntegrationRebuild('lane tips moved');
+  }
+
+  /** Run a rebuild and surface the outcome on the integration row. */
+  async runIntegrationRebuild(reason: string): Promise<RebuildResult> {
+    const workingPath = this.integrationPath;
+    if (!workingPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    if (this.integrationRebuildInFlight) {
+      return { ok: false, code: 'busy', message: 'rebuild already running' };
+    }
+    this.integrationRebuildInFlight = true;
+    const t0 = Date.now();
+    try {
+      const result = await rebuildIntegration(
+        workingPath,
+        this.defaultBaseRef(),
+      );
+      if (result.ok) {
+        this.integrationError = undefined;
+        this.output.appendLine(
+          `Integration rebuilt (${reason}): ${
+            result.lanes.length > 0 ? result.lanes.join(', ') : 'base only'
+          }${
+            result.skipped.length > 0
+              ? ` · skipped missing: ${result.skipped.join(', ')}`
+              : ''
+          } (${Date.now() - t0}ms)`,
+        );
+      } else if (result.code === 'busy') {
+        // Script/hook holds the lock — not an error state for the row
+        this.output.appendLine(`Integration rebuild busy (${reason})`);
+      } else {
+        this.integrationError = {
+          code: result.code,
+          message: result.message,
+          lane: result.lane,
+        };
+        this.output.appendLine(
+          `Integration rebuild failed (${reason}, ${result.code}${
+            result.lane ? `, lane ${result.lane}` : ''
+          }): ${result.message}`,
+        );
+      }
+      await this.refreshIntegrationState();
+      this.refreshCompare(workingPath);
+      this._onDidChangeTreeData.fire();
+      return result;
+    } finally {
+      this.integrationRebuildInFlight = false;
+    }
+  }
+
+  /** Add this worktree's branch as a lane and rebuild. */
+  async applyToIntegration(branch: string): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    if (!isLaneBranch(branch, this.defaultBaseRef())) {
+      return {
+        ok: false,
+        code: 'error',
+        message: `will not apply ${branch} as a lane`,
+      };
+    }
+    await addAppliedLane(this.integrationPath, branch);
+    return this.runIntegrationRebuild(`apply ${branch}`);
+  }
+
+  /** Drop this worktree's branch from the lanes and rebuild. */
+  async hideFromIntegration(branch: string): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    await dropAppliedLane(this.integrationPath, branch);
+    return this.runIntegrationRebuild(`hide ${branch}`);
+  }
+
+  /** Abort a conflicted lane merge, leaving the tree at the last good state. */
+  async abortIntegrationMerge(): Promise<void> {
+    if (!this.integrationPath) {
+      return;
+    }
+    await abortIntegrationMerge(this.integrationPath);
+    this.integrationError = undefined;
+    this.integrationFp = undefined;
+    this.refreshCompare(this.integrationPath);
+    this._onDidChangeTreeData.fire();
   }
 
   private defaultBaseRef(): string {
@@ -827,13 +1030,35 @@ export class WorktreeTreeProvider
 
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
+    const baseRef = this.defaultBaseRef();
     return this.worktrees.map((wt) => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);
+      let integration: IntegrationRowInfo | undefined;
+      if (this.integrationPath) {
+        if (wt.path === this.integrationPath) {
+          integration = {
+            role: 'integration',
+            lanes: this.integrationLanes,
+            error: this.integrationError
+              ? this.integrationError.lane
+                ? `${this.integrationError.message} (${this.integrationError.lane})`
+                : this.integrationError.message
+              : undefined,
+            conflict: this.integrationError?.code === 'conflict',
+          };
+        } else if (!wt.detached && isLaneBranch(wt.branch, baseRef)) {
+          integration = {
+            role: 'lane',
+            applied: this.integrationLanes.includes(wt.branch),
+          };
+        }
+      }
       return new WorktreeListItem(
         wt,
         wt.path === selected,
         pr ?? undefined,
+        integration,
       );
     });
   }
