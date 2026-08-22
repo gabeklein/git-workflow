@@ -144,12 +144,22 @@
           "name": "Worktree"
         },
         {
+          "id": "worktreeCompare.integration",
+          "name": "Integration"
+        },
+        {
           "id": "worktreeCompare.remotePrs",
           "name": "Remote PRs",
           "when": "config.worktreeCompare.githubPullRequests != off"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "worktreeCompare.integration",
+        "contents": "Integration mode is off.\nCombine feature branches onto a base — without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
+      }
+    ],
     "commands": [
       {
         "command": "worktreeCompare.refresh",
@@ -347,6 +357,26 @@
           "command": "worktreeCompare.refreshRemotePrs",
           "when": "view == worktreeCompare.remotePrs",
           "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.rebuildIntegration",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
+          "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.changeIntegrationBase",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
+          "group": "1_config@1"
+        },
+        {
+          "command": "worktreeCompare.abortIntegrationMerge",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
+          "group": "1_config@2"
+        },
+        {
+          "command": "worktreeCompare.disableIntegration",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
+          "group": "9_danger@1"
         }
       ],
       "view/item/context": [
@@ -402,28 +432,8 @@
         },
         {
           "command": "worktreeCompare.removeFromIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationLane/",
+          "when": "view == worktreeCompare.integration && viewItem =~ /^integrationLane/",
           "group": "2_integration@1"
-        },
-        {
-          "command": "worktreeCompare.enableIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem == integrationStatusOff",
-          "group": "2_integration@1"
-        },
-        {
-          "command": "worktreeCompare.rebuildIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
-          "group": "2_integration@1"
-        },
-        {
-          "command": "worktreeCompare.changeIntegrationBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
-          "group": "2_integration@2"
-        },
-        {
-          "command": "worktreeCompare.abortIntegrationMerge",
-          "when": "view == worktreeCompare.worktrees && viewItem == integrationStatusOnConflict",
-          "group": "2_integration@2"
         },
         {
           "command": "worktreeCompare.disableIntegration",

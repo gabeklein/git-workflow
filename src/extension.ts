@@ -34,6 +34,7 @@ import {
   type RemotePullRequest,
 } from './github/remotePrs';
 import { createFileBackedLogger } from './log';
+import { IntegrationTreeProvider } from './views/integrationTree';
 import { RemotePrsTreeProvider } from './views/remotePrsTree';
 import {
   CommitItem,
@@ -81,9 +82,42 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(treeView);
 
-  // Lane checkboxes (under the Integration row): checked = merged in
+  const integrationProvider = new IntegrationTreeProvider(treeProvider);
+  context.subscriptions.push(integrationProvider);
+  const integrationView = vscode.window.createTreeView(
+    'worktreeCompare.integration',
+    { treeDataProvider: integrationProvider },
+  );
+  context.subscriptions.push(integrationView);
+
+  // On/off + base + error status live on the panel description
+  const updateIntegrationView = () => {
+    const integration = treeProvider.getIntegration();
+    integrationView.description = !integration
+      ? 'off'
+      : integration.error?.code === 'conflict'
+        ? 'lane conflict'
+        : integration.error
+          ? 'rebuild failed'
+          : `→ ${integrationBaseRef()}`;
+    integrationView.message = integration?.error
+      ? integration.error.message
+      : undefined;
+    void vscode.commands.executeCommand(
+      'setContext',
+      'worktreeCompare.integrationOn',
+      Boolean(integration),
+    );
+  };
+  updateIntegrationView();
   context.subscriptions.push(
-    treeView.onDidChangeCheckboxState(async (e) => {
+    treeProvider.onDidChangeWorktrees(updateIntegrationView),
+    treeProvider.onDidChangeTreeData(updateIntegrationView),
+  );
+
+  // Lane checkboxes: checked = merged into the integration tree
+  context.subscriptions.push(
+    integrationView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
         if (item.kind !== 'integrationLane') {
           continue;

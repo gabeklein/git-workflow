@@ -110,7 +110,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 
 ## Integration worktree (overlay)
 
-The **Integration** row at the top of the panel always shows mode status. Off → click it (or **Enable Integration Mode…**) and pick:
+Integration lives in its own **Integration** panel below the Worktree view. Its description shows mode status (`off`, `→ main`, or an error state); when off, the panel offers an **Enable Integration Mode** button. Enabling asks you to pick:
 
 - **Use this checkout** (default) — the workspace root switches to the integration branch (default `integration/{base}`, e.g. `integration/main`) and becomes the integration surface; disabling switches it back to the branch it was on.
 
@@ -119,8 +119,8 @@ Disabling also **deletes the integration branch** — it is derived state, and t
 
 The integration checkout is rebuilt as **base + a merge of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean. Only **landed commits** are merged — a dirty feature worktree never leaks into the integration tree.
 
-- Make a worktree a candidate via its context menu → **Add to Integration**. Candidates appear as rows **under** the Integration item, each with a **checkbox**: checked = its branch is merged in. **Remove from Integration** drops the row.
-- The Integration header shows the **base** (`→ main`) every rebuild starts from — current base tip + lanes is exactly what landing those PRs would produce. **Change Integration Base…** on its context menu sets `integrationBaseRef` (workspace-scoped; empty = `defaultBaseRef`) and rebuilds.
+- Make a worktree a candidate via its context menu → **Add to Integration**. Candidates appear as rows in the Integration panel, each with a **checkbox**: checked = its branch is merged in. **Remove from Integration** drops the row.
+- The panel description shows the **base** (`→ main`) every rebuild starts from — current base tip + lanes is exactly what landing those PRs would produce. The panel's title menu has **Rebuild**, **Change Integration Base…** (sets workspace-scoped `integrationBaseRef`; empty = `defaultBaseRef`), and **Disable Integration Mode…**.
 - The merge chain is computed **off-tree** (`git merge-tree --write-tree` + `commit-tree`, git ≥ 2.38; older git falls back to in-tree merges) and applied with a single `reset --hard`. A conflicting lane fails the rebuild **without touching the checkout** — the lane shows `conflict`, and unchecking it (or landing a fix on it) recovers. Files that didn't change aren't rewritten, so a running dev server sees one small burst, not lane-by-lane churn.
 - **Auto-resolution** (`integrationAutoResolve`): edits to different lines of the same file always merge — that's git's default. Beyond that: `whitespace` (default) also resolves clashes where both lanes made the same change with different formatting; `lane-wins` resolves **every** remaining text clash toward the incoming lane (covers adjacent-line edits — the other side's clashing hunk is silently dropped, acceptable because the tree is derived); `off` is strict. Same-line divergent edits under `off`/`whitespace` still fail the rebuild — that's a real conflict to settle on the lanes.
 - With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds automatically — no git hooks needed. Change detection is event-driven: Node `fs.watch` on each repo's `.git` (`refs/`, `logs/`, `worktrees/`, `packed-refs` — never `objects/`, and not the VS Code host watcher), with a slow 30s poll as fallback for filesystems that drop events; if watch setup fails entirely, the poll runs at 4s.
