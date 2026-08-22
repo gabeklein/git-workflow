@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { ensureExcludedFromStatus } from './exclude';
 import { git, GitError, gitOk } from './exec';
 
 /**
@@ -468,6 +469,9 @@ export async function createIntegrationWorktree(
   baseRef: string,
 ): Promise<void> {
   const branch = integrationBranch();
+  await fs.mkdir(path.dirname(destDir), { recursive: true });
+  // Repo-local ignore before creation, so status never flashes dirty
+  await ensureExcludedFromStatus(destDir).catch(() => undefined);
   if (await gitOk(repoCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])) {
     await git(repoCwd, ['worktree', 'add', destDir, branch]);
   } else {

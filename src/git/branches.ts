@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { ensureExcludedFromStatus } from './exclude';
 import { git } from './exec';
 
 /** One branch (local, remote, or both), recency-sorted for the panel. */
@@ -104,6 +105,8 @@ export async function createWorktreeForBranch(
     }
     // ENOENT — free to create
   }
+  // Repo-local ignore before creation, so status never flashes dirty
+  await ensureExcludedFromStatus(destDir).catch(() => undefined);
   if (hasLocalRef) {
     await git(repoCwd, ['worktree', 'add', destDir, branch]);
   } else {
