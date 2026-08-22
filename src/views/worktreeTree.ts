@@ -138,6 +138,8 @@ export class WorktreeTreeProvider
     | undefined;
   private integrationFp: string | undefined;
   private integrationRebuildInFlight = false;
+  /** Bumped per activation — keys the header row so it renders expanded. */
+  private integrationActivation = 0;
 
   constructor(
     private readonly output: { appendLine(value: string): void },
@@ -521,7 +523,7 @@ export class WorktreeTreeProvider
       const baseRef =
         this.baseOverrides.get(worktreePath) ??
         prev?.compare.baseRef ??
-        (await resolveBaseRef(worktreePath, this.defaultBaseRef()));
+        (await resolveBaseRef(worktreePath, this.compareFallbackBaseRef()));
 
       const [compare, status] = await Promise.all([
         compareWorkingTreeToBase(worktreePath, baseRef),
@@ -616,7 +618,11 @@ export class WorktreeTreeProvider
       !this.selectedPath ||
       !this.worktrees.some((w) => w.path === this.selectedPath)
     ) {
-      this.selectedPath = this.worktrees[0]!.path;
+      // Prefer a real worktree; the integration checkout only via clicks
+      const first =
+        this.worktrees.find((w) => w.path !== this.integrationPath) ??
+        this.worktrees[0]!;
+      this.selectedPath = first.path;
       void this.context.workspaceState.update(
         SELECTED_PATH_KEY,
         this.selectedPath,
@@ -789,6 +795,7 @@ export class WorktreeTreeProvider
     if (this.integrationPath !== wt.path) {
       this.integrationError = undefined;
       this.integrationFp = undefined;
+      this.integrationActivation += 1;
       this.output.appendLine(
         `Integration worktree: ${wt.path} (${branch})`,
       );
@@ -797,6 +804,21 @@ export class WorktreeTreeProvider
         const message = err instanceof Error ? err.message : String(err);
         this.output.appendLine(`Push-block config failed: ${message}`);
       });
+      // Enabling must not hijack the compare focus: if the selected
+      // checkout just became the integration surface, move selection to a
+      // real worktree. Explicit clicks on the Integration row still focus it.
+      if (this.selectedPath === wt.path) {
+        const fallback = this.worktrees.find((w) => w.path !== wt.path);
+        this.selectedPath = fallback?.path;
+        this.selectionDecorations.setSelectedPath(this.selectedPath);
+        void this.context.workspaceState.update(
+          SELECTED_PATH_KEY,
+          this.selectedPath,
+        );
+        this.output.appendLine(
+          `Selection moved off integration checkout → ${this.selectedPath ?? '(none)'}`,
+        );
+      }
     }
     this.integrationPath = wt.path;
     try {
@@ -997,6 +1019,15 @@ export class WorktreeTreeProvider
       .get<string>('defaultBaseRef', 'main');
   }
 
+  /**
+   * Fallback for compare-base inference. While integration is active,
+   * lanes land on the integration base, so it is the sane default —
+   * per-worktree inference (reflog/upstream) and overrides still win.
+   */
+  private compareFallbackBaseRef(): string {
+    return this.integrationPath ? integrationBaseRef() : this.defaultBaseRef();
+  }
+
   private async getSnapshot(
     worktreePath: string,
   ): Promise<WorktreeSnapshot | undefined> {
@@ -1010,7 +1041,7 @@ export class WorktreeTreeProvider
       const tBase = Date.now();
       const baseRef =
         overridden ??
-        (await resolveBaseRef(worktreePath, this.defaultBaseRef()));
+        (await resolveBaseRef(worktreePath, this.compareFallbackBaseRef()));
       if (!overridden) {
         this.output.appendLine(
           `Inferred base for ${worktreePath}: ${baseRef} (${Date.now() - tBase}ms)`,
@@ -1096,6 +1127,7 @@ export class WorktreeTreeProvider
                 worktreePath: this.integrationPath,
                 baseRef: integrationBaseRef(),
                 lanes: this.integrationLanes,
+                activation: this.integrationActivation,
                 error: this.integrationError
                   ? this.integrationError.lane
                     ? `${this.integrationError.message} (${this.integrationError.lane})`
