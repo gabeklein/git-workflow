@@ -23,11 +23,15 @@ export async function ensureExcludedFromStatus(
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
     return undefined;
   }
-  const first = rel.split(path.sep)[0];
-  if (!first || first === '.git') {
+  const relPosix = rel.split(path.sep).join('/');
+  if (relPosix === '.git' || relPosix.startsWith('.git/')) {
     return undefined;
   }
-  const pattern = `/${first}/`;
+  // Exclude the containing folder (dedicated to checkouts); a checkout
+  // sitting directly at the repo root excludes just itself.
+  const parentRel = path.posix.dirname(relPosix);
+  const target = parentRel === '.' ? relPosix : parentRel;
+  const pattern = `/${target}/`;
 
   const common = path.resolve(
     parent,
@@ -44,17 +48,16 @@ export async function ensureExcludedFromStatus(
   const lines = new Set(text.split('\n').map((l) => l.trim()));
   if (
     lines.has(pattern) ||
-    lines.has(`${first}/`) ||
-    lines.has(`/${first}`) ||
-    lines.has(first)
+    lines.has(`${target}/`) ||
+    lines.has(`/${target}`) ||
+    lines.has(target)
   ) {
     return undefined;
   }
   await fs.mkdir(infoDir, { recursive: true });
+  const comment = '# Git Workflow: keep worktree checkouts out of status';
   const lead = text && !text.endsWith('\n') ? '\n' : '';
-  await fs.writeFile(
-    file,
-    `${text}${lead}# Git Workflow: keep worktree checkouts out of status\n${pattern}\n`,
-  );
+  const header = lines.has(comment) ? '' : `${comment}\n`;
+  await fs.writeFile(file, `${text}${lead}${header}${pattern}\n`);
   return pattern;
 }
