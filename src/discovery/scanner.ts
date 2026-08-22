@@ -290,6 +290,24 @@ export async function worktreeListFingerprint(): Promise<string> {
     .join('\n');
 }
 
+/** Unique .git common dirs of the repos opened in the workspace. */
+export async function resolveRepoCommonDirs(): Promise<string[]> {
+  const dirs: string[] = [];
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const root = folder.uri.fsPath;
+    try {
+      const out = (await git(root, ['rev-parse', '--git-common-dir'])).trim();
+      const abs = path.normalize(path.resolve(root, out));
+      if (!dirs.includes(abs)) {
+        dirs.push(abs);
+      }
+    } catch {
+      // not a git repo
+    }
+  }
+  return dirs;
+}
+
 /** True when `fsPath` is a direct child of a configured watch root. */
 export function isDirectChildOfWatchRoot(fsPath: string): boolean {
   const resolved = path.resolve(fsPath);
