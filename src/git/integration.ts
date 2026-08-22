@@ -136,6 +136,27 @@ export async function dropCandidateLane(
   );
 }
 
+/**
+ * Block accidental `git push` while on the integration branch: point its
+ * pushRemote at a remote that does not exist. Plain `git push` (simple/
+ * current/upstream push.default) fails fast; an explicit
+ * `git push origin <branch>` still works as the escape hatch. Repo-local,
+ * so it covers every terminal/agent in the clone, not just the extension.
+ */
+export async function ensureIntegrationPushBlocked(cwd: string): Promise<void> {
+  const branch = integrationBranch();
+  const key = `branch.${branch}.pushRemote`;
+  let current = '';
+  try {
+    current = (await git(cwd, ['config', '--get', key])).trim();
+  } catch {
+    // unset
+  }
+  if (current !== 'no_push') {
+    await git(cwd, ['config', key, 'no_push']);
+  }
+}
+
 export type RebuildResult =
   | { ok: true; lanes: string[]; skipped: string[] }
   | {
@@ -400,13 +421,14 @@ export async function createIntegrationWorktree(
   const branch = integrationBranch();
   if (await gitOk(repoCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])) {
     await git(repoCwd, ['worktree', 'add', destDir, branch]);
-    return;
+  } else {
+    const baseSha = await resolveBaseSha(repoCwd, baseRef);
+    if (!baseSha) {
+      throw new Error(`base ref ${baseRef} does not resolve`);
+    }
+    await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
   }
-  const baseSha = await resolveBaseSha(repoCwd, baseRef);
-  if (!baseSha) {
-    throw new Error(`base ref ${baseRef} does not resolve`);
-  }
-  await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
+  await ensureIntegrationPushBlocked(repoCwd);
 }
 
 export async function currentBranch(cwd: string): Promise<string | undefined> {
@@ -445,6 +467,7 @@ export async function switchToIntegrationBranch(
       }
       throw err;
     }
+    await ensureIntegrationPushBlocked(checkoutPath);
     return previous;
   }
   const baseSha = await resolveBaseSha(checkoutPath, baseRef);
@@ -452,6 +475,7 @@ export async function switchToIntegrationBranch(
     throw new Error(`base ref ${baseRef} does not resolve`);
   }
   await git(checkoutPath, ['switch', '-c', branch, baseSha]);
+  await ensureIntegrationPushBlocked(checkoutPath);
   return previous;
 }
 

@@ -22,6 +22,7 @@ import {
   addCandidateLane,
   dropAppliedLane,
   dropCandidateLane,
+  ensureIntegrationPushBlocked,
   integrationBranch,
   integrationFingerprint,
   isIntegrationAutoRebuildEnabled,
@@ -780,6 +781,11 @@ export class WorktreeTreeProvider
       this.output.appendLine(
         `Integration worktree: ${wt.path} (${branch})`,
       );
+      // Covers checkouts created by the shell script or by hand too
+      ensureIntegrationPushBlocked(wt.path).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.output.appendLine(`Push-block config failed: ${message}`);
+      });
     }
     this.integrationPath = wt.path;
     try {
