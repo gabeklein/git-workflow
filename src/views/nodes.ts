@@ -8,10 +8,7 @@ import {
   prThemeIcon,
   type PullRequestInfo,
 } from '../github/pr';
-import {
-  formatRemotePrDescription,
-  type RemotePullRequest,
-} from '../github/remotePrs';
+import type { RemotePullRequest } from '../github/remotePrs';
 import { worktreeFileUri, worktreeResourceUri } from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
@@ -25,7 +22,7 @@ export type TreeNode =
   | SectionItem
   | FolderItem
   | FileItem
-  | RemotePrItem
+  | BranchItem
   | RemotePrFileItem
   | MessageItem;
 
@@ -55,40 +52,84 @@ export class GroupItem extends vscode.TreeItem {
   }
 }
 
-/** One open PR from GitHub — expand for read-only files; checkout via context menu. */
-export class RemotePrItem extends vscode.TreeItem {
-  readonly kind = 'remotePr' as const;
+/**
+ * One branch in the Branches panel — local, remote, or PR-only, with
+ * recency and status tags. Rows with a PR expand into read-only PR files.
+ */
+export class BranchItem extends vscode.TreeItem {
+  readonly kind = 'branch' as const;
 
   constructor(
-    readonly pr: RemotePullRequest,
     readonly repoCwd: string,
+    readonly branch: string,
+    readonly hasLocalRef: boolean,
+    readonly hasRemote: boolean,
+    relativeDate: string,
+    readonly worktreePath?: string,
+    readonly pr?: RemotePullRequest,
   ) {
     super(
-      `#${pr.number} ${pr.title}`,
-      vscode.TreeItemCollapsibleState.Collapsed,
+      branch,
+      pr
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None,
     );
-    this.contextValue = pr.hasLocalWorktree
-      ? 'remotePrLocal'
-      : 'remotePr';
-    this.description = formatRemotePrDescription(pr);
-    this.iconPath = prThemeIcon(pr);
+    const flags = [
+      worktreePath ? 'HasWorktree' : 'NoWorktree',
+      pr ? 'WithPr' : '',
+    ].join('');
+    this.contextValue = `branch${flags}`;
+
+    const tags: string[] = [];
+    if (relativeDate) {
+      tags.push(relativeDate);
+    }
+    if (worktreePath) {
+      tags.push('worktree');
+    }
+    if (pr) {
+      tags.push(`PR #${pr.number}${pr.isDraft ? ' draft' : ''}`);
+      if (pr.mergeable === 'CONFLICTING') {
+        tags.push('conflicts');
+      }
+    }
+    if (!hasLocalRef && (hasRemote || pr)) {
+      tags.push('remote');
+    } else if (hasLocalRef && !hasRemote && !pr) {
+      tags.push('local only');
+    }
+    this.description = tags.join(' · ');
+
+    const conflicting = pr?.mergeable === 'CONFLICTING';
+    this.iconPath = pr
+      ? prThemeIcon(pr)
+      : !hasLocalRef
+        ? new vscode.ThemeIcon('cloud')
+        : new vscode.ThemeIcon(
+            'git-branch',
+            worktreePath ? new vscode.ThemeColor('charts.blue') : undefined,
+          );
+
     this.tooltip = [
-      `PR #${pr.number}: ${pr.title}`,
-      pr.authorLogin ? `Author: ${pr.authorLogin}` : undefined,
-      pr.baseRefName && pr.headRefName
-        ? `${pr.baseRefName} ← ${pr.headRefName}`
-        : undefined,
-      typeof pr.additions === 'number' && typeof pr.deletions === 'number'
-        ? `+${pr.additions} / −${pr.deletions}`
-        : undefined,
-      pr.hasLocalWorktree
-        ? 'Local worktree exists for this branch'
-        : 'Read-only — expand files, or Create Worktree to edit',
-      pr.url,
+      branch,
+      worktreePath ? `Worktree: ${worktreePath}` : 'No worktree — create one via context menu',
+      pr ? `PR #${pr.number}: ${pr.title}` : undefined,
+      pr?.authorLogin ? `Author: ${pr.authorLogin}` : undefined,
+      conflicting ? 'GitHub reports merge conflicts with the PR base.' : undefined,
+      !hasLocalRef && hasRemote ? 'Remote-tracking only (origin)' : undefined,
+      !hasLocalRef && !hasRemote && pr ? 'PR head only — fetched on demand' : undefined,
+      pr?.url,
     ]
-      .filter(Boolean)
+      .filter((x): x is string => Boolean(x))
       .join('\n');
-    // No default command — expand for files; open GitHub via context menu
+
+    if (worktreePath) {
+      this.command = {
+        command: 'worktreeCompare.focusWorktree',
+        title: 'Focus Worktree',
+        arguments: [worktreePath],
+      };
+    }
   }
 }
 

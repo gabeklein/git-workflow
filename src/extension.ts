@@ -29,19 +29,19 @@ import {
   unlockWorktree,
 } from './git/worktreeAdmin';
 import {
-  createWorktreeForPr,
-  defaultPrWorktreePath,
-  type RemotePullRequest,
-} from './github/remotePrs';
+  createWorktreeForBranch,
+  sanitizeWorktreeDirName,
+} from './git/branches';
+import { createWorktreeForPr } from './github/remotePrs';
 import { createFileBackedLogger } from './log';
 import { IntegrationTreeProvider } from './views/integrationTree';
-import { RemotePrsTreeProvider } from './views/remotePrsTree';
+import { BranchesTreeProvider } from './views/branchesTree';
 import {
   CommitItem,
   FileItem,
   WorktreeTreeProvider,
 } from './views/worktreeTree';
-import type { RemotePrFileItem, RemotePrItem } from './views/nodes';
+import type { BranchItem, RemotePrFileItem } from './views/nodes';
 
 /** Branch the root checkout was on before enabling integration on it. */
 const INTEGRATION_RETURN_KEY = 'worktreeCompare.integrationReturnBranch';
@@ -65,16 +65,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeProvider = new WorktreeTreeProvider(log, context);
   context.subscriptions.push(treeProvider);
 
-  const remotePrsProvider = new RemotePrsTreeProvider(log);
-  context.subscriptions.push(remotePrsProvider);
-  // Keep Remote PRs hide-filter in sync with discovered worktrees
-  const syncRemoteLocalBranches = () => {
-    remotePrsProvider.setLocalBranches(treeProvider.getLocalBranchNames());
+  const branchesProvider = new BranchesTreeProvider(log);
+  context.subscriptions.push(branchesProvider);
+  // Keep branch rows in sync with discovered worktrees and git activity
+  const syncBranchWorktrees = () => {
+    branchesProvider.setWorktrees(treeProvider.getWorktrees());
   };
   context.subscriptions.push(
-    treeProvider.onDidChangeWorktrees(syncRemoteLocalBranches),
+    treeProvider.onDidChangeWorktrees(syncBranchWorktrees),
+    treeProvider.onGitActivity(() => branchesProvider.refreshLocal()),
   );
-  syncRemoteLocalBranches();
+  syncBranchWorktrees();
 
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
     treeDataProvider: treeProvider,
@@ -136,14 +137,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  const remotePrsView = vscode.window.createTreeView(
-    'worktreeCompare.remotePrs',
+  const branchesView = vscode.window.createTreeView(
+    'worktreeCompare.branches',
     {
-      treeDataProvider: remotePrsProvider,
+      treeDataProvider: branchesProvider,
       showCollapseAll: true,
     },
   );
-  context.subscriptions.push(remotePrsView);
+  context.subscriptions.push(branchesView);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('worktreeCompare.refresh', () => {
@@ -913,12 +914,12 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.refreshRemotePrs',
+      'worktreeCompare.refreshBranches',
       async () => {
-        remotePrsProvider.setLocalBranches(treeProvider.getLocalBranchNames());
-        remotePrsProvider.refresh();
+        branchesProvider.setWorktrees(treeProvider.getWorktrees());
+        branchesProvider.refresh();
         void vscode.window.setStatusBarMessage(
-          'Git Workflow: refreshed remote PRs',
+          'Git Workflow: refreshed branches',
           2000,
         );
       },
@@ -997,31 +998,32 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.createWorktreeFromPr',
-      async (item?: RemotePrItem | { pr?: RemotePullRequest; repoCwd?: string }) => {
-        const pr = item && 'pr' in item ? item.pr : undefined;
-        const repoCwd =
-          item && 'repoCwd' in item && item.repoCwd
-            ? item.repoCwd
-            : treeProvider.getRepoCwd();
-        if (!pr || !repoCwd) {
-          void vscode.window.showInformationMessage(
-            'Git Workflow: pick a Remote PR first',
-          );
+      'worktreeCompare.createWorktreeFromBranch',
+      async (item?: BranchItem) => {
+        if (!item?.branch) {
           return;
         }
-        if (pr.hasLocalWorktree) {
+        const repoCwd = item.repoCwd;
+        if (item.worktreePath) {
           void vscode.window.showInformationMessage(
-            `Git Workflow: a local worktree already uses branch ${pr.headRefName}`,
+            `Git Workflow: ${item.branch} already has a worktree`,
           );
           return;
         }
 
         const workspaceRoot =
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
-        const suggested = defaultPrWorktreePath(workspaceRoot, pr);
+        const watch =
+          vscode.workspace
+            .getConfiguration('worktreeCompare')
+            .get<string[]>('watchFolders', ['.claude/worktrees'])[0] ||
+          '.claude/worktrees';
+        const suggested = path.join(
+          path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
+          sanitizeWorktreeDirName(item.branch),
+        );
         const dest = await vscode.window.showInputBox({
-          prompt: `Create worktree for PR #${pr.number} (${pr.headRefName || 'detached head'})`,
+          prompt: `Create worktree for ${item.branch}`,
           value: suggested,
           ignoreFocusOut: true,
           validateInput: (v) =>
@@ -1035,22 +1037,24 @@ export function activate(context: vscode.ExtensionContext): void {
           await vscode.window.withProgress(
             {
               location: vscode.ProgressLocation.Notification,
-              title: `Git Workflow: creating worktree for PR #${pr.number}…`,
+              title: `Git Workflow: creating worktree for ${item.branch}…`,
             },
             async () => {
-              const created = await createWorktreeForPr(
-                repoCwd,
-                pr,
-                dest.trim(),
-              );
+              // PR head with no local/remote ref (fork) → fetch via PR
+              const created =
+                !item.hasLocalRef && !item.hasRemote && item.pr
+                  ? await createWorktreeForPr(repoCwd, item.pr, dest.trim())
+                  : await createWorktreeForBranch(
+                      repoCwd,
+                      item.branch,
+                      item.hasLocalRef,
+                      dest.trim(),
+                    );
               log.appendLine(
-                `Created worktree for PR #${pr.number} at ${created}`,
+                `Created worktree for ${item.branch} at ${created}`,
               );
               treeProvider.refresh();
-              remotePrsProvider.setLocalBranches(
-                treeProvider.getLocalBranchNames(),
-              );
-              remotePrsProvider.refresh();
+              branchesProvider.refresh();
               await treeProvider.setSelectedPath(created);
               void vscode.window.showInformationMessage(
                 `Git Workflow: worktree ready at ${created}`,
@@ -1059,7 +1063,7 @@ export function activate(context: vscode.ExtensionContext): void {
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Create worktree from PR failed: ${message}`);
+          log.appendLine(`Create worktree failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not create worktree — ${message}`,
           );
