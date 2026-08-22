@@ -27,11 +27,15 @@ const CANDIDATES_FILE = 'focus-candidates';
 const LOCK_DIR = 'focus-working.lock';
 
 export function integrationBranch(): string {
-  return (
+  const template =
     vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<string>('integrationBranch', 'focus/working')
-      .trim() || 'focus/working'
+      .get<string>('integrationBranch', 'integration/{base}')
+      .trim() || 'integration/{base}';
+  // {base} → short base name (origin/main → main)
+  return template.replace(
+    '{base}',
+    integrationBaseRef().replace(/^origin\//, ''),
   );
 }
 
@@ -560,6 +564,34 @@ export async function switchAwayFromIntegration(
   }
   await git(checkoutPath, ['switch', '--detach', baseSha]);
   return baseSha.slice(0, 7);
+}
+
+/**
+ * Delete the integration branch (disable cleanup). The branch is derived
+ * state — lane lists persist separately, so re-enabling loses nothing.
+ * Force-delete: the chain's merge commits are reachable from nothing else
+ * by design. Best-effort; the branch may not exist.
+ */
+export async function deleteIntegrationBranch(cwd: string): Promise<boolean> {
+  return gitOk(cwd, ['branch', '-D', integrationBranch()]);
+}
+
+/**
+ * After the base changes, the templated branch name may change too
+ * (integration/main → integration/staging). Rename the checkout's current
+ * branch to match; `git branch -m` carries branch.* config (pushRemote)
+ * along. Returns the rename performed, if any.
+ */
+export async function alignIntegrationBranchName(
+  checkoutPath: string,
+): Promise<{ from: string; to: string } | undefined> {
+  const target = integrationBranch();
+  const current = await currentBranch(checkoutPath);
+  if (!current || current === target) {
+    return undefined;
+  }
+  await git(checkoutPath, ['branch', '-m', current, target]);
+  return { from: current, to: target };
 }
 
 export async function abortIntegrationMerge(

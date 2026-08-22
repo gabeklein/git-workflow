@@ -105,14 +105,16 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
 | `worktreeCompare.githubPullRequests` | `auto` | `auto` / `off` — PR badges, Remote PRs, needs `gh` |
 | `worktreeCompare.remotePrLimit` | `30` | Max open PRs in Remote PRs section |
-| `worktreeCompare.integrationBranch` | `focus/working` | Branch that opts a worktree into the integration overlay |
+| `worktreeCompare.integrationBranch` | `integration/{base}` | Branch that opts a checkout into the overlay ({base} = short base name; `focus/working` for script interop) |
 | `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
 
 ## Integration worktree (overlay)
 
 The **Integration** row at the top of the panel always shows mode status. Off → click it (or **Enable Integration Mode…**) and pick:
 
-- **Use this checkout** (default) — the workspace root switches to the integration branch (default `focus/working`) and becomes the integration surface; disabling switches it back to the branch it was on.
+- **Use this checkout** (default) — the workspace root switches to the integration branch (default `integration/{base}`, e.g. `integration/main`) and becomes the integration surface; disabling switches it back to the branch it was on.
+
+Disabling also **deletes the integration branch** — it is derived state, and the lane lists survive in `focus-applied`/`focus-candidates`, so re-enabling restores the same setup. Changing the base renames the branch to match (`integration/main` → `integration/staging`).
 - **Create a separate worktree…** — a dedicated checkout holds the combined lanes.
 
 The integration checkout is rebuilt as **base + a merge of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean. Only **landed commits** are merged — a dirty feature worktree never leaks into the integration tree.

@@ -20,6 +20,7 @@ import {
   abortIntegrationMerge,
   addAppliedLane,
   addCandidateLane,
+  alignIntegrationBranchName,
   dropAppliedLane,
   dropCandidateLane,
   ensureIntegrationPushBlocked,
@@ -170,10 +171,7 @@ export class WorktreeTreeProvider
           } else if (
             e.affectsConfiguration('worktreeCompare.integrationBaseRef')
           ) {
-            if (this.integrationPath) {
-              void this.runIntegrationRebuild('base changed');
-            }
-            this._onDidChangeTreeData.fire();
+            void this.handleIntegrationBaseChange();
           } else if (
             e.affectsConfiguration('worktreeCompare.squashLayout') ||
             e.affectsConfiguration('worktreeCompare.defaultBaseRef')
@@ -850,6 +848,30 @@ export class WorktreeTreeProvider
     }
     this.integrationFp = fp;
     await this.runIntegrationRebuild('lane tips moved');
+  }
+
+  /**
+   * Base changed: the templated branch name may change with it — rename
+   * the checkout's branch to match, then rebuild onto the new base.
+   */
+  private async handleIntegrationBaseChange(): Promise<void> {
+    if (!this.integrationPath) {
+      this._onDidChangeTreeData.fire();
+      return;
+    }
+    try {
+      const renamed = await alignIntegrationBranchName(this.integrationPath);
+      if (renamed) {
+        this.output.appendLine(
+          `Integration branch renamed: ${renamed.from} → ${renamed.to}`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Integration branch rename failed: ${message}`);
+    }
+    await this.runIntegrationRebuild('base changed');
+    this.refresh();
   }
 
   /** Run a rebuild and surface the outcome on the integration row. */
