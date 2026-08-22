@@ -50,9 +50,7 @@ import {
   FileItem,
   FolderItem,
   GroupItem,
-  IntegrationLaneItem,
   type IntegrationRowInfo,
-  IntegrationStatusItem,
   MessageItem,
   SectionItem,
   type TreeNode,
@@ -138,8 +136,6 @@ export class WorktreeTreeProvider
     | undefined;
   private integrationFp: string | undefined;
   private integrationRebuildInFlight = false;
-  /** Bumped per activation — keys the header row so it renders expanded. */
-  private integrationActivation = 0;
 
   constructor(
     private readonly output: { appendLine(value: string): void },
@@ -281,11 +277,6 @@ export class WorktreeTreeProvider
       // Keep PR cache across list refresh; explicit refreshPullRequests clears it
       void this.load();
     }, 150);
-  }
-
-  /** Re-render only (no git work) — e.g. snap a reverted checkbox back. */
-  redraw(): void {
-    this._onDidChangeTreeData.fire();
   }
 
   /** Force re-fetch for one worktree (stage/unstage, layout toggle). */
@@ -764,6 +755,7 @@ export class WorktreeTreeProvider
         path: string;
         branch: string;
         lanes: string[];
+        candidates: string[];
         error?: { code: string; message: string; lane?: string };
       }
     | undefined {
@@ -774,6 +766,7 @@ export class WorktreeTreeProvider
       path: this.integrationPath,
       branch: integrationBranch(),
       lanes: this.integrationLanes.slice(),
+      candidates: this.integrationCandidates.slice(),
       error: this.integrationError,
     };
   }
@@ -795,7 +788,6 @@ export class WorktreeTreeProvider
     if (this.integrationPath !== wt.path) {
       this.integrationError = undefined;
       this.integrationFp = undefined;
-      this.integrationActivation += 1;
       this.output.appendLine(
         `Integration worktree: ${wt.path} (${branch})`,
       );
@@ -1079,8 +1071,6 @@ export class WorktreeTreeProvider
         return await this.getRootChildren();
       }
       switch (element.kind) {
-        case 'integrationStatus':
-          return this.getIntegrationLaneChildren();
         case 'group':
           if (element.group === 'worktrees') {
             return this.getWorktreeListChildren();
@@ -1117,28 +1107,6 @@ export class WorktreeTreeProvider
         ),
       );
     } else {
-      // Integration mode status — always visible so on/off is never a guess
-      nodes.push(
-        new IntegrationStatusItem(
-          integrationBranch(),
-          this.integrationPath
-            ? {
-                on: true,
-                worktreePath: this.integrationPath,
-                baseRef: integrationBaseRef(),
-                lanes: this.integrationLanes,
-                activation: this.integrationActivation,
-                error: this.integrationError
-                  ? this.integrationError.lane
-                    ? `${this.integrationError.message} (${this.integrationError.lane})`
-                    : this.integrationError.message
-                  : undefined,
-                conflict: this.integrationError?.code === 'conflict',
-              }
-            : { on: false },
-        ),
-      );
-
       const selected = this.getSelected();
       const n = this.listedWorktrees().length;
       const worktreesLabel = selected
@@ -1245,39 +1213,6 @@ export class WorktreeTreeProvider
       }
     }
 
-    return nodes;
-  }
-
-  /** Base first (always checked), then candidate lanes (checked = applied). */
-  private getIntegrationLaneChildren(): TreeNode[] {
-    if (!this.integrationPath) {
-      return [];
-    }
-    const nodes: TreeNode[] = [];
-    if (this.integrationCandidates.length === 0) {
-      nodes.push(
-        new MessageItem(
-          'No lanes yet',
-          'Right-click a worktree → Add to Integration',
-        ),
-      );
-      return nodes;
-    }
-    const branchToPath = new Map(
-      this.worktrees
-        .filter((w) => !w.detached)
-        .map((w) => [w.branch, w.path] as const),
-    );
-    for (const branch of this.integrationCandidates) {
-      nodes.push(
-        new IntegrationLaneItem(branch, this.integrationLanes.includes(branch), {
-          conflicted:
-            this.integrationError?.code === 'conflict' &&
-            this.integrationError.lane === branch,
-          worktreePath: branchToPath.get(branch),
-        }),
-      );
-    }
     return nodes;
   }
 

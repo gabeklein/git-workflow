@@ -18,7 +18,6 @@ export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
 export type TreeNode =
   | GroupItem
-  | IntegrationStatusItem
   | IntegrationLaneItem
   | WorktreeListItem
   | ConflictWarningItem
@@ -116,97 +115,6 @@ export class RemotePrFileItem extends vscode.TreeItem {
       command: 'worktreeCompare.openRemotePrFile',
       title: 'Open Read-only Diff',
       arguments: [this],
-    };
-  }
-}
-
-/**
- * Always-visible integration mode row: off → click to enable (creates the
- * worktree); on → lanes summary / error state, click to focus the checkout.
- */
-export class IntegrationStatusItem extends vscode.TreeItem {
-  readonly kind = 'integrationStatus' as const;
-
-  constructor(
-    readonly branch: string,
-    state:
-      | { on: false }
-      | {
-          on: true;
-          worktreePath: string;
-          baseRef: string;
-          lanes: string[];
-          /** Bumped per activation — fresh id ⇒ renders expanded */
-          activation: number;
-          error?: string;
-          conflict?: boolean;
-        },
-  ) {
-    super(
-      'Integration',
-      state.on
-        ? vscode.TreeItemCollapsibleState.Expanded
-        : vscode.TreeItemCollapsibleState.None,
-    );
-    // VS Code persists collapse state per item id; a per-activation id
-    // guarantees the row opens expanded each time integration turns on.
-    if (state.on) {
-      this.id = `worktreeCompare.integration:${state.activation}`;
-    }
-    if (!state.on) {
-      this.contextValue = 'integrationStatusOff';
-      this.description = 'off';
-      this.iconPath = new vscode.ThemeIcon(
-        'circle-slash',
-        new vscode.ThemeColor('disabledForeground'),
-      );
-      this.tooltip = [
-        'Integration mode is off.',
-        `Enable: create a worktree on ${branch} — it is then rebuilt as`,
-        'base + a --no-ff merge of every lane you check below.',
-        'Click to enable.',
-      ].join('\n');
-      this.command = {
-        command: 'worktreeCompare.enableIntegration',
-        title: 'Enable Integration Mode',
-      };
-      return;
-    }
-
-    const failed = Boolean(state.error);
-    this.contextValue = state.conflict
-      ? 'integrationStatusOnConflict'
-      : 'integrationStatusOn';
-    this.description = state.conflict
-      ? 'lane conflict'
-      : failed
-        ? 'rebuild failed'
-        : `→ ${state.baseRef}`;
-    this.iconPath = new vscode.ThemeIcon(
-      failed ? 'warning' : 'combine',
-      failed
-        ? new vscode.ThemeColor('list.errorForeground')
-        : new vscode.ThemeColor('charts.blue'),
-    );
-    this.tooltip = [
-      `Integration mode: on (${branch})`,
-      `Base: ${state.baseRef} — every rebuild starts here (origin/… preferred). Change via context menu.`,
-      `Checkout: ${state.worktreePath}`,
-      state.lanes.length > 0
-        ? `Applied: ${state.lanes.join(', ')}`
-        : 'No lanes applied — check a lane below to merge it in.',
-      state.error ? `Last rebuild: ${state.error}` : undefined,
-      state.conflict
-        ? 'The checkout was left untouched — uncheck a conflicting lane or land a fix on it.'
-        : undefined,
-      'Click to focus the integration worktree.',
-    ]
-      .filter((x): x is string => Boolean(x))
-      .join('\n');
-    this.command = {
-      command: 'worktreeCompare.focusWorktree',
-      title: 'Focus Integration Worktree',
-      arguments: [state.worktreePath],
     };
   }
 }
