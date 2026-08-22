@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { ensureExcludedFromStatus } from './exclude';
 import { git, GitError, gitOk } from './exec';
+import { listWorktreeAdmin } from './worktreeAdmin';
 
 /**
  * Integration-worktree overlay (interop with agent-focus's
@@ -25,7 +26,11 @@ import { git, GitError, gitOk } from './exec';
 
 const APPLIED_FILE = 'focus-applied';
 const CANDIDATES_FILE = 'focus-candidates';
+const WIP_FILE = 'focus-wip';
 const LOCK_DIR = 'focus-working.lock';
+/** Subject prefix marking ephemeral working-tree snapshot commits. */
+const WIP_SUBJECT = 'wip(gw):';
+let wipIndexCounter = 0;
 
 export function integrationBranch(): string {
   const template =
@@ -201,6 +206,70 @@ export async function ensureIntegrationPushBlocked(cwd: string): Promise<void> {
   }
 }
 
+/** Lanes whose *uncommitted* worktree edits overlay into the rebuild. */
+export async function listWipLanes(cwd: string): Promise<string[]> {
+  return readLaneFile(cwd, WIP_FILE);
+}
+
+export async function setWipLane(
+  cwd: string,
+  lane: string,
+  enabled: boolean,
+): Promise<void> {
+  const lanes = await listWipLanes(cwd);
+  if (enabled && !lanes.includes(lane)) {
+    lanes.push(lane);
+    await writeLaneFile(cwd, WIP_FILE, lanes);
+  } else if (!enabled && lanes.includes(lane)) {
+    await writeLaneFile(
+      cwd,
+      WIP_FILE,
+      lanes.filter((l) => l !== lane),
+    );
+  }
+}
+
+/**
+ * Snapshot a lane worktree's uncommitted state (staged + unstaged +
+ * untracked, gitignore respected) as an ephemeral commit on top of its
+ * HEAD — via a temporary index, so the lane's real index, HEAD, and
+ * branch are untouched. Returns undefined when the worktree is clean.
+ */
+export async function snapshotWorktreeCommit(
+  lanePath: string,
+  lane: string,
+): Promise<string | undefined> {
+  const common = await commonDir(lanePath);
+  const tmpIndex = path.join(
+    common,
+    `focus-wip-index-${process.pid}-${wipIndexCounter++}`,
+  );
+  const env = { GIT_INDEX_FILE: tmpIndex };
+  try {
+    await git(lanePath, ['read-tree', 'HEAD'], env);
+    await git(lanePath, ['add', '-A'], env);
+    const tree = (await git(lanePath, ['write-tree'], env)).trim();
+    const headTree = (
+      await git(lanePath, ['rev-parse', 'HEAD^{tree}'])
+    ).trim();
+    if (tree === headTree) {
+      return undefined; // clean — merge the branch tip as usual
+    }
+    return (
+      await git(lanePath, [
+        'commit-tree',
+        tree,
+        '-p',
+        'HEAD',
+        '-m',
+        `${WIP_SUBJECT} ${lane}`,
+      ])
+    ).trim();
+  } finally {
+    await fs.rm(tmpIndex, { force: true }).catch(() => {});
+  }
+}
+
 export type RebuildResult =
   | { ok: true; lanes: string[]; skipped: string[] }
   | {
@@ -332,19 +401,25 @@ export async function rebuildIntegration(
 
     // Unique-commit guard: refuse only when HEAD carries non-merge commits
     // that exist on NO other branch — i.e. work that would truly be lost.
-    // Commits from formerly-applied lanes still live on their branches, so
-    // they must not block the rebuild.
+    // Commits from formerly-applied lanes still live on their branches, and
+    // ephemeral wip snapshots (ours, by subject marker) are derived state.
     const unique = (
       await git(workingPath, [
-        'rev-list',
+        'log',
         '--no-merges',
+        '--format=%H%x00%s',
         'HEAD',
         '--not',
         baseSha,
         `--exclude=${integrationBranch()}`,
         '--branches',
       ]).catch(() => '')
-    ).trim();
+    )
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .filter((l) => !(l.split('\0')[1] ?? '').startsWith(WIP_SUBJECT))
+      .join('\n');
     if (unique) {
       return {
         ok: false,
@@ -352,6 +427,26 @@ export async function rebuildIntegration(
         message:
           'integration checkout has commits that exist on no other branch; move them to a feature branch first',
       };
+    }
+
+    // Wip lanes: overlay uncommitted worktree edits via ephemeral snapshots
+    const wipLanes = new Set(
+      (await listWipLanes(workingPath).catch(() => [])).filter((l) =>
+        lanes.includes(l),
+      ),
+    );
+    const laneCheckouts = new Map<string, string>();
+    if (wipLanes.size > 0) {
+      try {
+        const admin = await listWorktreeAdmin(workingPath);
+        for (const state of admin.values()) {
+          if (state.branch) {
+            laneCheckouts.set(state.branch, state.path);
+          }
+        }
+      } catch {
+        // no lookup — wip lanes fall back to branch tips
+      }
     }
 
     // Compute the whole chain off-tree, then apply once
@@ -370,6 +465,34 @@ export async function rebuildIntegration(
         ).trim();
       } catch {
         skipped.push(lane);
+        continue;
+      }
+      if (wipLanes.has(lane)) {
+        const checkout = laneCheckouts.get(lane);
+        if (checkout) {
+          try {
+            const snapshot = await snapshotWorktreeCommit(checkout, lane);
+            if (snapshot) {
+              laneSha = snapshot;
+            }
+          } catch {
+            // snapshot failed — merge the branch tip instead
+          }
+        }
+      }
+      // Lane already contained in the chain (e.g. no commits yet): nothing
+      // to merge — and commit-tree would collapse duplicate parents into a
+      // non-merge commit that trips the unique guard.
+      if (
+        laneSha === current ||
+        (await gitOk(workingPath, [
+          'merge-base',
+          '--is-ancestor',
+          laneSha,
+          current,
+        ]))
+      ) {
+        merged.push(lane);
         continue;
       }
       const result = await mergeOffTree(workingPath, current, laneSha);

@@ -31,7 +31,9 @@ import {
   isLaneBranch,
   listAppliedLanes,
   listCandidateLanes,
+  listWipLanes,
   rebuildIntegration,
+  setWipLane,
   type RebuildResult,
 } from '../git/integration';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
@@ -140,6 +142,9 @@ export class WorktreeTreeProvider
     | undefined;
   private integrationFp: string | undefined;
   private integrationRebuildInFlight = false;
+  /** Lanes whose uncommitted edits overlay into rebuilds. */
+  private integrationWip: string[] = [];
+  private wipDebounce: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly output: { appendLine(value: string): void },
@@ -188,17 +193,20 @@ export class WorktreeTreeProvider
       // Agent/editor writes through VS Code (no recursive FS watcher)
       vscode.workspace.onDidSaveTextDocument((doc) => {
         this.scheduleSoftRefreshIfUnderSelected(doc.uri);
+        this.scheduleWipRebuildIfUnderWipLane(doc.uri);
       }),
       vscode.workspace.onDidCreateFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
+          this.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidDeleteFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
+          this.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidRenameFiles((e) => {
@@ -207,6 +215,8 @@ export class WorktreeTreeProvider
           this.scheduleDiscoverIfWatchRootChild(f.oldUri);
           this.scheduleSoftRefreshIfUnderSelected(f.newUri);
           this.scheduleSoftRefreshIfUnderSelected(f.oldUri);
+          this.scheduleWipRebuildIfUnderWipLane(f.newUri);
+          this.scheduleWipRebuildIfUnderWipLane(f.oldUri);
         }
       }),
     );
@@ -761,6 +771,7 @@ export class WorktreeTreeProvider
         branch: string;
         lanes: string[];
         candidates: string[];
+        wip: string[];
         error?: { code: string; message: string; lane?: string };
       }
     | undefined {
@@ -772,6 +783,7 @@ export class WorktreeTreeProvider
       branch: integrationBranch(),
       lanes: this.integrationLanes.slice(),
       candidates: this.integrationCandidates.slice(),
+      wip: this.integrationWip.slice(),
       error: this.integrationError,
     };
   }
@@ -825,12 +837,82 @@ export class WorktreeTreeProvider
       this.integrationCandidates = [
         ...new Set([...candidates, ...this.integrationLanes]),
       ].sort();
+      this.integrationWip = await listWipLanes(wt.path);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Read lanes failed: ${message}`);
       this.integrationLanes = [];
       this.integrationCandidates = [];
+      this.integrationWip = [];
     }
+  }
+
+  /**
+   * Wip lanes: a save/create/delete under an opted-in lane's checkout
+   * (VS Code events only, per design) re-snapshots and rebuilds.
+   */
+  private scheduleWipRebuildIfUnderWipLane(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file' || !this.integrationPath) {
+      return;
+    }
+    const wip = this.integrationWip.filter((l) =>
+      this.integrationLanes.includes(l),
+    );
+    if (wip.length === 0) {
+      return;
+    }
+    const hit = this.worktrees.find(
+      (w) =>
+        !w.detached &&
+        w.path !== this.integrationPath &&
+        wip.includes(w.branch) &&
+        isPathInside(uri.fsPath, w.path),
+    );
+    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath)) {
+      return;
+    }
+    if (this.wipDebounce) {
+      clearTimeout(this.wipDebounce);
+    }
+    this.wipDebounce = setTimeout(() => {
+      this.wipDebounce = undefined;
+      if (this.integrationRebuildInFlight) {
+        // Edits landed mid-rebuild — go again once it finishes
+        this.scheduleWipRebuildRetry();
+        return;
+      }
+      void this.runIntegrationRebuild('wip edits');
+    }, 1200);
+  }
+
+  private scheduleWipRebuildRetry(): void {
+    if (this.wipDebounce) {
+      return;
+    }
+    this.wipDebounce = setTimeout(() => {
+      this.wipDebounce = undefined;
+      if (this.integrationRebuildInFlight) {
+        this.scheduleWipRebuildRetry();
+        return;
+      }
+      void this.runIntegrationRebuild('wip edits (queued)');
+    }, 800);
+  }
+
+  /** Toggle overlaying a lane's uncommitted edits; rebuild when applied. */
+  async setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    await setWipLane(this.integrationPath, branch, enabled);
+    await this.refreshIntegrationState();
+    this._onDidChangeTreeData.fire();
+    if (this.integrationLanes.includes(branch)) {
+      return this.runIntegrationRebuild(
+        enabled ? `wip on ${branch}` : `wip off ${branch}`,
+      );
+    }
+    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [] };
   }
 
   /**
