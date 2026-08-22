@@ -384,16 +384,6 @@
           "group": "2_integration@1"
         },
         {
-          "command": "worktreeCompare.rebuildIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /Integration/",
-          "group": "2_integration@1"
-        },
-        {
-          "command": "worktreeCompare.abortIntegrationMerge",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /IntegrationConflict/",
-          "group": "2_integration@2"
-        },
-        {
           "command": "worktreeCompare.enableIntegration",
           "when": "view == worktreeCompare.worktrees && viewItem == integrationStatusOff",
           "group": "2_integration@1"
