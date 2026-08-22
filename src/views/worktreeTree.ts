@@ -97,6 +97,10 @@ export class WorktreeTreeProvider
   /** Fired when discovery list or selection changes. */
   readonly onDidChangeWorktrees = this._onDidChangeWorktrees.event;
 
+  private readonly _onGitActivity = new vscode.EventEmitter<void>();
+  /** Fired after each .git-event/poll state check — cheap change signal. */
+  readonly onGitActivity = this._onGitActivity.event;
+
   private worktrees: DiscoveredWorktree[] = [];
   private loading = false;
   private readonly disposables: vscode.Disposable[] = [];
@@ -740,6 +744,7 @@ export class WorktreeTreeProvider
       this.output.appendLine(`Worktree state check failed (${reason}): ${message}`);
     } finally {
       this.stateCheckInFlight = false;
+      this._onGitActivity.fire();
       if (this.stateCheckQueued) {
         this.stateCheckQueued = false;
         void this.checkWorktreeState(`${reason} (queued)`);

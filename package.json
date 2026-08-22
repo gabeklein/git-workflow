@@ -24,10 +24,7 @@
     "workflow",
     "claude"
   ],
-  "activationEvents": [
-    "onView:worktreeCompare.worktrees",
-    "onView:worktreeCompare.remotePrs"
-  ],
+  "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": {
@@ -91,7 +88,7 @@
             "Use the GitHub CLI (gh) when available to detect PRs for worktree branches",
             "Disable GitHub PR status and context actions"
           ],
-          "description": "Optional GitHub integration: PR badges on worktrees, Remote PRs panel, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
+          "description": "Optional GitHub integration: PR badges on worktrees and branches, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
         },
         "worktreeCompare.integrationBranch": {
           "type": "string",
@@ -124,7 +121,7 @@
           "default": 30,
           "minimum": 1,
           "maximum": 100,
-          "description": "Max open pull requests to list in the Remote PRs panel."
+          "description": "Max open pull requests fetched for the Branches panel's PR tags."
         }
       }
     },
@@ -148,9 +145,8 @@
           "name": "Integration"
         },
         {
-          "id": "worktreeCompare.remotePrs",
-          "name": "Remote PRs",
-          "when": "config.worktreeCompare.githubPullRequests != off"
+          "id": "worktreeCompare.branches",
+          "name": "Branches"
         }
       ]
     },
@@ -266,8 +262,9 @@
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.refreshRemotePrs",
-        "title": "Refresh Remote PRs",
+        "command": "worktreeCompare.refreshBranches",
+        "title": "Refresh Branches",
+        "icon": "$(refresh)",
         "category": "Git Workflow"
       },
       {
@@ -276,8 +273,8 @@
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.createWorktreeFromPr",
-        "title": "Create Worktree from PR…",
+        "command": "worktreeCompare.createWorktreeFromBranch",
+        "title": "Create Worktree…",
         "icon": "$(repo-clone)",
         "category": "Git Workflow"
       },
@@ -354,8 +351,8 @@
           "group": "navigation@4"
         },
         {
-          "command": "worktreeCompare.refreshRemotePrs",
-          "when": "view == worktreeCompare.remotePrs",
+          "command": "worktreeCompare.refreshBranches",
+          "when": "view == worktreeCompare.branches",
           "group": "navigation@1"
         },
         {
@@ -447,17 +444,22 @@
         },
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.remotePrs && viewItem =~ /^remotePr/",
+          "when": "view == worktreeCompare.branches && viewItem =~ /WithPr/",
           "group": "1_github@1"
         },
         {
           "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.remotePrs && viewItem =~ /^remotePr/",
+          "when": "view == worktreeCompare.branches && viewItem =~ /WithPr/",
           "group": "1_github@2"
         },
         {
-          "command": "worktreeCompare.createWorktreeFromPr",
-          "when": "view == worktreeCompare.remotePrs && viewItem == remotePr",
+          "command": "worktreeCompare.createWorktreeFromBranch",
+          "when": "view == worktreeCompare.branches && viewItem =~ /NoWorktree/",
+          "group": "inline@1"
+        },
+        {
+          "command": "worktreeCompare.createWorktreeFromBranch",
+          "when": "view == worktreeCompare.branches && viewItem =~ /NoWorktree/",
           "group": "2_worktree@1"
         },
         {

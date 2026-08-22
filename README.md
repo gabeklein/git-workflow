@@ -67,7 +67,7 @@ npm run install:local
 - **Remote-SSH:** run install on the remote. The extension host does not use the client’s `~/.vscode/extensions` alone.
 - **Cursor:** if `code` is missing, ensure `cursor` is on PATH, or set `VSCODE_CLI=/path/to/cursor`.
 - Env overrides: `SKIP_CODE_CLI=1`, `SKIP_SERVER=1`.
-- **PR features** need authenticated `gh` (`gh auth login`). Without it, worktree compare still works; Remote PRs / PR badges stay empty.
+- **PR features** need authenticated `gh` (`gh auth login`). Without it, worktree compare and the Branches panel still work; PR tags/badges stay empty.
 - **Dev vs installed:** F5 EDH overrides the installed copy **only in the debug window**. Daily use = installed VSIX.
 
 ### Manual alternative
@@ -103,8 +103,8 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.contentRefreshIntervalMs` | `0` | Idle poll (`0` = off, events only) |
 | `worktreeCompare.contentRefreshActiveIntervalMs` | `2500` | Faster poll after a change (only if poll enabled) |
 | `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
-| `worktreeCompare.githubPullRequests` | `auto` | `auto` / `off` — PR badges, Remote PRs, needs `gh` |
-| `worktreeCompare.remotePrLimit` | `30` | Max open PRs in Remote PRs section |
+| `worktreeCompare.githubPullRequests` | `auto` | `auto` / `off` — PR tags on worktrees & branches, needs `gh` |
+| `worktreeCompare.remotePrLimit` | `30` | Max open PRs fetched for Branches-panel tags |
 | `worktreeCompare.integrationBranch` | `integration/{base}` | Branch that opts a checkout into the overlay ({base} = short base name; `focus/working` for script interop) |
 | `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
 
@@ -157,7 +157,7 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 ▶ Full Diff · N new · M modified · …  ← collapsed until opened
 ```
 
-**Remote PRs** panel (separate): open PRs without a local worktree; expand for read-only files; context menu to create a worktree.
+**Branches** panel (separate): every branch — local, remote, PR-only — newest first, tagged with `worktree` / `PR #N` / `conflicts` / `remote` / `local only`. Create a worktree from any row (inline action); PR rows expand into read-only file diffs; click a row with a worktree to focus it.
 
 Selection is persisted per workspace. Compare defaults to merge-base of the integration tip (not “must rebase” when main moves).
 
