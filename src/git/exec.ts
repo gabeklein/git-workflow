@@ -19,6 +19,7 @@ export class GitError extends Error {
 export async function git(
   cwd: string,
   args: string[],
+  extraEnv?: Record<string, string>,
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', args, {
@@ -29,6 +30,7 @@ export async function git(
         // Stable, script-friendly output
         GIT_TERMINAL_PROMPT: '0',
         LANG: 'C',
+        ...extraEnv,
       },
     });
     return stdout.toString();

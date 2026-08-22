@@ -317,6 +317,16 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.includeWipInIntegration",
+        "title": "Include Working-Tree Edits",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.excludeWipFromIntegration",
+        "title": "Exclude Working-Tree Edits",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.disableIntegration",
         "title": "Disable Integration Mode…",
         "category": "Git Workflow"
@@ -431,6 +441,16 @@
           "command": "worktreeCompare.removeFromIntegration",
           "when": "view == worktreeCompare.integration && viewItem =~ /^integrationLane/",
           "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.includeWipInIntegration",
+          "when": "view == worktreeCompare.integration && viewItem =~ /WipOff/",
+          "group": "2_integration@2"
+        },
+        {
+          "command": "worktreeCompare.excludeWipFromIntegration",
+          "when": "view == worktreeCompare.integration && viewItem =~ /WipOn/",
+          "group": "2_integration@2"
         },
         {
           "command": "worktreeCompare.disableIntegration",

@@ -94,13 +94,16 @@ export function activate(context: vscode.ExtensionContext): void {
   // On/off + base + error status live on the panel description
   const updateIntegrationView = () => {
     const integration = treeProvider.getIntegration();
+    const wipActive =
+      integration &&
+      integration.wip.some((l) => integration.lanes.includes(l));
     integrationView.description = !integration
       ? 'off'
       : integration.error?.code === 'conflict'
         ? 'lane conflict'
         : integration.error
           ? 'rebuild failed'
-          : `→ ${integrationBaseRef()}`;
+          : `→ ${integrationBaseRef()}${wipActive ? ' · +wip' : ''}`;
     integrationView.message = integration?.error
       ? integration.error.message
       : undefined;
@@ -826,6 +829,26 @@ export function activate(context: vscode.ExtensionContext): void {
           const message = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Git Workflow: ${message}`);
         }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.includeWipInIntegration',
+      async (item?: { branch?: string }) => {
+        if (!item?.branch) {
+          return;
+        }
+        const result = await treeProvider.setLaneWip(item.branch, true);
+        reportIntegrationResult(result, `wip on for ${item.branch}`);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.excludeWipFromIntegration',
+      async (item?: { branch?: string }) => {
+        if (!item?.branch) {
+          return;
+        }
+        const result = await treeProvider.setLaneWip(item.branch, false);
+        reportIntegrationResult(result, `wip off for ${item.branch}`);
       },
     ),
     vscode.commands.registerCommand(

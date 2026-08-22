@@ -60,6 +60,7 @@ export class IntegrationTreeProvider
             integration.error?.code === 'conflict' &&
             integration.error.lane === branch,
           worktreePath: branchToPath.get(branch),
+          wip: integration.wip.includes(branch),
         }),
     );
   }

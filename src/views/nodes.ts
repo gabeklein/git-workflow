@@ -177,10 +177,18 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       worktreePath?: string;
       /** Lane branch no longer exists */
       missing?: boolean;
+      /** Uncommitted edits from the checkout overlay into rebuilds */
+      wip?: boolean;
     },
   ) {
     super(branch, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = applied ? 'integrationLaneApplied' : 'integrationLane';
+    // Wip toggle only offered for lanes that have a checkout
+    const wipFlag = opts?.worktreePath
+      ? opts?.wip
+        ? 'WipOn'
+        : 'WipOff'
+      : '';
+    this.contextValue = `${applied ? 'integrationLaneApplied' : 'integrationLane'}${wipFlag}`;
     this.checkboxState = {
       state: applied
         ? vscode.TreeItemCheckboxState.Checked
@@ -190,10 +198,16 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         : `Merge ${branch} into the integration tree`,
     };
     if (opts?.conflicted) {
-      this.description = 'conflict';
+      this.description = opts?.wip ? 'conflict · +wip' : 'conflict';
       this.iconPath = new vscode.ThemeIcon(
         'warning',
         new vscode.ThemeColor('list.errorForeground'),
+      );
+    } else if (opts?.wip) {
+      this.description = '+wip';
+      this.iconPath = new vscode.ThemeIcon(
+        'edit',
+        applied ? new vscode.ThemeColor('charts.yellow') : undefined,
       );
     } else if (opts?.missing) {
       this.description = 'branch missing';
@@ -211,6 +225,9 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         : 'Candidate — check to merge its landed commits in.',
       opts?.conflicted
         ? 'This lane conflicted on the last rebuild; the checkout was left untouched.'
+        : undefined,
+      opts?.wip
+        ? 'Working-tree edits included: uncommitted changes from the checkout overlay into rebuilds (saves in VS Code re-trigger).'
         : undefined,
       opts?.missing ? 'The branch no longer exists.' : undefined,
     ]
