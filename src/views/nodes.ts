@@ -19,6 +19,7 @@ export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 export type TreeNode =
   | GroupItem
   | IntegrationStatusItem
+  | IntegrationBaseItem
   | IntegrationLaneItem
   | WorktreeListItem
   | ConflictWarningItem
@@ -202,6 +203,30 @@ export class IntegrationStatusItem extends vscode.TreeItem {
       title: 'Focus Integration Worktree',
       arguments: [state.worktreePath],
     };
+  }
+}
+
+/**
+ * First row under Integration: the base every rebuild starts from.
+ * Permanently checked — unchecking is reverted by the checkbox handler.
+ */
+export class IntegrationBaseItem extends vscode.TreeItem {
+  readonly kind = 'integrationBase' as const;
+
+  constructor(readonly baseRef: string) {
+    super(baseRef, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'integrationBase';
+    this.checkboxState = {
+      state: vscode.TreeItemCheckboxState.Checked,
+      tooltip: `${baseRef} is the base — always included`,
+    };
+    this.iconPath = new vscode.ThemeIcon('repo');
+    this.description = 'base';
+    this.tooltip = [
+      `Every rebuild starts from ${baseRef}`,
+      '(origin/… is preferred when it resolves).',
+      'Always included — change via the worktreeCompare.defaultBaseRef setting.',
+    ].join('\n');
   }
 }
 

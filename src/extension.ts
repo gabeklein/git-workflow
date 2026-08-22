@@ -83,6 +83,17 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     treeView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
+        if (item.kind === 'integrationBase') {
+          // The base is permanently included — snap the checkbox back
+          if (state === vscode.TreeItemCheckboxState.Unchecked) {
+            void vscode.window.setStatusBarMessage(
+              `Git Workflow: ${item.baseRef} is the base — always included`,
+              3000,
+            );
+            treeProvider.redraw();
+          }
+          continue;
+        }
         if (item.kind !== 'integrationLane') {
           continue;
         }

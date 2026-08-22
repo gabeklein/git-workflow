@@ -48,6 +48,7 @@ import {
   FileItem,
   FolderItem,
   GroupItem,
+  IntegrationBaseItem,
   IntegrationLaneItem,
   type IntegrationRowInfo,
   IntegrationStatusItem,
@@ -273,6 +274,11 @@ export class WorktreeTreeProvider
       // Keep PR cache across list refresh; explicit refreshPullRequests clears it
       void this.load();
     }, 150);
+  }
+
+  /** Re-render only (no git work) — e.g. snap a reverted checkbox back. */
+  redraw(): void {
+    this._onDidChangeTreeData.fire();
   }
 
   /** Force re-fetch for one worktree (stage/unstage, layout toggle). */
@@ -1181,33 +1187,37 @@ export class WorktreeTreeProvider
     return nodes;
   }
 
-  /** Candidate lanes under the Integration row (checked = applied). */
+  /** Base first (always checked), then candidate lanes (checked = applied). */
   private getIntegrationLaneChildren(): TreeNode[] {
     if (!this.integrationPath) {
       return [];
     }
+    const nodes: TreeNode[] = [new IntegrationBaseItem(this.defaultBaseRef())];
     if (this.integrationCandidates.length === 0) {
-      return [
+      nodes.push(
         new MessageItem(
           'No lanes yet',
           'Right-click a worktree → Add to Integration',
         ),
-      ];
+      );
+      return nodes;
     }
     const branchToPath = new Map(
       this.worktrees
         .filter((w) => !w.detached)
         .map((w) => [w.branch, w.path] as const),
     );
-    return this.integrationCandidates.map(
-      (branch) =>
+    for (const branch of this.integrationCandidates) {
+      nodes.push(
         new IntegrationLaneItem(branch, this.integrationLanes.includes(branch), {
           conflicted:
             this.integrationError?.code === 'conflict' &&
             this.integrationError.lane === branch,
           worktreePath: branchToPath.get(branch),
         }),
-    );
+      );
+    }
+    return nodes;
   }
 
   /** Worktrees shown in the list — the integration checkout lives under
