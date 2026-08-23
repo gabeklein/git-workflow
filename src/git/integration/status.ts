@@ -1,4 +1,5 @@
 import { git, gitOk } from '../exec';
+import { revParseCommit } from '../plumbing';
 import { mergeOffTree } from './merge';
 import { listAppliedLanes } from './lanes';
 
@@ -7,15 +8,7 @@ export async function resolveBaseSha(
   baseRef: string,
 ): Promise<string | undefined> {
   const name = baseRef.replace(/^origin\//, '');
-  const sha = async (ref: string) => {
-    try {
-      return (
-        await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])
-      ).trim();
-    } catch {
-      return undefined;
-    }
-  };
+  const sha = (ref: string) => revParseCommit(cwd, ref);
   // When both exist, prefer the DESCENDANT: the remote tip when PRs land
   // on the host, the local tip in local-only workflows where the user
   // advances the base directly. Diverged → origin (a fetch reconciles).
@@ -65,12 +58,8 @@ export async function findLandedLanes(
   }
   const landed: string[] = [];
   for (const lane of lanes) {
-    let laneSha: string;
-    try {
-      laneSha = (
-        await git(cwd, ['rev-parse', '--verify', `refs/heads/${lane}^{commit}`])
-      ).trim();
-    } catch {
+    const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
+    if (!laneSha) {
       continue; // branch gone — not our call to make
     }
     if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
@@ -125,12 +114,8 @@ export async function baseStatusFor(
   if (!baseSha) {
     return undefined;
   }
-  let refSha: string;
-  try {
-    refSha = (
-      await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])
-    ).trim();
-  } catch {
+  const refSha = await revParseCommit(cwd, ref);
+  if (!refSha) {
     return undefined;
   }
   const counts = (
@@ -172,14 +157,8 @@ export async function integrationFingerprint(
   const lanes = await listAppliedLanes(cwd);
   const parts: string[] = [`base\0${await resolveBaseSha(cwd, baseRef)}`];
   for (const lane of lanes) {
-    let sha = '';
-    try {
-      sha = (
-        await git(cwd, ['rev-parse', '--verify', `refs/heads/${lane}^{commit}`])
-      ).trim();
-    } catch {
-      sha = 'missing';
-    }
+    const sha =
+      (await revParseCommit(cwd, `refs/heads/${lane}`)) ?? 'missing';
     parts.push(`${lane}\0${sha}`);
   }
   return parts.join('\n');

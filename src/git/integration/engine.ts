@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { git, GitError, gitOk } from '../exec';
+import { git, gitOk } from '../exec';
+import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
 import { autoResolveArgs, integrationBranch } from './config';
 import {
@@ -110,13 +111,7 @@ export async function rebuildIntegration(
       await git(workingPath, ['merge', '--abort']);
     }
 
-    const porcelain = await git(workingPath, [
-      'status',
-      '--porcelain=v1',
-      '-unormal',
-      '--ignore-submodules=dirty',
-    ]);
-    if (porcelain.trim().length > 0) {
+    if (await isWorktreeDirty(workingPath)) {
       return {
         ok: false,
         code: 'dirty',
@@ -195,16 +190,8 @@ export async function rebuildIntegration(
     const merged: string[] = [];
     const landed: string[] = [];
     for (const lane of lanes) {
-      let laneSha: string;
-      try {
-        laneSha = (
-          await git(workingPath, [
-            'rev-parse',
-            '--verify',
-            `refs/heads/${lane}^{commit}`,
-          ])
-        ).trim();
-      } catch {
+      let laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
+      if (!laneSha) {
         skipped.push(lane);
         continue;
       }
@@ -336,12 +323,7 @@ async function rebuildInWorktree(
     } catch (err) {
       // Leave nothing half-merged on this fallback path either
       await git(workingPath, ['merge', '--abort']).catch(() => {});
-      const message =
-        err instanceof GitError
-          ? err.stderr.trim() || err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
+      const message = gitErrorMessage(err);
       return { ok: false, code: 'conflict', message, lane };
     }
   }

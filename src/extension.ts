@@ -23,7 +23,7 @@ import {
 import { getWorkingStatus } from './git/status';
 import { stagePaths, unstagePaths } from './git/stage';
 import type { SectionItem } from './views/nodes';
-import { git } from './git/exec';
+import { isWorktreeDirty } from './git/plumbing';
 import {
   removeWorktree,
   unlockWorktree,
@@ -292,17 +292,8 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
         // Fresh dirty probe (linked worktrees may not cache isDirty)
         let dirty = Boolean(wt.isDirty);
-        try {
-          const porcelain = await git(target, [
-            'status',
-            '--porcelain=v1',
-            '-unormal',
-            '--ignore-submodules=dirty',
-          ]);
-          dirty = porcelain.trim().length > 0;
-        } catch {
-          // ignore probe failure; git remove will still validate
-        }
+        // Fresh probe (git worktree remove still validates independently)
+        dirty = await isWorktreeDirty(target);
 
         const warnings: string[] = [
           `Delete linked worktree “${name}”?`,
@@ -663,13 +654,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
         try {
           if (mode.id === 'main') {
-            const porcelain = await git(workspaceRoot, [
-              'status',
-              '--porcelain=v1',
-              '-unormal',
-              '--ignore-submodules=dirty',
-            ]);
-            if (porcelain.trim().length > 0) {
+            if (await isWorktreeDirty(workspaceRoot)) {
               void vscode.window.showErrorMessage(
                 `Git Workflow: this checkout has uncommitted changes — commit or stash before switching to ${branch}`,
               );
