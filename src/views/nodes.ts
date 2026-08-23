@@ -274,6 +274,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     selected: boolean,
     pullRequest?: PullRequestInfo,
     integration?: IntegrationRowInfo,
+    baseStatus?: { behind: number; conflicts: boolean; baseRef: string },
   ) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
@@ -301,6 +302,11 @@ export class WorktreeListItem extends vscode.TreeItem {
       // Candidates are managed under the Integration row; here only add/remove
       flags.push(integration.candidate ? 'LaneCandidate' : 'LaneAddable');
     }
+    if (baseStatus?.conflicts) {
+      flags.push('ConflictsBase');
+    } else if (baseStatus && baseStatus.behind > 0) {
+      flags.push('BehindBase');
+    }
     const baseCtx = selected ? 'worktreeListItemActive' : 'worktreeListItem';
     this.contextValue =
       flags.length > 0 ? `${baseCtx}${flags.join('')}` : baseCtx;
@@ -327,6 +333,11 @@ export class WorktreeListItem extends vscode.TreeItem {
 
     const bits: string[] = [];
     // Selection is shown via blue decoration tint only (no "selected" label)
+    if (baseStatus?.conflicts) {
+      bits.push(`conflicts with ${baseStatus.baseRef}`);
+    } else if (baseStatus && baseStatus.behind > 0) {
+      bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
+    }
     if (integration?.role === 'lane' && integration.applied) {
       bits.push('applied');
     }
@@ -358,6 +369,11 @@ export class WorktreeListItem extends vscode.TreeItem {
       integration?.role === 'lane' && integration.applied
         ? 'Applied to the integration worktree'
         : undefined,
+      baseStatus?.conflicts
+        ? `Rebasing/merging onto ${baseStatus.baseRef} would conflict.`
+        : baseStatus && baseStatus.behind > 0
+          ? `${baseStatus.behind} commit(s) behind ${baseStatus.baseRef} — merges cleanly.`
+          : undefined,
       selected ? 'Selected' : 'Click to focus',
     ].filter((x): x is string => Boolean(x));
     if (pullRequest) {

@@ -19,6 +19,8 @@ import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
   abortIntegrationMerge,
   addAppliedLane,
+  baseStatusFor,
+  type BaseStatus,
   addCandidateLane,
   alignIntegrationBranchName,
   dropAppliedLane,
@@ -150,6 +152,18 @@ export class WorktreeTreeProvider
   /** Lanes whose uncommitted edits overlay into rebuilds. */
   private integrationWip: string[] = [];
   private wipDebounce: NodeJS.Timeout | undefined;
+
+  /** Inferred per-worktree base (path\0branch → ref) — ONE cache shared by
+   *  the compare snapshot and the base-status badges. */
+  private readonly worktreeBases = new Map<string, string>();
+  /** Row badges: path → status vs its base. */
+  private readonly baseStatuses = new Map<
+    string,
+    BaseStatus & { baseRef: string }
+  >();
+  /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
+  private readonly baseProbeMemo = new Map<string, boolean>();
+  private baseStatusInFlight = false;
 
   constructor(
     private readonly output: { appendLine(value: string): void },
@@ -293,6 +307,7 @@ export class WorktreeTreeProvider
     this.refreshTimer = setTimeout(() => {
       this.snapshotCache.clear();
       this.compareErrors.clear();
+      this.worktreeBases.clear();
       // Keep PR cache across list refresh; explicit refreshPullRequests clears it
       void this.load();
     }, 150);
@@ -531,9 +546,8 @@ export class WorktreeTreeProvider
       const prev = this.snapshotCache.get(worktreePath);
       const prevFp = prev ? snapshotFingerprint(prev) : undefined;
       const baseRef =
-        this.baseOverrides.get(worktreePath) ??
         prev?.compare.baseRef ??
-        (await resolveBaseRef(worktreePath, this.compareFallbackBaseRef()));
+        (await this.worktreeBaseFor(worktreePath));
 
       const [compare, status] = await Promise.all([
         compareWorkingTreeToBase(worktreePath, baseRef),
@@ -573,6 +587,12 @@ export class WorktreeTreeProvider
     this.baseOverrides.set(worktreePath, preferred);
     this.snapshotCache.delete(worktreePath);
     this.compareErrors.delete(worktreePath);
+    for (const key of [...this.worktreeBases.keys()]) {
+      if (key.startsWith(`${worktreePath}\0`)) {
+        this.worktreeBases.delete(key);
+      }
+    }
+    void this.refreshBaseStatuses();
     this.output.appendLine(`Base ref for ${worktreePath} → ${preferred}`);
     this._onDidChangeTreeData.fire();
   }
@@ -586,6 +606,7 @@ export class WorktreeTreeProvider
       this.ensureValidSelection();
       this.prunePrCache();
       await this.refreshIntegrationState();
+      void this.refreshBaseStatuses();
       this.output.appendLine(
         `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
       );
@@ -754,6 +775,7 @@ export class WorktreeTreeProvider
         this.refresh();
       }
       await this.tickIntegration();
+      void this.refreshBaseStatuses();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Worktree state check failed (${reason}): ${message}`);
@@ -1157,6 +1179,106 @@ export class WorktreeTreeProvider
     return this.integrationPath ? integrationBaseRef() : this.defaultBaseRef();
   }
 
+  /**
+   * THE per-worktree base: override → cached inference → inference
+   * (reflog/config/upstream, falling back to the integration base while
+   * integration is on). Compare snapshots and status badges both use this,
+   * so the diff you read and the badge you see agree by construction.
+   */
+  async worktreeBaseFor(worktreePath: string): Promise<string> {
+    const override = this.baseOverrides.get(worktreePath);
+    if (override) {
+      return override;
+    }
+    const branch =
+      this.worktrees.find((w) => w.path === worktreePath)?.branch ?? '';
+    const key = `${worktreePath}\0${branch}`;
+    const cached = this.worktreeBases.get(key);
+    if (cached) {
+      return cached;
+    }
+    const base = await resolveBaseRef(
+      worktreePath,
+      this.compareFallbackBaseRef(),
+    );
+    this.worktreeBases.set(key, base);
+    return base;
+  }
+
+  /**
+   * Row badges: how each lane relates to its base. Bounded-parallel, and
+   * memoized by refSha:baseSha so probes rerun only when a tip moves.
+   */
+  private async refreshBaseStatuses(): Promise<void> {
+    if (this.baseStatusInFlight) {
+      return;
+    }
+    this.baseStatusInFlight = true;
+    try {
+      const targets = this.listedWorktrees().filter((w) => !w.detached);
+      let changed = false;
+      const live = new Set<string>();
+      const worker = async (wt: DiscoveredWorktree) => {
+        live.add(wt.path);
+        try {
+          const baseRef = await this.worktreeBaseFor(wt.path);
+          const prev = this.baseStatuses.get(wt.path);
+          const status = await baseStatusFor(
+            wt.path,
+            'HEAD',
+            baseRef,
+            this.baseProbeMemo,
+          );
+          if (!status) {
+            if (this.baseStatuses.delete(wt.path)) {
+              changed = true;
+            }
+            return;
+          }
+          const entry = { ...status, baseRef };
+          this.baseStatuses.set(wt.path, entry);
+          if (
+            !prev ||
+            prev.behind !== entry.behind ||
+            prev.conflicts !== entry.conflicts ||
+            prev.baseRef !== entry.baseRef
+          ) {
+            changed = true;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.output.appendLine(
+            `Base status failed for ${wt.branch}: ${message}`,
+          );
+        }
+      };
+      // Bounded parallelism: probes are independent
+      const queue = targets.slice();
+      await Promise.all(
+        Array.from({ length: Math.min(4, queue.length) }, async () => {
+          for (;;) {
+            const wt = queue.shift();
+            if (!wt) {
+              return;
+            }
+            await worker(wt);
+          }
+        }),
+      );
+      for (const key of [...this.baseStatuses.keys()]) {
+        if (!live.has(key)) {
+          this.baseStatuses.delete(key);
+          changed = true;
+        }
+      }
+      if (changed) {
+        this._onDidChangeTreeData.fire();
+      }
+    } finally {
+      this.baseStatusInFlight = false;
+    }
+  }
+
   private async getSnapshot(
     worktreePath: string,
   ): Promise<WorktreeSnapshot | undefined> {
@@ -1168,9 +1290,7 @@ export class WorktreeTreeProvider
     try {
       const overridden = this.baseOverrides.get(worktreePath);
       const tBase = Date.now();
-      const baseRef =
-        overridden ??
-        (await resolveBaseRef(worktreePath, this.compareFallbackBaseRef()));
+      const baseRef = await this.worktreeBaseFor(worktreePath);
       if (!overridden) {
         this.output.appendLine(
           `Inferred base for ${worktreePath}: ${baseRef} (${Date.now() - tBase}ms)`,
@@ -1373,11 +1493,15 @@ export class WorktreeTreeProvider
           candidate: this.integrationCandidates.includes(wt.branch),
         };
       }
+      const baseStatus = this.baseStatuses.get(wt.path);
       return new WorktreeListItem(
         wt,
         wt.path === selected,
         pr ?? undefined,
         integration,
+        baseStatus && (baseStatus.behind > 0 || baseStatus.conflicts)
+          ? baseStatus
+          : undefined,
       );
     });
   }
