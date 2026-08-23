@@ -421,7 +421,7 @@ export class WorktreeTreeProvider
     }
     // Root monorepo checkout: ignore high-churn / irrelevant paths so every
     // node_modules or dist write does not trigger git status.
-    if (shouldIgnoreHotFollowPath(uri.fsPath)) {
+    if (shouldIgnoreHotFollowPath(uri.fsPath, selected.path)) {
       return;
     }
     // File activity → mark active (poll pace, if enabled)
@@ -911,7 +911,7 @@ export class WorktreeTreeProvider
         wip.includes(w.branch) &&
         isPathInside(uri.fsPath, w.path),
     );
-    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath)) {
+    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath, hit.path)) {
       return;
     }
     this.output.appendLine(
@@ -1696,9 +1696,14 @@ function isPathInside(fsPath: string, root: string): boolean {
   );
 }
 
-/** Skip hot-follow for paths that churn hard and are not useful for SCM UI. */
-function shouldIgnoreHotFollowPath(fsPath: string): boolean {
-  const parts = fsPath.split(/[/\\]/);
+/**
+ * Skip hot-follow for paths that churn hard and are not useful for SCM UI.
+ * Only segments INSIDE the worktree count — a repo living under /tmp (or
+ * below a parent named build/out/…) must not lose reactivity wholesale.
+ */
+function shouldIgnoreHotFollowPath(fsPath: string, worktreeRoot: string): boolean {
+  const rel = path.relative(path.resolve(worktreeRoot), path.resolve(fsPath));
+  const parts = rel.split(/[/\\]/);
   for (const part of parts) {
     if (
       part === 'node_modules' ||
