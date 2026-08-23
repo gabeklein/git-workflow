@@ -836,6 +836,74 @@ export async function alignIntegrationBranchName(
   return { from: current, to: target };
 }
 
+export interface BaseStatus {
+  /** Commits the base has that this branch lacks */
+  behind: number;
+  /** Commits this branch has that the base lacks */
+  ahead: number;
+  /** Merging/rebasing onto the base would conflict (strict off-tree probe) */
+  conflicts: boolean;
+  refSha: string;
+  baseSha: string;
+}
+
+/**
+ * How a branch relates to the base — no working-tree access. The conflict
+ * probe is STRICT (independent of integrationAutoResolve): the badge must
+ * reflect what a real `git rebase`/`git merge` would hit.
+ */
+export async function baseStatusFor(
+  cwd: string,
+  ref: string,
+  baseRef: string,
+  /** Probe results keyed `${refSha}:${baseSha}` — pass a persistent map
+   *  so merge-tree probes rerun only when a tip actually moves. */
+  probeMemo?: Map<string, boolean>,
+): Promise<BaseStatus | undefined> {
+  const baseSha = await resolveBaseSha(cwd, baseRef);
+  if (!baseSha) {
+    return undefined;
+  }
+  let refSha: string;
+  try {
+    refSha = (
+      await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])
+    ).trim();
+  } catch {
+    return undefined;
+  }
+  const counts = (
+    await git(cwd, [
+      'rev-list',
+      '--left-right',
+      '--count',
+      `${refSha}...${baseSha}`,
+    ])
+  )
+    .trim()
+    .split(/\s+/);
+  const ahead = Number(counts[0]) || 0;
+  const behind = Number(counts[1]) || 0;
+  let conflicts = false;
+  if (behind > 0 && ahead > 0) {
+    const memoKey = `${refSha}:${baseSha}`;
+    const memoized = probeMemo?.get(memoKey);
+    if (memoized !== undefined) {
+      conflicts = memoized;
+    } else {
+      const probe = await mergeOffTree(cwd, refSha, baseSha, {
+        strict: true,
+      }).catch(() => ({ kind: 'tree' }) as const);
+      conflicts = probe.kind === 'conflict';
+      probeMemo?.set(memoKey, conflicts);
+      if (probeMemo && probeMemo.size > 512) {
+        probeMemo.clear();
+      }
+    }
+  }
+  return { behind, ahead, conflicts, refSha, baseSha };
+}
+
 export async function abortIntegrationMerge(
   workingPath: string,
 ): Promise<void> {
