@@ -926,7 +926,7 @@ export class WorktreeTreeProvider
         enabled ? `wip on ${branch}` : `wip off ${branch}`,
       );
     }
-    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [] };
+    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [], landed: [] };
   }
 
   /**
@@ -948,15 +948,17 @@ export class WorktreeTreeProvider
       .get<number>('integrationFetchIntervalMs', 300000);
     if (fetchMs > 0 && Date.now() - this.lastBaseFetchAt > fetchMs) {
       this.lastBaseFetchAt = Date.now();
-      const ok = await fetchIntegrationBase(
-        this.integrationPath,
-        integrationBaseRef(),
-      );
-      this.output.appendLine(
-        ok
-          ? `Fetched origin ${integrationBaseRef()} (integration base)`
-          : 'Integration base fetch failed (offline / no remote?)',
-      );
+      // Fire-and-forget: never let a slow/hung remote stall the tick. A
+      // moved tip is picked up by the fingerprint on the next tick.
+      void fetchIntegrationBase(this.integrationPath, integrationBaseRef())
+        .then((ok) =>
+          this.output.appendLine(
+            ok
+              ? `Fetched origin ${integrationBaseRef()} (integration base)`
+              : 'Integration base fetch failed (offline / no remote?)',
+          ),
+        )
+        .catch(() => {});
     }
     // Conflicts no longer dirty the checkout (off-tree merge), so keep
     // retrying — a new commit on the conflicting lane may resolve it.
@@ -1029,15 +1031,12 @@ export class WorktreeTreeProvider
       );
       if (result.ok) {
         this.integrationError = undefined;
-        // Landed lanes retire automatically: unapply (row stays, tagged
-        // 'landed') so the changeover after merging a PR is hands-off
+        // Landed lanes were retired by the rebuild itself (under its lock);
+        // rows stay as candidates with the 'landed' tag
         for (const lane of result.landed) {
-          if (this.integrationLanes.includes(lane)) {
-            await dropAppliedLane(workingPath, lane);
-            this.output.appendLine(
-              `Lane ${lane} landed in ${integrationBaseRef()} — unapplied`,
-            );
-          }
+          this.output.appendLine(
+            `Lane ${lane} landed in ${integrationBaseRef()} — unapplied`,
+          );
         }
         this.output.appendLine(
           `Integration rebuilt (${reason}): ${

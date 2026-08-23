@@ -40,13 +40,34 @@ function buildFixture() {
   git(repo, ['add', '.']);
   git(repo, ['commit', '-qm', 'base']);
 
-  // Feature lane with a worktree under .worktrees (the default layout)
+  // Bare origin so landing/fetch flows are real
+  const origin = path.join(root, 'origin.git');
+  git(root, ['init', '-q', '--bare', 'origin.git']);
+  git(repo, ['remote', 'add', 'origin', origin]);
+  git(repo, ['push', '-qu', 'origin', 'main']);
+
+  // Feature lanes with worktrees under .worktrees (the default layout)
   git(repo, ['branch', 'feat/a']);
   git(repo, ['worktree', 'add', '-q', '.worktrees/feat-a', 'feat/a']);
   const laneA = path.join(repo, '.worktrees', 'feat-a');
   writeFileSync(path.join(laneA, 'a.txt'), 'from feat/a\n');
   git(laneA, ['add', 'a.txt']);
   git(laneA, ['commit', '-qm', 'feat a']);
+  git(repo, ['push', '-q', 'origin', 'feat/a']);
+
+  git(repo, ['branch', 'feat/b']);
+  git(repo, ['worktree', 'add', '-q', '.worktrees/feat-b', 'feat/b']);
+  const laneB = path.join(repo, '.worktrees', 'feat-b');
+  writeFileSync(path.join(laneB, 'b.txt'), 'from feat/b\n');
+  git(laneB, ['add', 'b.txt']);
+  git(laneB, ['commit', '-qm', 'feat b']);
+  git(repo, ['push', '-q', 'origin', 'feat/b']);
+
+  // A second clone stands in for "the GitHub side" where PRs land
+  git(root, ['clone', '-q', origin, 'landing']);
+  const landing = path.join(root, 'landing');
+  git(landing, ['config', 'user.email', 'edh@test']);
+  git(landing, ['config', 'user.name', 'edh']);
 
   // Integration checkout on the default branch name (integration/main)
   git(repo, [
@@ -91,7 +112,10 @@ try {
       '--skip-release-notes',
       '--disable-gpu',
     ],
-    extensionTestsEnv: { GW_FIXTURE_REPO: repo },
+    extensionTestsEnv: {
+      GW_FIXTURE_REPO: repo,
+      GW_FIXTURE_LANDING: path.join(root, 'landing'),
+    },
   });
   console.log('[edh-test] PASS');
 } catch (err) {

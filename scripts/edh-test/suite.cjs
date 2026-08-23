@@ -163,6 +163,67 @@ async function run() {
     git(repo, ['rev-parse', 'feat/a']) === laneTipBefore,
     'lane branch tip unchanged across the whole session',
   );
+
+  // ---- Landed-lane lifecycle against a real remote --------------------
+  const landing = process.env.GW_FIXTURE_LANDING;
+  const laneB = path.join(repo, '.worktrees', 'feat-b');
+  const applied = () => readLanes('focus-applied');
+
+  // 8. True-merge landing: feat/a merges on the "GitHub side"; a manual
+  //    rebuild (which fetches) must recognize it and retire on apply.
+  git(landing, ['fetch', '-q', 'origin']);
+  git(landing, ['merge', '-q', '--no-ff', '-m', 'Merge PR feat/a', 'origin/feat/a']);
+  git(landing, ['push', '-q']);
+  await vscode.commands.executeCommand('worktreeCompare.rebuildIntegration');
+  await vscode.commands.executeCommand('worktreeCompare.applyToIntegration', {
+    worktreePath: laneA,
+  });
+  await poll('true-merged lane retires instead of merging', 20000, () => {
+    const tree = git(working, ['rev-parse', 'HEAD^{tree}']);
+    const base = git(repo, ['rev-parse', 'origin/main^{tree}']);
+    return !applied().includes('feat/a') && tree === base;
+  });
+  assert(
+    readLanes('focus-candidates').includes('feat/a'),
+    'retired lane stays listed as a candidate',
+  );
+  assert(
+    fs.existsSync(path.join(working, 'a.txt')),
+    'landed content present via the base itself',
+  );
+
+  // 9. Squash landing: feat/b lands as a squash commit (no ancestry) —
+  //    the content predicate must retire it.
+  git(landing, ['fetch', '-q', 'origin']);
+  git(landing, ['merge', '-q', '--squash', 'origin/feat/b']);
+  git(landing, ['commit', '-qm', 'feat b (squash #2)']);
+  const squashSha = git(landing, ['rev-parse', 'HEAD']);
+  git(landing, ['push', '-q']);
+  await vscode.commands.executeCommand('worktreeCompare.rebuildIntegration');
+  await vscode.commands.executeCommand('worktreeCompare.applyToIntegration', {
+    worktreePath: laneB,
+  });
+  await poll('squash-landed lane retires by content', 20000, () =>
+    !applied().includes('feat/b') &&
+    fs.existsSync(path.join(working, 'b.txt')),
+  );
+
+  // 10. Revert-safety: the squash is reverted on the remote — the lane is
+  //     NOT landed anymore, so applying it must merge it back in.
+  git(landing, ['revert', '--no-edit', squashSha]);
+  git(landing, ['push', '-q']);
+  await vscode.commands.executeCommand('worktreeCompare.rebuildIntegration');
+  await poll('revert reaches the integration tree', 20000, () =>
+    !fs.existsSync(path.join(working, 'b.txt')),
+  );
+  await vscode.commands.executeCommand('worktreeCompare.applyToIntegration', {
+    worktreePath: laneB,
+  });
+  await poll('reverted lane re-applies as a real merge', 20000, () =>
+    applied().includes('feat/b') &&
+    fs.existsSync(path.join(working, 'b.txt')),
+  );
+
   console.log('[suite] all assertions passed');
 }
 
