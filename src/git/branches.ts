@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import { ensureExcludedFromStatus } from './exclude';
 import { git } from './exec';
 
@@ -70,6 +71,18 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
   }
   return [...byName.values()].sort(
     (a, b) => b.committerDate - a.committerDate,
+  );
+}
+
+/** Default location for a new worktree: first watchFolder + sanitized name. */
+export function suggestWorktreePath(workspaceRoot: string, name: string): string {
+  const watch =
+    vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<string[]>('watchFolders', ['.worktrees'])[0] || '.worktrees';
+  return path.join(
+    path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
+    sanitizeWorktreeDirName(name),
   );
 }
 

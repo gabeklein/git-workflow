@@ -30,7 +30,7 @@ import {
 } from './git/worktreeAdmin';
 import {
   createWorktreeForBranch,
-  sanitizeWorktreeDirName,
+  suggestWorktreePath,
 } from './git/branches';
 import { createWorktreeForPr } from './github/remotePrs';
 import { createFileBackedLogger } from './log';
@@ -672,15 +672,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
               `Integration mode on: ${workspaceRoot} switched ${previous ?? '(detached)'} → ${branch}`,
             );
           } else {
-            const watch =
-              vscode.workspace
-                .getConfiguration('worktreeCompare')
-                .get<string[]>('watchFolders', ['.worktrees'])[0] ||
-              '.worktrees';
-            const suggested = path.join(
-              path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
-              'working',
-            );
+            const suggested = suggestWorktreePath(workspaceRoot, 'working');
             const dest = await vscode.window.showInputBox({
               prompt: `Create a worktree on ${branch}`,
               value: suggested,
@@ -1046,15 +1038,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
         const workspaceRoot =
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
-        const watch =
-          vscode.workspace
-            .getConfiguration('worktreeCompare')
-            .get<string[]>('watchFolders', ['.worktrees'])[0] ||
-          '.worktrees';
-        const suggested = path.join(
-          path.isAbsolute(watch) ? watch : path.join(workspaceRoot, watch),
-          sanitizeWorktreeDirName(item.branch),
-        );
+        const suggested = suggestWorktreePath(workspaceRoot, item.branch);
         const dest = await vscode.window.showInputBox({
           prompt: `Create worktree for ${item.branch}`,
           value: suggested,
