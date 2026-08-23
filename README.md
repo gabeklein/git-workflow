@@ -108,6 +108,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.remotePrLimit` | `30` | Max open PRs fetched for Branches-panel tags |
 | `worktreeCompare.integrationBranch` | `integration/{base}` | Branch that opts a checkout into the overlay ({base} = short base name; `focus/working` for script interop) |
 | `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
+| `worktreeCompare.integrationFetchIntervalMs` | `300000` | Fetch `origin/<base>` this often while integration is on (`0` = off); landed lanes retire automatically |
 
 ## Integration worktree (overlay)
 

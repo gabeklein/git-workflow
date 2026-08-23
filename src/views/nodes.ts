@@ -179,6 +179,8 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       missing?: boolean;
       /** Uncommitted edits from the checkout overlay into rebuilds */
       wip?: boolean;
+      /** Lane tip is contained in the base — it landed */
+      landed?: boolean;
     },
   ) {
     super(branch, vscode.TreeItemCollapsibleState.None);
@@ -202,6 +204,12 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       this.iconPath = new vscode.ThemeIcon(
         'warning',
         new vscode.ThemeColor('list.errorForeground'),
+      );
+    } else if (opts?.landed) {
+      this.description = 'landed';
+      this.iconPath = new vscode.ThemeIcon(
+        'pass-filled',
+        new vscode.ThemeColor('charts.green'),
       );
     } else if (opts?.wip) {
       this.description = '+wip';
@@ -228,6 +236,9 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         : undefined,
       opts?.wip
         ? 'Working-tree edits included: uncommitted changes from the checkout overlay into rebuilds (saves in VS Code re-trigger).'
+        : undefined,
+      opts?.landed
+        ? 'Landed — merging this lane into the base changes nothing. Safe to remove this row and delete the branch/worktree.'
         : undefined,
       opts?.missing ? 'The branch no longer exists.' : undefined,
     ]

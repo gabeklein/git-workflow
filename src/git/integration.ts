@@ -271,7 +271,7 @@ export async function snapshotWorktreeCommit(
 }
 
 export type RebuildResult =
-  | { ok: true; lanes: string[]; skipped: string[] }
+  | { ok: true; lanes: string[]; skipped: string[]; landed: string[] }
   | {
       ok: false;
       code: 'busy' | 'dirty' | 'unique' | 'conflict' | 'error';
@@ -284,7 +284,9 @@ async function resolveBaseSha(
   baseRef: string,
 ): Promise<string | undefined> {
   const name = baseRef.replace(/^origin\//, '');
-  for (const ref of [`refs/heads/${name}`, `origin/${name}`, baseRef]) {
+  // Remote tip first — the local base branch is often stale (integration
+  // must track where PRs actually land)
+  for (const ref of [`origin/${name}`, `refs/heads/${name}`, baseRef]) {
     try {
       return (await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
     } catch {
@@ -292,6 +294,41 @@ async function resolveBaseSha(
     }
   }
   return undefined;
+}
+
+/** Best-effort `git fetch origin <base>` so origin/<base> tracks reality. */
+export async function fetchIntegrationBase(
+  cwd: string,
+  baseRef: string,
+): Promise<boolean> {
+  const name = baseRef.replace(/^origin\//, '');
+  return gitOk(cwd, ['fetch', 'origin', name]);
+}
+
+/** Lanes whose tips are already contained in the base (they landed). */
+export async function findLandedLanes(
+  cwd: string,
+  baseRef: string,
+  lanes: string[],
+): Promise<string[]> {
+  const baseSha = await resolveBaseSha(cwd, baseRef);
+  if (!baseSha) {
+    return [];
+  }
+  const landed: string[] = [];
+  for (const lane of lanes) {
+    if (
+      await gitOk(cwd, [
+        'merge-base',
+        '--is-ancestor',
+        `refs/heads/${lane}`,
+        baseSha,
+      ])
+    ) {
+      landed.push(lane);
+    }
+  }
+  return landed;
 }
 
 /**
@@ -453,6 +490,7 @@ export async function rebuildIntegration(
     let current = baseSha;
     const skipped: string[] = [];
     const merged: string[] = [];
+    const landed: string[] = [];
     for (const lane of lanes) {
       let laneSha: string;
       try {
@@ -467,6 +505,7 @@ export async function rebuildIntegration(
         skipped.push(lane);
         continue;
       }
+      let isSnapshot = false;
       if (wipLanes.has(lane)) {
         const checkout = laneCheckouts.get(lane);
         if (checkout) {
@@ -474,11 +513,18 @@ export async function rebuildIntegration(
             const snapshot = await snapshotWorktreeCommit(checkout, lane);
             if (snapshot) {
               laneSha = snapshot;
+              isSnapshot = true;
             }
           } catch {
             // snapshot failed — merge the branch tip instead
           }
         }
+      }
+      // Landed: merging the branch tip adds nothing (strict, precomputed).
+      // A wip snapshot is never landed — its uncommitted edits remain.
+      if (!isSnapshot && landedSet.has(lane)) {
+        landed.push(lane);
+        continue;
       }
       // Lane already contained in the chain (e.g. no commits yet): nothing
       // to merge — and commit-tree would collapse duplicate parents into a
@@ -527,7 +573,7 @@ export async function rebuildIntegration(
 
     // Single working-tree update; git rewrites only files whose content changed
     await git(workingPath, ['reset', '--hard', current]);
-    return { ok: true, lanes: merged, skipped };
+    return { ok: true, lanes: merged, skipped, landed };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, code: 'error', message };
@@ -545,6 +591,7 @@ async function rebuildInWorktree(
   await git(workingPath, ['reset', '--hard', baseSha]);
   const skipped: string[] = [];
   const merged: string[] = [];
+  const landed: string[] = [];
   for (const lane of lanes) {
     if (
       !(await gitOk(workingPath, [
@@ -554,6 +601,17 @@ async function rebuildInWorktree(
       ]))
     ) {
       skipped.push(lane);
+      continue;
+    }
+    if (
+      await gitOk(workingPath, [
+        'merge-base',
+        '--is-ancestor',
+        `refs/heads/${lane}`,
+        baseSha,
+      ])
+    ) {
+      landed.push(lane);
       continue;
     }
     try {
@@ -579,7 +637,7 @@ async function rebuildInWorktree(
       return { ok: false, code: 'conflict', message, lane };
     }
   }
-  return { ok: true, lanes: merged, skipped };
+  return { ok: true, lanes: merged, skipped, landed };
 }
 
 /**

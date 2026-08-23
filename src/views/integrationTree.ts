@@ -61,6 +61,7 @@ export class IntegrationTreeProvider
             integration.error.lane === branch,
           worktreePath: branchToPath.get(branch),
           wip: integration.wip.includes(branch),
+          landed: integration.landed.includes(branch),
         }),
     );
   }

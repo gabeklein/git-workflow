@@ -24,6 +24,8 @@ import {
   dropAppliedLane,
   dropCandidateLane,
   ensureIntegrationPushBlocked,
+  fetchIntegrationBase,
+  findLandedLanes,
   integrationBaseRef,
   integrationBranch,
   integrationFingerprint,
@@ -137,6 +139,9 @@ export class WorktreeTreeProvider
   private integrationLanes: string[] = [];
   /** Union of the candidates file and applied lanes — rows under Integration. */
   private integrationCandidates: string[] = [];
+  /** Candidates whose tips are contained in the base (they landed). */
+  private integrationLanded: string[] = [];
+  private lastBaseFetchAt = 0;
   private integrationError:
     | { code: string; message: string; lane?: string }
     | undefined;
@@ -772,6 +777,7 @@ export class WorktreeTreeProvider
         lanes: string[];
         candidates: string[];
         wip: string[];
+        landed: string[];
         error?: { code: string; message: string; lane?: string };
       }
     | undefined {
@@ -784,6 +790,7 @@ export class WorktreeTreeProvider
       lanes: this.integrationLanes.slice(),
       candidates: this.integrationCandidates.slice(),
       wip: this.integrationWip.slice(),
+      landed: this.integrationLanded.slice(),
       error: this.integrationError,
     };
   }
@@ -798,6 +805,7 @@ export class WorktreeTreeProvider
       this.integrationPath = undefined;
       this.integrationLanes = [];
       this.integrationCandidates = [];
+      this.integrationLanded = [];
       this.integrationError = undefined;
       this.integrationFp = undefined;
       return;
@@ -838,12 +846,18 @@ export class WorktreeTreeProvider
         ...new Set([...candidates, ...this.integrationLanes]),
       ].sort();
       this.integrationWip = await listWipLanes(wt.path);
+      this.integrationLanded = await findLandedLanes(
+        wt.path,
+        integrationBaseRef(),
+        this.integrationCandidates,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Read lanes failed: ${message}`);
       this.integrationLanes = [];
       this.integrationCandidates = [];
       this.integrationWip = [];
+      this.integrationLanded = [];
     }
   }
 
@@ -927,6 +941,23 @@ export class WorktreeTreeProvider
       this.integrationFp = undefined;
       return;
     }
+    // Track where PRs actually land: refresh origin/<base> periodically.
+    // A moved tip changes the fingerprint below and triggers the rebuild.
+    const fetchMs = vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<number>('integrationFetchIntervalMs', 300000);
+    if (fetchMs > 0 && Date.now() - this.lastBaseFetchAt > fetchMs) {
+      this.lastBaseFetchAt = Date.now();
+      const ok = await fetchIntegrationBase(
+        this.integrationPath,
+        integrationBaseRef(),
+      );
+      this.output.appendLine(
+        ok
+          ? `Fetched origin ${integrationBaseRef()} (integration base)`
+          : 'Integration base fetch failed (offline / no remote?)',
+      );
+    }
     // Conflicts no longer dirty the checkout (off-tree merge), so keep
     // retrying — a new commit on the conflicting lane may resolve it.
     let fp: string;
@@ -987,12 +1018,27 @@ export class WorktreeTreeProvider
     this.integrationRebuildInFlight = true;
     const t0 = Date.now();
     try {
+      if (reason === 'manual') {
+        // Manual rebuild = "give me reality": refresh the base tip first
+        this.lastBaseFetchAt = Date.now();
+        await fetchIntegrationBase(workingPath, integrationBaseRef());
+      }
       const result = await rebuildIntegration(
         workingPath,
         integrationBaseRef(),
       );
       if (result.ok) {
         this.integrationError = undefined;
+        // Landed lanes retire automatically: unapply (row stays, tagged
+        // 'landed') so the changeover after merging a PR is hands-off
+        for (const lane of result.landed) {
+          if (this.integrationLanes.includes(lane)) {
+            await dropAppliedLane(workingPath, lane);
+            this.output.appendLine(
+              `Lane ${lane} landed in ${integrationBaseRef()} — unapplied`,
+            );
+          }
+        }
         this.output.appendLine(
           `Integration rebuilt (${reason}): ${
             result.lanes.length > 0 ? result.lanes.join(', ') : 'base only'
@@ -1050,7 +1096,12 @@ export class WorktreeTreeProvider
     }
     await this.refreshIntegrationState();
     this._onDidChangeTreeData.fire();
-    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [] };
+    return {
+      ok: true,
+      lanes: this.integrationLanes.slice(),
+      skipped: [],
+      landed: [],
+    };
   }
 
   /** Add this worktree's branch as a lane and rebuild. */
