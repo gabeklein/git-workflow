@@ -60,6 +60,7 @@ npm run install:local
 | `npm run package` | Production `dist/` only |
 | `npm run vsix` | Production build + `artifacts/*.vsix` |
 | `npm run install:local` | Build → VSIX → editor install → vscode-server mirror |
+| `npm run test:edh` | Live EDH test: sample repo + real VS Code, drives integration commands |
 
 ### Install notes
 
