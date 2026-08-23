@@ -10,6 +10,7 @@ import {
 import { pickBaseRef } from '../compare/pickBaseRef';
 import { pickWorktree } from '../compare/pickWorktree';
 import { commitStaged, commitUnstagedPaths } from '../git/commit';
+import { findLandedLanes } from '../git/integration';
 import { isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
@@ -146,6 +147,24 @@ export function registerWorktreeCommands(
         // Fresh probe (git worktree remove still validates independently)
         dirty = await isWorktreeDirty(target);
 
+        // Landed hint: merging this branch into its base changes nothing
+        // (ancestry or content — same predicate as integration retirement),
+        // so its COMMITS are safe. Deliberately not "nothing will be lost":
+        // gitignored files in the checkout are invisible to the dirty probe.
+        let landedIn: string | undefined;
+        if (!wt.detached && !dirty) {
+          try {
+            const baseRef = await treeProvider.worktreeBaseFor(target);
+            if (
+              (await findLandedLanes(target, baseRef, [wt.branch])).length > 0
+            ) {
+              landedIn = baseRef;
+            }
+          } catch {
+            // hint only — never block the delete flow on a probe failure
+          }
+        }
+
         const warnings: string[] = [
           `Delete linked worktree “${name}”?`,
           '',
@@ -155,6 +174,12 @@ export function registerWorktreeCommands(
           'This runs `git worktree remove` and deletes the checkout folder.',
           'The branch ref is kept (not deleted).',
         ];
+        if (landedIn) {
+          warnings.push(
+            '',
+            `✓ Landed: every commit on ${wt.branch} is already contained in ${landedIn} — the checkout is safe to delete.`,
+          );
+        }
         if (dirty) {
           warnings.push(
             '',
