@@ -149,6 +149,8 @@ export class WorktreeTreeProvider
     | undefined;
   private integrationFp: string | undefined;
   private integrationRebuildInFlight = false;
+  /** Reason of a rebuild requested while one was in flight — run once after. */
+  private integrationRebuildQueued: string | undefined;
   /** Lanes whose uncommitted edits overlay into rebuilds. */
   private integrationWip: string[] = [];
   private wipDebounce: NodeJS.Timeout | undefined;
@@ -211,6 +213,11 @@ export class WorktreeTreeProvider
       }),
       // Agent/editor writes through VS Code (no recursive FS watcher)
       vscode.workspace.onDidSaveTextDocument((doc) => {
+        if (process.env.GW_TEST_HOOKS === '1') {
+          this.output.appendLine(
+            `save event: ${doc.uri.scheme}:${doc.uri.fsPath}`,
+          );
+        }
         this.scheduleSoftRefreshIfUnderSelected(doc.uri);
         this.scheduleWipRebuildIfUnderWipLane(doc.uri);
       }),
@@ -414,7 +421,7 @@ export class WorktreeTreeProvider
     }
     // Root monorepo checkout: ignore high-churn / irrelevant paths so every
     // node_modules or dist write does not trigger git status.
-    if (shouldIgnoreHotFollowPath(uri.fsPath)) {
+    if (shouldIgnoreHotFollowPath(uri.fsPath, selected.path)) {
       return;
     }
     // File activity → mark active (poll pace, if enabled)
@@ -904,9 +911,12 @@ export class WorktreeTreeProvider
         wip.includes(w.branch) &&
         isPathInside(uri.fsPath, w.path),
     );
-    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath)) {
+    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath, hit.path)) {
       return;
     }
+    this.output.appendLine(
+      `Wip edit under ${hit.branch} (${path.basename(uri.fsPath)}) — rebuild scheduled`,
+    );
     if (this.wipDebounce) {
       clearTimeout(this.wipDebounce);
     }
@@ -1037,6 +1047,10 @@ export class WorktreeTreeProvider
       return { ok: false, code: 'error', message: 'no integration worktree' };
     }
     if (this.integrationRebuildInFlight) {
+      // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
+      // follow-up run — it re-reads the lane files, so it applies whatever
+      // state the caller just wrote.
+      this.integrationRebuildQueued = reason;
       return { ok: false, code: 'busy', message: 'rebuild already running' };
     }
     this.integrationRebuildInFlight = true;
@@ -1090,6 +1104,11 @@ export class WorktreeTreeProvider
       return result;
     } finally {
       this.integrationRebuildInFlight = false;
+      if (this.integrationRebuildQueued) {
+        const queued = this.integrationRebuildQueued;
+        this.integrationRebuildQueued = undefined;
+        void this.runIntegrationRebuild(`${queued} (queued)`);
+      }
     }
   }
 
@@ -1209,7 +1228,14 @@ export class WorktreeTreeProvider
    * Row badges: how each lane relates to its base. Bounded-parallel, and
    * memoized by refSha:baseSha so probes rerun only when a tip moves.
    */
-  private async refreshBaseStatuses(): Promise<void> {
+  /** Row badge for a worktree (undefined = up to date / unknown). */
+  getBaseStatus(
+    worktreePath: string,
+  ): { behind: number; ahead: number; conflicts: boolean; baseRef: string } | undefined {
+    return this.baseStatuses.get(worktreePath);
+  }
+
+  async refreshBaseStatuses(): Promise<void> {
     if (this.baseStatusInFlight) {
       return;
     }
@@ -1670,9 +1696,14 @@ function isPathInside(fsPath: string, root: string): boolean {
   );
 }
 
-/** Skip hot-follow for paths that churn hard and are not useful for SCM UI. */
-function shouldIgnoreHotFollowPath(fsPath: string): boolean {
-  const parts = fsPath.split(/[/\\]/);
+/**
+ * Skip hot-follow for paths that churn hard and are not useful for SCM UI.
+ * Only segments INSIDE the worktree count — a repo living under /tmp (or
+ * below a parent named build/out/…) must not lose reactivity wholesale.
+ */
+function shouldIgnoreHotFollowPath(fsPath: string, worktreeRoot: string): boolean {
+  const rel = path.relative(path.resolve(worktreeRoot), path.resolve(fsPath));
+  const parts = rel.split(/[/\\]/);
   for (const part of parts) {
     if (
       part === 'node_modules' ||
