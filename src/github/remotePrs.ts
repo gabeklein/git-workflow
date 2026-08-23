@@ -226,14 +226,6 @@ export async function listRemotePrFiles(
   return { baseRef, headRef, files: parseNameStatus(out) };
 }
 
-function sanitizeDirName(name: string): string {
-  return name
-    .replace(/[/\\:]+/g, '-')
-    .replace(/[^\w.@+-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'pr';
-}
-
 /**
  * Create a linked worktree for a PR under the first watch folder.
  * Does not delete existing folders; throws if destination exists.
@@ -283,36 +275,3 @@ export async function createWorktreeForPr(
   return destDir;
 }
 
-/** Default destination path for a PR worktree. */
-export function defaultPrWorktreePath(
-  workspaceRoot: string,
-  pr: RemotePullRequest,
-): string {
-  const watch =
-    vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<string[]>('watchFolders', ['.worktrees'])[0] ||
-    '.worktrees';
-  const folder = path.isAbsolute(watch)
-    ? watch
-    : path.join(workspaceRoot, watch);
-  const name = sanitizeDirName(pr.headRefName || `pr-${pr.number}`);
-  return path.join(folder, name);
-}
-
-export function formatRemotePrDescription(pr: RemotePullRequest): string {
-  const bits: string[] = [];
-  if (pr.authorLogin) {
-    bits.push(pr.authorLogin);
-  }
-  if (pr.baseRefName && pr.headRefName) {
-    bits.push(`${pr.baseRefName} ← ${pr.headRefName}`);
-  }
-  if (pr.hasLocalWorktree) {
-    bits.push('local');
-  }
-  if (typeof pr.changedFiles === 'number') {
-    bits.push(`${pr.changedFiles} files`);
-  }
-  return bits.join(' · ');
-}

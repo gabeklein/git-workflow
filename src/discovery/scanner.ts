@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from '../git/exec';
+import { isWorktreeDirty } from '../git/plumbing';
 import { integrationBranch } from '../git/integration';
 import { listWorktreeAdmin, type WorktreeAdminState } from '../git/worktreeAdmin';
 import type { WorktreeInfo } from '../git/worktree';
@@ -43,21 +44,6 @@ function getRootCheckoutMode(): RootCheckoutMode {
     return v;
   }
   return 'dirty';
-}
-
-/** Cheap dirty probe for root-checkout visibility. */
-async function probeDirty(dir: string): Promise<boolean> {
-  try {
-    const out = await git(dir, [
-      'status',
-      '--porcelain=v1',
-      '-unormal',
-      '--ignore-submodules=dirty',
-    ]);
-    return out.trim().length > 0;
-  } catch {
-    return false;
-  }
 }
 
 /** Branch has remote tip → pushed; else local-only. */
@@ -195,7 +181,7 @@ export async function discoverWorktrees(
           if (rootMode === 'never') {
             continue;
           }
-          dirty = await probeDirty(normalized);
+          dirty = await isWorktreeDirty(normalized);
           if (rootMode === 'dirty' && !dirty) {
             output?.appendLine(
               `Root checkout clean, omitted (includeRootCheckout=dirty): ${normalized}`,
