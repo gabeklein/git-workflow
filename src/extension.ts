@@ -34,6 +34,7 @@ import {
 } from './git/branches';
 import { createWorktreeForPr } from './github/remotePrs';
 import { createFileBackedLogger } from './log';
+import { ChangesTreeProvider } from './views/changesTree';
 import { IntegrationTreeProvider } from './views/integrationTree';
 import { BranchesTreeProvider } from './views/branchesTree';
 import {
@@ -79,9 +80,33 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
     treeDataProvider: treeProvider,
-    showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
+
+  const changesProvider = new ChangesTreeProvider(treeProvider);
+  context.subscriptions.push(changesProvider);
+  const changesView = vscode.window.createTreeView('worktreeCompare.changes', {
+    treeDataProvider: changesProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(changesView);
+
+  // Panel descriptions: worktree count / which worktree the Changes show
+  const updateSplitViewDescriptions = () => {
+    const worktrees = treeProvider.getWorktrees();
+    const integrationPath = treeProvider.getIntegration()?.path;
+    const listed = worktrees.filter((w) => w.path !== integrationPath).length;
+    treeView.description =
+      listed > 0 ? `${listed} worktree${listed === 1 ? '' : 's'}` : undefined;
+    const selected = treeProvider.getSelected();
+    changesView.description = selected
+      ? selected.branch + (selected.detached ? ' (detached)' : '')
+      : undefined;
+  };
+  updateSplitViewDescriptions();
+  context.subscriptions.push(
+    treeProvider.onDidChangeWorktrees(updateSplitViewDescriptions),
+  );
 
   const integrationProvider = new IntegrationTreeProvider(treeProvider);
   context.subscriptions.push(integrationProvider);
