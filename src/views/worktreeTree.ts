@@ -149,6 +149,8 @@ export class WorktreeTreeProvider
     | undefined;
   private integrationFp: string | undefined;
   private integrationRebuildInFlight = false;
+  /** Reason of a rebuild requested while one was in flight — run once after. */
+  private integrationRebuildQueued: string | undefined;
   /** Lanes whose uncommitted edits overlay into rebuilds. */
   private integrationWip: string[] = [];
   private wipDebounce: NodeJS.Timeout | undefined;
@@ -1037,6 +1039,10 @@ export class WorktreeTreeProvider
       return { ok: false, code: 'error', message: 'no integration worktree' };
     }
     if (this.integrationRebuildInFlight) {
+      // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
+      // follow-up run — it re-reads the lane files, so it applies whatever
+      // state the caller just wrote.
+      this.integrationRebuildQueued = reason;
       return { ok: false, code: 'busy', message: 'rebuild already running' };
     }
     this.integrationRebuildInFlight = true;
@@ -1090,6 +1096,11 @@ export class WorktreeTreeProvider
       return result;
     } finally {
       this.integrationRebuildInFlight = false;
+      if (this.integrationRebuildQueued) {
+        const queued = this.integrationRebuildQueued;
+        this.integrationRebuildQueued = undefined;
+        void this.runIntegrationRebuild(`${queued} (queued)`);
+      }
     }
   }
 
