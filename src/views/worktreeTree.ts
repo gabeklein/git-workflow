@@ -213,6 +213,11 @@ export class WorktreeTreeProvider
       }),
       // Agent/editor writes through VS Code (no recursive FS watcher)
       vscode.workspace.onDidSaveTextDocument((doc) => {
+        if (process.env.GW_TEST_HOOKS === '1') {
+          this.output.appendLine(
+            `save event: ${doc.uri.scheme}:${doc.uri.fsPath}`,
+          );
+        }
         this.scheduleSoftRefreshIfUnderSelected(doc.uri);
         this.scheduleWipRebuildIfUnderWipLane(doc.uri);
       }),
