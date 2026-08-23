@@ -263,6 +263,103 @@ async function baseBadges() {
   });
 }
 
+async function manualCatchUp() {
+  // Commands that end in a force-push/push OFFER await the notification;
+  // headless nothing dismisses it — fire them without awaiting and poll
+  // git state instead.
+  const fire = (command, arg) =>
+    void vscode.commands.executeCommand(command, arg);
+  const gitOk = (cwd, args) => {
+    try {
+      git(cwd, args);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const rebasePaused = () => {
+    const p = git(laneA, ['rev-parse', '--git-path', 'rebase-merge']);
+    return fs.existsSync(path.resolve(laneA, p));
+  };
+
+  // laneA still carries the uncommitted wip.txt from the wip scenario —
+  // catch-up ops refuse dirty worktrees (as they must), so clean it up
+  fs.rmSync(path.join(laneA, 'wip.txt'), { force: true });
+
+  // 1. Conflicted rebase pauses visibly; Abort restores the tip
+  const tipBefore = git(repo, ['rev-parse', 'feat/a']);
+  fire('worktreeCompare.rebaseOntoBase', { worktreePath: laneA });
+  await poll('conflicted rebase pauses (row shows rebasing)', 20000, async () => {
+    await api.refreshBaseStatuses();
+    return rebasePaused() && api.baseStatus(laneA)?.rebasing === true;
+  });
+  fire('worktreeCompare.abortRebase', { worktreePath: laneA });
+  await poll('abort restores the lane tip', 20000, async () => {
+    await api.refreshBaseStatuses();
+    return (
+      !rebasePaused() &&
+      git(repo, ['rev-parse', 'feat/a']) === tipBefore &&
+      api.baseStatus(laneA)?.rebasing !== true
+    );
+  });
+
+  // 2. Conflicted rebase → Continue refuses on markers → resolve → done
+  fire('worktreeCompare.rebaseOntoBase', { worktreePath: laneA });
+  await poll('rebase pauses again for the continue flow', 20000, () =>
+    rebasePaused(),
+  );
+  fire('worktreeCompare.continueRebase', { worktreePath: laneA });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert(
+    rebasePaused(),
+    'Continue Rebase refuses while conflict markers remain',
+  );
+  fs.writeFileSync(path.join(laneA, 'a.txt'), 'lane and base agree\n');
+  fire('worktreeCompare.continueRebase', { worktreePath: laneA });
+  await poll('continue finishes the rebase onto the base', 20000, () =>
+    !rebasePaused() &&
+    gitOk(repo, ['merge-base', '--is-ancestor', 'origin/main', 'feat/a']),
+  );
+  assert(
+    git(repo, ['show', 'feat/a:a.txt']).trim() === 'lane and base agree',
+    'rebased tip carries the resolved content',
+  );
+
+  // 3. Clean catch-up honors catchUpStrategy (explicit rebase, no pause)
+  const config = vscode.workspace.getConfiguration('worktreeCompare');
+  await config.update('catchUpStrategy', 'rebase', vscode.ConfigurationTarget.Workspace);
+  try {
+    fire('worktreeCompare.catchUpWithBase', { worktreePath: laneB });
+    await poll('clean rebase catches feat/b up with the base', 20000, () =>
+      gitOk(repo, ['merge-base', '--is-ancestor', 'origin/main', 'feat/b']),
+    );
+  } finally {
+    await config.update('catchUpStrategy', undefined, vscode.ConfigurationTarget.Workspace);
+  }
+
+  // 4. Conflicted MERGE from base → resolve markers → Complete commits it
+  fs.writeFileSync(path.join(landing, 'a.txt'), 'base moves on\n');
+  git(landing, ['add', 'a.txt']);
+  git(landing, ['commit', '-qm', 'base edits a.txt again']);
+  git(landing, ['push', '-q']);
+  git(laneA, ['fetch', '-q', 'origin']);
+  fire('worktreeCompare.mergeFromBase', { worktreePath: laneA });
+  await poll('conflicted merge pauses (row shows merging base)', 20000, async () => {
+    await api.refreshBaseStatuses();
+    return (
+      gitOk(laneA, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']) &&
+      api.baseStatus(laneA)?.merging === true
+    );
+  });
+  fs.writeFileSync(path.join(laneA, 'a.txt'), 'merged: both sides\n');
+  fire('worktreeCompare.completeMergeFromBase', { worktreePath: laneA });
+  await poll('complete commits the merge (two parents, clean tree)', 20000, () =>
+    !gitOk(laneA, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']) &&
+    gitOk(repo, ['rev-parse', '--verify', 'feat/a^2']) &&
+    git(laneA, ['status', '--porcelain']).length === 0,
+  );
+}
+
 async function run() {
   const scenarios = [
     ['activation', activation],
@@ -271,6 +368,7 @@ async function run() {
     ['wip overlay', wipOverlay],
     ['landed lifecycle', landedLifecycle],
     ['base badges', baseBadges],
+    ['manual catch-up', manualCatchUp],
   ];
   for (const [name, fn] of scenarios) {
     console.log(`[suite] ▸ ${name}`);

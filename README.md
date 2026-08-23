@@ -109,6 +109,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.integrationBranch` | `integration/{base}` | Branch that opts a checkout into the overlay ({base} = short base name; `focus/working` for script interop) |
 | `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
 | `worktreeCompare.integrationFetchIntervalMs` | `300000` | Fetch `origin/<base>` this often while integration is on (`0` = off); landed lanes retire automatically |
+| `worktreeCompare.catchUpStrategy` | `auto` | How **Catch Up with Base** works: `auto` (rebase unpushed lanes, merge pushed ones), `rebase`, or `merge` |
 
 ## Integration worktree (overlay)
 
@@ -130,6 +131,19 @@ The integration checkout is rebuilt as **base + a merge of each applied lane**, 
 - With `integrationAutoRebuild` on, committing (or amending / rebasing) on an applied lane rebuilds automatically — no git hooks needed. Change detection is event-driven: Node `fs.watch` on each repo's `.git` (`refs/`, `logs/`, `worktrees/`, `packed-refs` — never `objects/`, and not the VS Code host watcher), with a slow 30s poll as fallback for filesystems that drop events; if watch setup fails entirely, the poll runs at 4s.
 - Guard rails: a rebuild refuses when the integration checkout itself is dirty or carries commits that belong to no lane.
 - Applied lanes live in `<git-common-dir>/focus-applied` (candidates in `focus-candidates`) and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
+
+## Catching lanes up with the base
+
+Base conflicts dominate multi-branch workflows (peer-lane conflicts are rare), so staleness is surfaced on the **worktree rows**: `N behind <base>`, `conflicts with <base>`, `rebasing`, or `merging base`. Every badge is computed against the same per-worktree base the Commits/Full Diff views use, and the paused states are probed from real git state (`rebase-merge`/`MERGE_HEAD`) — operations started in a terminal show the same controls.
+
+Manual flow, from the row's context menu:
+
+- **Catch Up with Base…** picks the method via `catchUpStrategy` — `auto` (default) rebases unpushed lanes and merges the base into pushed ones (no force-push, PR review anchors survive; squash landings erase the merge bubbles anyway). **Rebase onto Base…** and **Merge from Base…** force one method explicitly.
+- A conflicted **rebase** pauses: the marked files open for VS Code's inline conflict UI, the row flips to `rebasing`, and **Continue Rebase** (refuses while conflict markers remain; loops to the next conflicting commit) or **Abort Rebase** finish it. After rebasing a pushed branch you're offered **Force Push (with lease)** — never automatic.
+- A conflicted **merge** pauses the same way (`merging base`, **Complete Merge from Base** / **Abort Merge from Base**); completing a pushed lane's merge offers a plain **Push**.
+- Every operation refuses to start on a dirty worktree, or when a rebase/merge is already in progress there — the extension never aborts an operation it didn't start.
+
+Applied integration lanes that conflict with the base are re-probed on every refresh, so the `conflict` badge and **Resolve Conflict with Base…** (which runs the base merge in the lane's own worktree — the same conflict its PR would hit) survive window reloads.
 
 ## Base ref inference
 

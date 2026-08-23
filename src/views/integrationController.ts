@@ -1,11 +1,13 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
+import { baseMergeInProgress } from '../git/laneOps';
 import {
   abortIntegrationMerge,
   addAppliedLane,
   addCandidateLane,
   alignIntegrationBranchName,
+  baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
   ensureIntegrationPushBlocked,
@@ -44,6 +46,10 @@ export interface IntegrationState {
   candidates: string[];
   wip: string[];
   landed: string[];
+  /** Applied lanes whose tips conflict with the base (probed off-tree). */
+  conflicts: string[];
+  /** Candidates with a paused base merge in their worktree. */
+  resolving: string[];
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -61,6 +67,12 @@ export class IntegrationController implements vscode.Disposable {
   private landed: string[] = [];
   /** Lanes whose uncommitted edits overlay into rebuilds. */
   private wip: string[] = [];
+  /** Applied lanes whose tips conflict with the base right now. */
+  private conflicts: string[] = [];
+  /** Candidates with a paused base merge in their worktree. */
+  private resolving: string[] = [];
+  /** Conflict-probe memo (refSha:baseSha) for the lane-vs-base re-probe. */
+  private readonly probeMemo = new Map<string, boolean>();
   private error: { code: string; message: string; lane?: string } | undefined;
   private fingerprint: string | undefined;
   private rebuildInFlight = false;
@@ -83,6 +95,8 @@ export class IntegrationController implements vscode.Disposable {
       candidates: this.candidates.slice(),
       wip: this.wip.slice(),
       landed: this.landed.slice(),
+      conflicts: this.conflicts.slice(),
+      resolving: this.resolving.slice(),
       error: this.error,
     };
   }
@@ -104,6 +118,8 @@ export class IntegrationController implements vscode.Disposable {
       this.lanes = [];
       this.candidates = [];
       this.landed = [];
+      this.conflicts = [];
+      this.resolving = [];
       this.error = undefined;
       this.fingerprint = undefined;
       return;
@@ -136,6 +152,40 @@ export class IntegrationController implements vscode.Disposable {
         integrationBaseRef(),
         this.candidates,
       );
+      // Persistent conflict badge: re-probe applied lanes against the base
+      // on every refresh (memoized per tip pair), so 'conflict' and its
+      // Resolve action survive window reloads instead of living only in
+      // post-rebuild error memory.
+      const conflicts: string[] = [];
+      for (const lane of this.lanes) {
+        if (this.landed.includes(lane)) {
+          continue;
+        }
+        const st = await baseStatusFor(
+          wt.path,
+          `refs/heads/${lane}`,
+          integrationBaseRef(),
+          this.probeMemo,
+        );
+        if (st?.conflicts) {
+          conflicts.push(lane);
+        }
+      }
+      this.conflicts = conflicts;
+      // Paused base merges in candidate checkouts (started here or in a
+      // terminal) — the lane row shows Complete/Abort either way.
+      const resolving: string[] = [];
+      for (const w of this.host.getWorktrees()) {
+        if (
+          !w.detached &&
+          w.path !== wt.path &&
+          this.candidates.includes(w.branch) &&
+          (await baseMergeInProgress(w.path))
+        ) {
+          resolving.push(w.branch);
+        }
+      }
+      this.resolving = resolving;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.host.output.appendLine(`Read lanes failed: ${message}`);
@@ -143,6 +193,8 @@ export class IntegrationController implements vscode.Disposable {
       this.candidates = [];
       this.wip = [];
       this.landed = [];
+      this.conflicts = [];
+      this.resolving = [];
     }
   }
 

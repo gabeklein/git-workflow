@@ -125,6 +125,21 @@
           ],
           "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable \u2014 but resolved-away edits silently miss from the combined tree."
         },
+        "worktreeCompare.catchUpStrategy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "rebase",
+            "merge"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Rebase unpushed lanes (history still private); merge the base into pushed lanes (no force-push, review anchors survive — squash landings erase the merge bubbles anyway).",
+            "Always rebase; pushed lanes get a Force Push (with lease) offer afterward.",
+            "Always merge the base in — never rewrites history."
+          ],
+          "description": "How Catch Up with Base brings a lane up to date with its base."
+        },
         "worktreeCompare.integrationFetchIntervalMs": {
           "type": "number",
           "default": 300000,
@@ -360,6 +375,46 @@
         "title": "Change Integration Base\u2026",
         "icon": "$(git-compare)",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.catchUpWithBase",
+        "title": "Catch Up with Base\u2026",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.rebaseOntoBase",
+        "title": "Rebase onto Base\u2026",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.mergeFromBase",
+        "title": "Merge from Base\u2026",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.continueRebase",
+        "title": "Continue Rebase",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.abortRebase",
+        "title": "Abort Rebase",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.completeMergeFromBase",
+        "title": "Complete Merge from Base",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.abortMergeFromBase",
+        "title": "Abort Merge from Base",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.resolveLaneConflict",
+        "title": "Resolve Conflict with Base\u2026",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -452,6 +507,41 @@
           "group": "1_worktree@1"
         },
         {
+          "command": "worktreeCompare.catchUpWithBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "group": "1_base@1"
+        },
+        {
+          "command": "worktreeCompare.rebaseOntoBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "group": "1_base@2"
+        },
+        {
+          "command": "worktreeCompare.mergeFromBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "group": "1_base@3"
+        },
+        {
+          "command": "worktreeCompare.continueRebase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /Rebasing/",
+          "group": "1_base@1"
+        },
+        {
+          "command": "worktreeCompare.abortRebase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /Rebasing/",
+          "group": "1_base@2"
+        },
+        {
+          "command": "worktreeCompare.completeMergeFromBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /MergingBase/",
+          "group": "1_base@1"
+        },
+        {
+          "command": "worktreeCompare.abortMergeFromBase",
+          "when": "view == worktreeCompare.worktrees && viewItem =~ /MergingBase/",
+          "group": "1_base@2"
+        },
+        {
           "command": "worktreeCompare.addToIntegration",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneAddable/",
           "group": "2_integration@1"
@@ -460,6 +550,21 @@
           "command": "worktreeCompare.removeFromIntegration",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneCandidate/",
           "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.resolveLaneConflict",
+          "when": "view == worktreeCompare.integration && viewItem =~ /Conflicted/",
+          "group": "1_resolve@1"
+        },
+        {
+          "command": "worktreeCompare.completeMergeFromBase",
+          "when": "view == worktreeCompare.integration && viewItem =~ /Resolving/",
+          "group": "1_resolve@1"
+        },
+        {
+          "command": "worktreeCompare.abortMergeFromBase",
+          "when": "view == worktreeCompare.integration && viewItem =~ /Resolving/",
+          "group": "1_resolve@2"
         },
         {
           "command": "worktreeCompare.removeFromIntegration",

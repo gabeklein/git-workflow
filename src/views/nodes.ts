@@ -181,6 +181,8 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       wip?: boolean;
       /** Lane tip is contained in the base — it landed */
       landed?: boolean;
+      /** A base merge is paused in the lane's worktree */
+      resolving?: boolean;
     },
   ) {
     super(branch, vscode.TreeItemCollapsibleState.None);
@@ -190,7 +192,13 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         ? 'WipOn'
         : 'WipOff'
       : '';
-    this.contextValue = `${applied ? 'integrationLaneApplied' : 'integrationLane'}${wipFlag}`;
+    // Resolve Conflict needs a checkout to run the merge in
+    const conflictFlag = opts?.resolving
+      ? 'Resolving'
+      : opts?.conflicted && opts?.worktreePath
+        ? 'Conflicted'
+        : '';
+    this.contextValue = `${applied ? 'integrationLaneApplied' : 'integrationLane'}${wipFlag}${conflictFlag}`;
     this.checkboxState = {
       state: applied
         ? vscode.TreeItemCheckboxState.Checked
@@ -199,7 +207,13 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         ? `${branch} is merged into the integration tree — uncheck to remove`
         : `Merge ${branch} into the integration tree`,
     };
-    if (opts?.conflicted) {
+    if (opts?.resolving) {
+      this.description = 'resolving merge';
+      this.iconPath = new vscode.ThemeIcon(
+        'git-merge',
+        new vscode.ThemeColor('charts.orange'),
+      );
+    } else if (opts?.conflicted) {
       this.description = opts?.wip ? 'conflict · +wip' : 'conflict';
       this.iconPath = new vscode.ThemeIcon(
         'warning',
@@ -231,9 +245,11 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       applied
         ? 'Applied — merged into the integration tree (landed commits only).'
         : 'Candidate — check to merge its landed commits in.',
-      opts?.conflicted
-        ? 'This lane conflicted on the last rebuild; the checkout was left untouched.'
-        : undefined,
+      opts?.resolving
+        ? 'A base merge is paused in the lane worktree — resolve the markers, then Complete Merge from Base.'
+        : opts?.conflicted
+          ? 'This lane conflicts with the base; the checkout was left untouched. Resolve Conflict with Base starts the fix in the lane worktree.'
+          : undefined,
       opts?.wip
         ? 'Working-tree edits included: uncommitted changes from the checkout overlay into rebuilds (saves in VS Code re-trigger).'
         : undefined,
@@ -274,7 +290,13 @@ export class WorktreeListItem extends vscode.TreeItem {
     selected: boolean,
     pullRequest?: PullRequestInfo,
     integration?: IntegrationRowInfo,
-    baseStatus?: { behind: number; conflicts: boolean; baseRef: string },
+    baseStatus?: {
+      behind: number;
+      conflicts: boolean;
+      rebasing?: boolean;
+      merging?: boolean;
+      baseRef: string;
+    },
   ) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
@@ -302,7 +324,11 @@ export class WorktreeListItem extends vscode.TreeItem {
       // Candidates are managed under the Integration row; here only add/remove
       flags.push(integration.candidate ? 'LaneCandidate' : 'LaneAddable');
     }
-    if (baseStatus?.conflicts) {
+    if (baseStatus?.rebasing) {
+      flags.push('Rebasing');
+    } else if (baseStatus?.merging) {
+      flags.push('MergingBase');
+    } else if (baseStatus?.conflicts) {
       flags.push('ConflictsBase');
     } else if (baseStatus && baseStatus.behind > 0) {
       flags.push('BehindBase');
@@ -333,7 +359,11 @@ export class WorktreeListItem extends vscode.TreeItem {
 
     const bits: string[] = [];
     // Selection is shown via blue decoration tint only (no "selected" label)
-    if (baseStatus?.conflicts) {
+    if (baseStatus?.rebasing) {
+      bits.push('rebasing');
+    } else if (baseStatus?.merging) {
+      bits.push('merging base');
+    } else if (baseStatus?.conflicts) {
       bits.push(`conflicts with ${baseStatus.baseRef}`);
     } else if (baseStatus && baseStatus.behind > 0) {
       bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
@@ -369,11 +399,15 @@ export class WorktreeListItem extends vscode.TreeItem {
       integration?.role === 'lane' && integration.applied
         ? 'Applied to the integration worktree'
         : undefined,
-      baseStatus?.conflicts
-        ? `Rebasing/merging onto ${baseStatus.baseRef} would conflict.`
-        : baseStatus && baseStatus.behind > 0
-          ? `${baseStatus.behind} commit(s) behind ${baseStatus.baseRef} — merges cleanly.`
-          : undefined,
+      baseStatus?.rebasing
+        ? 'A rebase is paused here — resolve the conflicts, then Continue Rebase (or Abort Rebase).'
+        : baseStatus?.merging
+          ? 'A base merge is paused here — resolve the conflicts, then Complete Merge from Base (or abort).'
+          : baseStatus?.conflicts
+            ? `Rebasing/merging onto ${baseStatus.baseRef} would conflict — Catch Up with Base starts the fix here.`
+            : baseStatus && baseStatus.behind > 0
+              ? `${baseStatus.behind} commit(s) behind ${baseStatus.baseRef} — merges cleanly.`
+              : undefined,
       selected ? 'Selected' : 'Click to focus',
     ].filter((x): x is string => Boolean(x));
     if (pullRequest) {

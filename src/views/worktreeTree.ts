@@ -940,7 +940,11 @@ export class WorktreeTreeProvider
         wt.path === selected,
         pr ?? undefined,
         integration,
-        baseStatus && (baseStatus.behind > 0 || baseStatus.conflicts)
+        baseStatus &&
+        (baseStatus.behind > 0 ||
+          baseStatus.conflicts ||
+          baseStatus.rebasing ||
+          baseStatus.merging)
           ? baseStatus
           : undefined,
       );

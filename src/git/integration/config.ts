@@ -58,6 +58,21 @@ export function autoResolveArgs(): string[] {
   }
 }
 
+export type CatchUpStrategy = 'auto' | 'rebase' | 'merge';
+
+/**
+ * How Catch Up with Base brings a lane up to date. 'auto': rebase
+ * unpushed lanes (their history is still private), merge the base into
+ * pushed ones (no force-push, PR review anchors survive — squash landings
+ * erase the merge bubbles anyway).
+ */
+export function catchUpStrategy(): CatchUpStrategy {
+  const v = vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<string>('catchUpStrategy', 'auto');
+  return v === 'rebase' || v === 'merge' ? v : 'auto';
+}
+
 /** Branches that must never be applied as a lane. */
 export function isLaneBranch(branch: string, baseRef: string): boolean {
   if (!branch || branch === 'HEAD' || branch === 'unknown') {

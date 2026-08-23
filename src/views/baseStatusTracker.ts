@@ -1,5 +1,6 @@
 import type { DiscoveredWorktree } from '../discovery/scanner';
-import { baseStatusFor, type BaseStatus } from '../git/integration';
+import { baseStatusFor } from '../git/integration';
+import { baseMergeInProgress, rebaseInProgress } from '../git/laneOps';
 import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
 
 export interface BaseStatusHost {
@@ -10,6 +11,18 @@ export interface BaseStatusHost {
   /** Inference fallback (integration base while integration is on). */
   fallbackBaseRef(): string;
   fireTreeData(): void;
+}
+
+/** Row badge: how a worktree relates to its base, plus paused git state. */
+export interface WorktreeBaseState {
+  behind: number;
+  ahead: number;
+  conflicts: boolean;
+  /** A rebase is paused in this worktree (HEAD is detached mid-rebase). */
+  rebasing: boolean;
+  /** A merge is paused in this worktree (MERGE_HEAD present). */
+  merging: boolean;
+  baseRef: string;
 }
 
 /**
@@ -24,7 +37,7 @@ export class BaseStatusTracker {
   /** Inferred per-worktree base (path\0branch → ref). */
   private readonly inferred = new Map<string, string>();
   /** Row badges: path → status vs its base. */
-  private readonly statuses = new Map<string, BaseStatus & { baseRef: string }>();
+  private readonly statuses = new Map<string, WorktreeBaseState>();
   /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
   private readonly probeMemo = new Map<string, boolean>();
   private inFlight = false;
@@ -76,18 +89,15 @@ export class BaseStatusTracker {
   }
 
   /** Row badge for a worktree (undefined = up to date / unknown). */
-  status(
-    worktreePath: string,
-  ):
-    | { behind: number; ahead: number; conflicts: boolean; baseRef: string }
-    | undefined {
+  status(worktreePath: string): WorktreeBaseState | undefined {
     return this.statuses.get(worktreePath);
   }
 
   /**
    * Row badges: how each lane relates to its base. Bounded-parallel, and
    * probe-memoized by refSha:baseSha so merge-tree reruns only when a tip
-   * moves.
+   * moves. Detached worktrees are probed too: a paused rebase detaches
+   * HEAD, and that is exactly when the row must show Continue/Abort.
    */
   async refresh(): Promise<void> {
     if (this.inFlight) {
@@ -95,14 +105,43 @@ export class BaseStatusTracker {
     }
     this.inFlight = true;
     try {
-      const targets = this.host.listedWorktrees().filter((w) => !w.detached);
+      const targets = this.host.listedWorktrees();
       let changed = false;
       const live = new Set<string>();
       const worker = async (wt: DiscoveredWorktree) => {
         live.add(wt.path);
         try {
-          const baseRef = await this.baseFor(wt.path);
           const prev = this.statuses.get(wt.path);
+          const rebasing = await rebaseInProgress(wt.path);
+          const merging = rebasing ? false : await baseMergeInProgress(wt.path);
+          if (rebasing || merging) {
+            // Ahead/behind vs a mid-operation HEAD is noise — show the
+            // paused state alone until the operation finishes.
+            const entry: WorktreeBaseState = {
+              behind: 0,
+              ahead: 0,
+              conflicts: false,
+              rebasing,
+              merging,
+              baseRef: prev?.baseRef ?? '',
+            };
+            this.statuses.set(wt.path, entry);
+            if (
+              !prev ||
+              prev.rebasing !== rebasing ||
+              prev.merging !== merging
+            ) {
+              changed = true;
+            }
+            return;
+          }
+          if (wt.detached) {
+            if (this.statuses.delete(wt.path)) {
+              changed = true;
+            }
+            return;
+          }
+          const baseRef = await this.baseFor(wt.path);
           const status = await baseStatusFor(
             wt.path,
             'HEAD',
@@ -115,13 +154,22 @@ export class BaseStatusTracker {
             }
             return;
           }
-          const entry = { ...status, baseRef };
+          const entry: WorktreeBaseState = {
+            behind: status.behind,
+            ahead: status.ahead,
+            conflicts: status.conflicts,
+            rebasing: false,
+            merging: false,
+            baseRef,
+          };
           this.statuses.set(wt.path, entry);
           if (
             !prev ||
             prev.behind !== entry.behind ||
             prev.conflicts !== entry.conflicts ||
-            prev.baseRef !== entry.baseRef
+            prev.baseRef !== entry.baseRef ||
+            prev.rebasing ||
+            prev.merging
           ) {
             changed = true;
           }
