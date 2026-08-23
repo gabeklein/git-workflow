@@ -3,11 +3,8 @@ import * as vscode from 'vscode';
 import {
   discoverWorktrees,
   isDirectChildOfWatchRoot,
-  resolveRepoCommonDirs,
-  worktreeListFingerprint,
   type DiscoveredWorktree,
 } from '../discovery/scanner';
-import { GitDirWatcher } from '../git/gitWatcher';
 import {
   compareWorkingTreeToBase,
   formatFileChangeBreakdown,
@@ -15,32 +12,12 @@ import {
   type CompareResult,
   type FileChange,
 } from '../git/compare';
-import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
-  abortIntegrationMerge,
-  addAppliedLane,
-  baseStatusFor,
-  type BaseStatus,
-  addCandidateLane,
-  alignIntegrationBranchName,
-  dropAppliedLane,
-  dropCandidateLane,
-  ensureIntegrationPushBlocked,
-  fetchIntegrationBase,
-  findLandedLanes,
   integrationBaseRef,
-  integrationBranch,
-  integrationFingerprint,
-  isIntegrationAutoRebuildEnabled,
   isLaneBranch,
-  listAppliedLanes,
-  listCandidateLanes,
-  listWipLanes,
-  rebuildIntegration,
-  setWipLane,
   type RebuildResult,
 } from '../git/integration';
-import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
+import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
   findPullRequestForBranch,
   isGithubPrIntegrationEnabled,
@@ -49,7 +26,13 @@ import {
   resetGithubPrClient,
   type PullRequestInfo,
 } from '../github/pr';
+import { BaseStatusTracker } from './baseStatusTracker';
 import { childrenAtPrefix, joinPrefix } from './fileTree';
+import { GitActivityHub } from './gitActivityHub';
+import {
+  IntegrationController,
+  type IntegrationState,
+} from './integrationController';
 import {
   ConflictWarningItem,
   CommitItem,
@@ -62,20 +45,13 @@ import {
   type TreeNode,
   WorktreeListItem,
 } from './nodes';
+import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 import { WorktreeSelectionDecorationProvider } from './worktreeDecorations';
 
 export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
-/**
- * Worktree-list / integration check cadence. Primary signal is the .git
- * fs.watch (GitDirWatcher); while that is active the poll is only a slow
- * fallback for filesystems that drop events. Without watchers (watch setup
- * failed) the poll carries detection alone at the fast interval.
- */
-const WATCH_ROOT_POLL_FALLBACK_MS = 30000;
-const WATCH_ROOT_POLL_NO_WATCHER_MS = 4000;
 
 interface WorktreeSnapshot {
   compare: CompareResult;
@@ -83,13 +59,11 @@ interface WorktreeSnapshot {
 }
 
 /**
- * Single TreeView:
- *   ▼ Worktrees   — list (click to focus)
- *   ▼ Ahead / file sections for the selected worktree
- *
- * Hot-follow (safe): poll selected worktree only + VS Code file events
- * under that path. Watch-root membership is a cheap readdir poll — do not
- * createFileSystemWatcher on `.worktrees` (the host watches recursively).
+ * Composition root for the Worktree panel:
+ *   discovery + selection + compare snapshots (hot-follow) + PR badges,
+ * with the integration overlay (IntegrationController), base badges
+ * (BaseStatusTracker), and .git change detection (GitActivityHub) as
+ * dedicated modules. Also renders the Changes view via getChangesChildren.
  */
 export class WorktreeTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
@@ -112,13 +86,6 @@ export class WorktreeTreeProvider
   private readonly disposables: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
   private pollTimer: NodeJS.Timeout | undefined;
-  private watchRootTimer: NodeJS.Timeout | undefined;
-  private watchRootFingerprint: string | undefined;
-  /** Node fs.watch on each repo's .git — primary change signal. */
-  private gitWatchers: GitDirWatcher[] = [];
-  private gitWatcherGeneration = 0;
-  private stateCheckInFlight = false;
-  private stateCheckQueued = false;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
   /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
@@ -127,7 +94,6 @@ export class WorktreeTreeProvider
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
-  private readonly baseOverrides = new Map<string, string>();
   /** PR lookup cache keyed by worktreePath\\0branch */
   private readonly prCache = new Map<string, PullRequestInfo | null>();
   private prRefreshGeneration = 0;
@@ -136,53 +102,57 @@ export class WorktreeTreeProvider
   private readonly selectionDecorations =
     new WorktreeSelectionDecorationProvider();
 
-  /** Integration overlay (focus/working) state, refreshed on load/tick. */
-  private integrationPath: string | undefined;
-  private integrationLanes: string[] = [];
-  /** Union of the candidates file and applied lanes — rows under Integration. */
-  private integrationCandidates: string[] = [];
-  /** Candidates whose tips are contained in the base (they landed). */
-  private integrationLanded: string[] = [];
-  private lastBaseFetchAt = 0;
-  private integrationError:
-    | { code: string; message: string; lane?: string }
-    | undefined;
-  private integrationFp: string | undefined;
-  private integrationRebuildInFlight = false;
-  /** Reason of a rebuild requested while one was in flight — run once after. */
-  private integrationRebuildQueued: string | undefined;
-  /** Lanes whose uncommitted edits overlay into rebuilds. */
-  private integrationWip: string[] = [];
-  private wipDebounce: NodeJS.Timeout | undefined;
-
-  /** Inferred per-worktree base (path\0branch → ref) — ONE cache shared by
-   *  the compare snapshot and the base-status badges. */
-  private readonly worktreeBases = new Map<string, string>();
-  /** Row badges: path → status vs its base. */
-  private readonly baseStatuses = new Map<
-    string,
-    BaseStatus & { baseRef: string }
-  >();
-  /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
-  private readonly baseProbeMemo = new Map<string, boolean>();
-  private baseStatusInFlight = false;
+  private readonly integration: IntegrationController;
+  private readonly baseStatus: BaseStatusTracker;
+  private readonly activity: GitActivityHub;
 
   constructor(
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
   ) {
+    this.integration = new IntegrationController({
+      output,
+      getWorktrees: () => this.worktrees,
+      getSelectedPath: () => this.selectedPath,
+      fireTreeData: () => this._onDidChangeTreeData.fire(),
+      refresh: () => this.refresh(),
+      refreshCompare: (p) => this.refreshCompare(p),
+      moveSelectionOff: (p) => this.moveSelectionOff(p),
+    });
+    this.baseStatus = new BaseStatusTracker({
+      output,
+      getWorktrees: () => this.worktrees,
+      listedWorktrees: () => this.listedWorktrees(),
+      fallbackBaseRef: () => this.compareFallbackBaseRef(),
+      fireTreeData: () => this._onDidChangeTreeData.fire(),
+    });
+    this.activity = new GitActivityHub({
+      output,
+      onMembershipChanged: (reason) => {
+        this.output.appendLine(`Worktree list changed (${reason}) — rediscover`);
+        this.refresh();
+      },
+      onTick: async () => {
+        await this.integration.tick();
+        void this.baseStatus.refresh();
+      },
+      onActivity: () => this._onGitActivity.fire(),
+    });
+
     this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);
     this.selectionDecorations.setSelectedPath(this.selectedPath);
     this.disposables.push(
       this.selectionDecorations,
+      this.integration,
+      this.activity,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        void this.restartGitWatchers();
+        void this.activity.restart();
         this.refresh();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('worktreeCompare')) {
           if (e.affectsConfiguration('worktreeCompare.watchFolders')) {
-            this.restartWatchRootPoll();
+            this.activity.restartPoll();
           }
           this.restartPoll();
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
@@ -199,7 +169,7 @@ export class WorktreeTreeProvider
           } else if (
             e.affectsConfiguration('worktreeCompare.integrationBaseRef')
           ) {
-            void this.handleIntegrationBaseChange();
+            void this.integration.handleBaseChange();
           } else if (
             e.affectsConfiguration('worktreeCompare.squashLayout') ||
             e.affectsConfiguration('worktreeCompare.defaultBaseRef')
@@ -219,20 +189,20 @@ export class WorktreeTreeProvider
           );
         }
         this.scheduleSoftRefreshIfUnderSelected(doc.uri);
-        this.scheduleWipRebuildIfUnderWipLane(doc.uri);
+        this.integration.scheduleWipRebuildIfUnderWipLane(doc.uri);
       }),
       vscode.workspace.onDidCreateFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
-          this.scheduleWipRebuildIfUnderWipLane(u);
+          this.integration.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidDeleteFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
-          this.scheduleWipRebuildIfUnderWipLane(u);
+          this.integration.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidRenameFiles((e) => {
@@ -241,15 +211,17 @@ export class WorktreeTreeProvider
           this.scheduleDiscoverIfWatchRootChild(f.oldUri);
           this.scheduleSoftRefreshIfUnderSelected(f.newUri);
           this.scheduleSoftRefreshIfUnderSelected(f.oldUri);
-          this.scheduleWipRebuildIfUnderWipLane(f.newUri);
-          this.scheduleWipRebuildIfUnderWipLane(f.oldUri);
+          this.integration.scheduleWipRebuildIfUnderWipLane(f.newUri);
+          this.integration.scheduleWipRebuildIfUnderWipLane(f.oldUri);
         }
       }),
     );
-    void this.restartGitWatchers();
+    void this.activity.restart();
     this.restartPoll();
     void this.refresh();
   }
+
+  // ---- worktrees & selection ---------------------------------------------
 
   /** All discovered worktrees (for the picker). */
   getWorktrees(): DiscoveredWorktree[] {
@@ -302,6 +274,45 @@ export class WorktreeTreeProvider
     this._onDidChangeWorktrees.fire();
   }
 
+  /** Selection landed on the integration checkout — move to a real lane. */
+  private moveSelectionOff(worktreePath: string): void {
+    const fallback = this.worktrees.find((w) => w.path !== worktreePath);
+    this.selectedPath = fallback?.path;
+    this.selectionDecorations.setSelectedPath(this.selectedPath);
+    void this.context.workspaceState.update(
+      SELECTED_PATH_KEY,
+      this.selectedPath,
+    );
+    this.output.appendLine(
+      `Selection moved off integration checkout → ${this.selectedPath ?? '(none)'}`,
+    );
+  }
+
+  private ensureValidSelection(): void {
+    if (this.worktrees.length === 0) {
+      this.selectedPath = undefined;
+      this.selectionDecorations.setSelectedPath(undefined);
+      return;
+    }
+    if (
+      !this.selectedPath ||
+      !this.worktrees.some((w) => w.path === this.selectedPath)
+    ) {
+      // Prefer a real worktree; the integration checkout only via clicks
+      const first =
+        this.worktrees.find((w) => w.path !== this.integration.getPath()) ??
+        this.worktrees[0]!;
+      this.selectedPath = first.path;
+      void this.context.workspaceState.update(
+        SELECTED_PATH_KEY,
+        this.selectedPath,
+      );
+    }
+    this.selectionDecorations.setSelectedPath(this.selectedPath);
+  }
+
+  // ---- discovery ----------------------------------------------------------
+
   refresh(): void {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
@@ -309,7 +320,7 @@ export class WorktreeTreeProvider
     this.refreshTimer = setTimeout(() => {
       this.snapshotCache.clear();
       this.compareErrors.clear();
-      this.worktreeBases.clear();
+      this.baseStatus.invalidateAll();
       // Keep PR cache across list refresh; explicit refreshPullRequests clears it
       void this.load();
     }, 150);
@@ -321,6 +332,49 @@ export class WorktreeTreeProvider
     this.compareErrors.delete(worktreePath);
     this._onDidChangeTreeData.fire();
   }
+
+  private async load(): Promise<void> {
+    const t0 = Date.now();
+    this.loading = true;
+    this._onDidChangeTreeData.fire();
+    try {
+      this.worktrees = await discoverWorktrees(this.output);
+      this.ensureValidSelection();
+      this.prunePrCache();
+      await this.integration.refreshState();
+      void this.baseStatus.refresh();
+      this.output.appendLine(
+        `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Discovery failed: ${message}`);
+      this.worktrees = [];
+      this.prCache.clear();
+    } finally {
+      this.loading = false;
+      this._onDidChangeTreeData.fire();
+      this._onDidChangeWorktrees.fire();
+      // Background: associate open PRs with worktree branches
+      void this.refreshPullRequests();
+    }
+  }
+
+  /**
+   * New/removed linked worktrees: VS Code file events when the editor did
+   * the create/delete, plus the hub's poll for changes outside VS Code.
+   */
+  private scheduleDiscoverIfWatchRootChild(uri: vscode.Uri): void {
+    if (uri.scheme !== 'file') {
+      return;
+    }
+    if (!isDirectChildOfWatchRoot(uri.fsPath)) {
+      return;
+    }
+    this.refresh();
+  }
+
+  // ---- PR badges -----------------------------------------------------------
 
   /** Cached PR for a worktree row (if looked up). */
   getPullRequest(worktreePath: string): PullRequestInfo | undefined {
@@ -402,10 +456,23 @@ export class WorktreeTreeProvider
     }
   }
 
-  /**
-   * Hot-follow: re-run git status/diff for the focused worktree and only
-   * rebuild the tree if something actually changed.
-   */
+  /** Drop PR cache entries for worktrees / branches that no longer exist. */
+  private prunePrCache(): void {
+    if (this.prCache.size === 0) {
+      return;
+    }
+    const live = new Set(
+      this.worktrees.map((wt) => prCacheKey(wt.path, wt.branch)),
+    );
+    for (const key of [...this.prCache.keys()]) {
+      if (!live.has(key)) {
+        this.prCache.delete(key);
+      }
+    }
+  }
+
+  // ---- hot-follow compare (selected worktree) ------------------------------
+
   private scheduleSoftRefreshIfUnderSelected(uri: vscode.Uri): void {
     if (uri.scheme !== 'file') {
       return;
@@ -548,8 +615,7 @@ export class WorktreeTreeProvider
       const prev = this.snapshotCache.get(worktreePath);
       const prevFp = prev ? snapshotFingerprint(prev) : undefined;
       const baseRef =
-        prev?.compare.baseRef ??
-        (await this.worktreeBaseFor(worktreePath));
+        prev?.compare.baseRef ?? (await this.worktreeBaseFor(worktreePath));
 
       const [compare, status] = await Promise.all([
         compareWorkingTreeToBase(worktreePath, baseRef),
@@ -577,729 +643,6 @@ export class WorktreeTreeProvider
     }
   }
 
-  getBaseRef(worktreePath: string): string | undefined {
-    return (
-      this.baseOverrides.get(worktreePath) ??
-      this.snapshotCache.get(worktreePath)?.compare.baseRef
-    );
-  }
-
-  async setBaseRef(worktreePath: string, baseRef: string): Promise<void> {
-    const preferred = await preferRemoteTrackingRef(worktreePath, baseRef);
-    this.baseOverrides.set(worktreePath, preferred);
-    this.snapshotCache.delete(worktreePath);
-    this.compareErrors.delete(worktreePath);
-    for (const key of [...this.worktreeBases.keys()]) {
-      if (key.startsWith(`${worktreePath}\0`)) {
-        this.worktreeBases.delete(key);
-      }
-    }
-    void this.refreshBaseStatuses();
-    this.output.appendLine(`Base ref for ${worktreePath} → ${preferred}`);
-    this._onDidChangeTreeData.fire();
-  }
-
-  private async load(): Promise<void> {
-    const t0 = Date.now();
-    this.loading = true;
-    this._onDidChangeTreeData.fire();
-    try {
-      this.worktrees = await discoverWorktrees(this.output);
-      this.ensureValidSelection();
-      this.prunePrCache();
-      await this.refreshIntegrationState();
-      void this.refreshBaseStatuses();
-      this.output.appendLine(
-        `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Discovery failed: ${message}`);
-      this.worktrees = [];
-      this.prCache.clear();
-    } finally {
-      this.loading = false;
-      this._onDidChangeTreeData.fire();
-      this._onDidChangeWorktrees.fire();
-      // Background: associate open PRs with worktree branches
-      void this.refreshPullRequests();
-    }
-  }
-
-  /** Drop PR cache entries for worktrees / branches that no longer exist. */
-  private prunePrCache(): void {
-    if (this.prCache.size === 0) {
-      return;
-    }
-    const live = new Set(
-      this.worktrees.map((wt) => prCacheKey(wt.path, wt.branch)),
-    );
-    for (const key of [...this.prCache.keys()]) {
-      if (!live.has(key)) {
-        this.prCache.delete(key);
-      }
-    }
-  }
-
-  private ensureValidSelection(): void {
-    if (this.worktrees.length === 0) {
-      this.selectedPath = undefined;
-      this.selectionDecorations.setSelectedPath(undefined);
-      return;
-    }
-    if (
-      !this.selectedPath ||
-      !this.worktrees.some((w) => w.path === this.selectedPath)
-    ) {
-      // Prefer a real worktree; the integration checkout only via clicks
-      const first =
-        this.worktrees.find((w) => w.path !== this.integrationPath) ??
-        this.worktrees[0]!;
-      this.selectedPath = first.path;
-      void this.context.workspaceState.update(
-        SELECTED_PATH_KEY,
-        this.selectedPath,
-      );
-    }
-    this.selectionDecorations.setSelectedPath(this.selectedPath);
-  }
-
-  /**
-   * New/removed linked worktrees: VS Code file events when the editor did
-   * the create/delete, plus a readdir poll for `git worktree add` outside VS Code.
-   */
-  private scheduleDiscoverIfWatchRootChild(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file') {
-      return;
-    }
-    if (!isDirectChildOfWatchRoot(uri.fsPath)) {
-      return;
-    }
-    this.refresh();
-  }
-
-  /**
-   * (Re)attach Node fs.watch to each repo's .git (refs/, logs/, worktrees/,
-   * packed-refs). Events run the same state check the poll does — the poll
-   * stays on as a slow fallback for filesystems that drop events.
-   */
-  private async restartGitWatchers(): Promise<void> {
-    const generation = ++this.gitWatcherGeneration;
-    for (const w of this.gitWatchers) {
-      w.dispose();
-    }
-    this.gitWatchers = [];
-    try {
-      const commonDirs = await resolveRepoCommonDirs();
-      if (generation !== this.gitWatcherGeneration) {
-        return;
-      }
-      for (const dir of commonDirs) {
-        const watcher = new GitDirWatcher(
-          dir,
-          () => void this.checkWorktreeState('.git event'),
-          this.output,
-        );
-        if ((await watcher.start()) && generation === this.gitWatcherGeneration) {
-          this.gitWatchers.push(watcher);
-        } else {
-          watcher.dispose();
-        }
-      }
-      this.output.appendLine(
-        this.gitWatchers.length > 0
-          ? `.git watch active on ${this.gitWatchers.length} repo(s); poll fallback ${WATCH_ROOT_POLL_FALLBACK_MS}ms`
-          : `.git watch unavailable — polling every ${WATCH_ROOT_POLL_NO_WATCHER_MS}ms`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`.git watch setup failed: ${message}`);
-    }
-    this.restartWatchRootPoll();
-  }
-
-  private hasActiveGitWatchers(): boolean {
-    return this.gitWatchers.some((w) => w.active);
-  }
-
-  private watchRootPollMs(): number {
-    return this.hasActiveGitWatchers()
-      ? WATCH_ROOT_POLL_FALLBACK_MS
-      : WATCH_ROOT_POLL_NO_WATCHER_MS;
-  }
-
-  private restartWatchRootPoll(): void {
-    if (this.watchRootTimer) {
-      clearTimeout(this.watchRootTimer);
-      this.watchRootTimer = undefined;
-    }
-    this.watchRootFingerprint = undefined;
-    this.scheduleWatchRootPoll();
-  }
-
-  private scheduleWatchRootPoll(): void {
-    if (this.watchRootTimer) {
-      clearTimeout(this.watchRootTimer);
-    }
-    this.watchRootTimer = setTimeout(() => {
-      this.watchRootTimer = undefined;
-      void this.tickWatchRoots();
-    }, this.watchRootPollMs());
-  }
-
-  private async tickWatchRoots(): Promise<void> {
-    try {
-      await this.checkWorktreeState('poll');
-    } finally {
-      this.scheduleWatchRootPoll();
-    }
-  }
-
-  /**
-   * Shared state check for .git events and the fallback poll: rediscover
-   * when worktree membership changed, then run the integration tick.
-   */
-  private async checkWorktreeState(reason: string): Promise<void> {
-    if (this.stateCheckInFlight) {
-      // An event landed mid-check: its change may predate this run's reads,
-      // so run once more when the current check finishes.
-      this.stateCheckQueued = true;
-      return;
-    }
-    this.stateCheckInFlight = true;
-    try {
-      const next = await worktreeListFingerprint();
-      if (this.watchRootFingerprint === undefined) {
-        this.watchRootFingerprint = next;
-      } else if (next !== this.watchRootFingerprint) {
-        this.watchRootFingerprint = next;
-        this.output.appendLine(`Worktree list changed (${reason}) — rediscover`);
-        this.refresh();
-      }
-      await this.tickIntegration();
-      void this.refreshBaseStatuses();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Worktree state check failed (${reason}): ${message}`);
-    } finally {
-      this.stateCheckInFlight = false;
-      this._onGitActivity.fire();
-      if (this.stateCheckQueued) {
-        this.stateCheckQueued = false;
-        void this.checkWorktreeState(`${reason} (queued)`);
-      }
-    }
-  }
-
-  // ---- Integration overlay (focus/working) -------------------------------
-
-  /** Integration worktree row + lanes, if one is checked out. */
-  getIntegration():
-    | {
-        path: string;
-        branch: string;
-        lanes: string[];
-        candidates: string[];
-        wip: string[];
-        landed: string[];
-        error?: { code: string; message: string; lane?: string };
-      }
-    | undefined {
-    if (!this.integrationPath) {
-      return undefined;
-    }
-    return {
-      path: this.integrationPath,
-      branch: integrationBranch(),
-      lanes: this.integrationLanes.slice(),
-      candidates: this.integrationCandidates.slice(),
-      wip: this.integrationWip.slice(),
-      landed: this.integrationLanded.slice(),
-      error: this.integrationError,
-    };
-  }
-
-  private async refreshIntegrationState(): Promise<void> {
-    const branch = integrationBranch();
-    const wt = this.worktrees.find((w) => !w.detached && w.branch === branch);
-    if (!wt) {
-      if (this.integrationPath) {
-        this.output.appendLine('Integration worktree gone — overlay off');
-      }
-      this.integrationPath = undefined;
-      this.integrationLanes = [];
-      this.integrationCandidates = [];
-      this.integrationLanded = [];
-      this.integrationError = undefined;
-      this.integrationFp = undefined;
-      return;
-    }
-    if (this.integrationPath !== wt.path) {
-      this.integrationError = undefined;
-      this.integrationFp = undefined;
-      this.output.appendLine(
-        `Integration worktree: ${wt.path} (${branch})`,
-      );
-      // Covers checkouts created by the shell script or by hand too
-      ensureIntegrationPushBlocked(wt.path).catch((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.output.appendLine(`Push-block config failed: ${message}`);
-      });
-      // Enabling must not hijack the compare focus: if the selected
-      // checkout just became the integration surface, move selection to a
-      // real worktree. Explicit clicks on the Integration row still focus it.
-      if (this.selectedPath === wt.path) {
-        const fallback = this.worktrees.find((w) => w.path !== wt.path);
-        this.selectedPath = fallback?.path;
-        this.selectionDecorations.setSelectedPath(this.selectedPath);
-        void this.context.workspaceState.update(
-          SELECTED_PATH_KEY,
-          this.selectedPath,
-        );
-        this.output.appendLine(
-          `Selection moved off integration checkout → ${this.selectedPath ?? '(none)'}`,
-        );
-      }
-    }
-    this.integrationPath = wt.path;
-    try {
-      this.integrationLanes = await listAppliedLanes(wt.path);
-      const candidates = await listCandidateLanes(wt.path);
-      // Applied lanes (e.g. from the shell script) always show as candidates
-      this.integrationCandidates = [
-        ...new Set([...candidates, ...this.integrationLanes]),
-      ].sort();
-      this.integrationWip = await listWipLanes(wt.path);
-      this.integrationLanded = await findLandedLanes(
-        wt.path,
-        integrationBaseRef(),
-        this.integrationCandidates,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Read lanes failed: ${message}`);
-      this.integrationLanes = [];
-      this.integrationCandidates = [];
-      this.integrationWip = [];
-      this.integrationLanded = [];
-    }
-  }
-
-  /**
-   * Wip lanes: a save/create/delete under an opted-in lane's checkout
-   * (VS Code events only, per design) re-snapshots and rebuilds.
-   */
-  private scheduleWipRebuildIfUnderWipLane(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file' || !this.integrationPath) {
-      return;
-    }
-    const wip = this.integrationWip.filter((l) =>
-      this.integrationLanes.includes(l),
-    );
-    if (wip.length === 0) {
-      return;
-    }
-    const hit = this.worktrees.find(
-      (w) =>
-        !w.detached &&
-        w.path !== this.integrationPath &&
-        wip.includes(w.branch) &&
-        isPathInside(uri.fsPath, w.path),
-    );
-    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath, hit.path)) {
-      return;
-    }
-    this.output.appendLine(
-      `Wip edit under ${hit.branch} (${path.basename(uri.fsPath)}) — rebuild scheduled`,
-    );
-    if (this.wipDebounce) {
-      clearTimeout(this.wipDebounce);
-    }
-    this.wipDebounce = setTimeout(() => {
-      this.wipDebounce = undefined;
-      if (this.integrationRebuildInFlight) {
-        // Edits landed mid-rebuild — go again once it finishes
-        this.scheduleWipRebuildRetry();
-        return;
-      }
-      void this.runIntegrationRebuild('wip edits');
-    }, 1200);
-  }
-
-  private scheduleWipRebuildRetry(): void {
-    if (this.wipDebounce) {
-      return;
-    }
-    this.wipDebounce = setTimeout(() => {
-      this.wipDebounce = undefined;
-      if (this.integrationRebuildInFlight) {
-        this.scheduleWipRebuildRetry();
-        return;
-      }
-      void this.runIntegrationRebuild('wip edits (queued)');
-    }, 800);
-  }
-
-  /** Toggle overlaying a lane's uncommitted edits; rebuild when applied. */
-  async setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
-    if (!this.integrationPath) {
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
-    await setWipLane(this.integrationPath, branch, enabled);
-    await this.refreshIntegrationState();
-    this._onDidChangeTreeData.fire();
-    if (this.integrationLanes.includes(branch)) {
-      return this.runIntegrationRebuild(
-        enabled ? `wip on ${branch}` : `wip off ${branch}`,
-      );
-    }
-    return { ok: true, lanes: this.integrationLanes.slice(), skipped: [], landed: [] };
-  }
-
-  /**
-   * Auto-rebuild: rebuild the integration tree when the base or an applied
-   * lane tip moves (commit/amend/rebase anywhere — no git hook needed).
-   */
-  private async tickIntegration(): Promise<void> {
-    if (!this.integrationPath || this.integrationRebuildInFlight) {
-      return;
-    }
-    if (!isIntegrationAutoRebuildEnabled()) {
-      this.integrationFp = undefined;
-      return;
-    }
-    // Track where PRs actually land: refresh origin/<base> periodically.
-    // A moved tip changes the fingerprint below and triggers the rebuild.
-    const fetchMs = vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('integrationFetchIntervalMs', 300000);
-    if (fetchMs > 0 && Date.now() - this.lastBaseFetchAt > fetchMs) {
-      this.lastBaseFetchAt = Date.now();
-      // Fire-and-forget: never let a slow/hung remote stall the tick. A
-      // moved tip is picked up by the fingerprint on the next tick.
-      void fetchIntegrationBase(this.integrationPath, integrationBaseRef())
-        .then((ok) =>
-          this.output.appendLine(
-            ok
-              ? `Fetched origin ${integrationBaseRef()} (integration base)`
-              : 'Integration base fetch failed (offline / no remote?)',
-          ),
-        )
-        .catch(() => {});
-    }
-    // Conflicts no longer dirty the checkout (off-tree merge), so keep
-    // retrying — a new commit on the conflicting lane may resolve it.
-    let fp: string;
-    try {
-      fp = await integrationFingerprint(
-        this.integrationPath,
-        integrationBaseRef(),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Integration fingerprint failed: ${message}`);
-      return;
-    }
-    if (this.integrationFp === undefined) {
-      this.integrationFp = fp;
-      return;
-    }
-    if (fp === this.integrationFp) {
-      return;
-    }
-    this.integrationFp = fp;
-    await this.runIntegrationRebuild('lane tips moved');
-  }
-
-  /**
-   * Base changed: the templated branch name may change with it — rename
-   * the checkout's branch to match, then rebuild onto the new base.
-   */
-  private async handleIntegrationBaseChange(): Promise<void> {
-    if (!this.integrationPath) {
-      this._onDidChangeTreeData.fire();
-      return;
-    }
-    try {
-      const renamed = await alignIntegrationBranchName(this.integrationPath);
-      if (renamed) {
-        this.output.appendLine(
-          `Integration branch renamed: ${renamed.from} → ${renamed.to}`,
-        );
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`Integration branch rename failed: ${message}`);
-    }
-    await this.runIntegrationRebuild('base changed');
-    this.refresh();
-  }
-
-  /** Run a rebuild and surface the outcome on the integration row. */
-  async runIntegrationRebuild(reason: string): Promise<RebuildResult> {
-    const workingPath = this.integrationPath;
-    if (!workingPath) {
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
-    if (this.integrationRebuildInFlight) {
-      // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
-      // follow-up run — it re-reads the lane files, so it applies whatever
-      // state the caller just wrote.
-      this.integrationRebuildQueued = reason;
-      return { ok: false, code: 'busy', message: 'rebuild already running' };
-    }
-    this.integrationRebuildInFlight = true;
-    const t0 = Date.now();
-    try {
-      if (reason === 'manual') {
-        // Manual rebuild = "give me reality": refresh the base tip first
-        this.lastBaseFetchAt = Date.now();
-        await fetchIntegrationBase(workingPath, integrationBaseRef());
-      }
-      const result = await rebuildIntegration(
-        workingPath,
-        integrationBaseRef(),
-      );
-      if (result.ok) {
-        this.integrationError = undefined;
-        // Landed lanes were retired by the rebuild itself (under its lock);
-        // rows stay as candidates with the 'landed' tag
-        for (const lane of result.landed) {
-          this.output.appendLine(
-            `Lane ${lane} landed in ${integrationBaseRef()} — unapplied`,
-          );
-        }
-        this.output.appendLine(
-          `Integration rebuilt (${reason}): ${
-            result.lanes.length > 0 ? result.lanes.join(', ') : 'base only'
-          }${
-            result.skipped.length > 0
-              ? ` · skipped missing: ${result.skipped.join(', ')}`
-              : ''
-          } (${Date.now() - t0}ms)`,
-        );
-      } else if (result.code === 'busy') {
-        // Script/hook holds the lock — not an error state for the row
-        this.output.appendLine(`Integration rebuild busy (${reason})`);
-      } else {
-        this.integrationError = {
-          code: result.code,
-          message: result.message,
-          lane: result.lane,
-        };
-        this.output.appendLine(
-          `Integration rebuild failed (${reason}, ${result.code}${
-            result.lane ? `, lane ${result.lane}` : ''
-          }): ${result.message}`,
-        );
-      }
-      await this.refreshIntegrationState();
-      this.refreshCompare(workingPath);
-      this._onDidChangeTreeData.fire();
-      return result;
-    } finally {
-      this.integrationRebuildInFlight = false;
-      if (this.integrationRebuildQueued) {
-        const queued = this.integrationRebuildQueued;
-        this.integrationRebuildQueued = undefined;
-        void this.runIntegrationRebuild(`${queued} (queued)`);
-      }
-    }
-  }
-
-  /** Offer a branch under the Integration row (unchecked; no rebuild). */
-  async addIntegrationCandidate(branch: string): Promise<void> {
-    if (!this.integrationPath) {
-      return;
-    }
-    if (!isLaneBranch(branch, integrationBaseRef())) {
-      throw new Error(`${branch} cannot be an integration lane`);
-    }
-    await addCandidateLane(this.integrationPath, branch);
-    await this.refreshIntegrationState();
-    this._onDidChangeTreeData.fire();
-  }
-
-  /** Drop a branch from the Integration row; rebuild if it was applied. */
-  async removeIntegrationCandidate(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
-    await dropCandidateLane(this.integrationPath, branch);
-    if (this.integrationLanes.includes(branch)) {
-      return this.hideFromIntegration(branch);
-    }
-    await this.refreshIntegrationState();
-    this._onDidChangeTreeData.fire();
-    return {
-      ok: true,
-      lanes: this.integrationLanes.slice(),
-      skipped: [],
-      landed: [],
-    };
-  }
-
-  /** Add this worktree's branch as a lane and rebuild. */
-  async applyToIntegration(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
-    if (!isLaneBranch(branch, integrationBaseRef())) {
-      return {
-        ok: false,
-        code: 'error',
-        message: `will not apply ${branch} as a lane`,
-      };
-    }
-    // Persist candidacy too, so unchecking later keeps the row visible
-    await addCandidateLane(this.integrationPath, branch);
-    await addAppliedLane(this.integrationPath, branch);
-    return this.runIntegrationRebuild(`apply ${branch}`);
-  }
-
-  /** Drop this worktree's branch from the lanes and rebuild. */
-  async hideFromIntegration(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
-    await dropAppliedLane(this.integrationPath, branch);
-    return this.runIntegrationRebuild(`hide ${branch}`);
-  }
-
-  /** Abort a conflicted lane merge, leaving the tree at the last good state. */
-  async abortIntegrationMerge(): Promise<void> {
-    if (!this.integrationPath) {
-      return;
-    }
-    await abortIntegrationMerge(this.integrationPath);
-    this.integrationError = undefined;
-    this.integrationFp = undefined;
-    this.refreshCompare(this.integrationPath);
-    this._onDidChangeTreeData.fire();
-  }
-
-  private defaultBaseRef(): string {
-    return vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<string>('defaultBaseRef', 'main');
-  }
-
-  /**
-   * Fallback for compare-base inference. While integration is active,
-   * lanes land on the integration base, so it is the sane default —
-   * per-worktree inference (reflog/upstream) and overrides still win.
-   */
-  private compareFallbackBaseRef(): string {
-    return this.integrationPath ? integrationBaseRef() : this.defaultBaseRef();
-  }
-
-  /**
-   * THE per-worktree base: override → cached inference → inference
-   * (reflog/config/upstream, falling back to the integration base while
-   * integration is on). Compare snapshots and status badges both use this,
-   * so the diff you read and the badge you see agree by construction.
-   */
-  async worktreeBaseFor(worktreePath: string): Promise<string> {
-    const override = this.baseOverrides.get(worktreePath);
-    if (override) {
-      return override;
-    }
-    const branch =
-      this.worktrees.find((w) => w.path === worktreePath)?.branch ?? '';
-    const key = `${worktreePath}\0${branch}`;
-    const cached = this.worktreeBases.get(key);
-    if (cached) {
-      return cached;
-    }
-    const base = await resolveBaseRef(
-      worktreePath,
-      this.compareFallbackBaseRef(),
-    );
-    this.worktreeBases.set(key, base);
-    return base;
-  }
-
-  /**
-   * Row badges: how each lane relates to its base. Bounded-parallel, and
-   * memoized by refSha:baseSha so probes rerun only when a tip moves.
-   */
-  /** Row badge for a worktree (undefined = up to date / unknown). */
-  getBaseStatus(
-    worktreePath: string,
-  ): { behind: number; ahead: number; conflicts: boolean; baseRef: string } | undefined {
-    return this.baseStatuses.get(worktreePath);
-  }
-
-  async refreshBaseStatuses(): Promise<void> {
-    if (this.baseStatusInFlight) {
-      return;
-    }
-    this.baseStatusInFlight = true;
-    try {
-      const targets = this.listedWorktrees().filter((w) => !w.detached);
-      let changed = false;
-      const live = new Set<string>();
-      const worker = async (wt: DiscoveredWorktree) => {
-        live.add(wt.path);
-        try {
-          const baseRef = await this.worktreeBaseFor(wt.path);
-          const prev = this.baseStatuses.get(wt.path);
-          const status = await baseStatusFor(
-            wt.path,
-            'HEAD',
-            baseRef,
-            this.baseProbeMemo,
-          );
-          if (!status) {
-            if (this.baseStatuses.delete(wt.path)) {
-              changed = true;
-            }
-            return;
-          }
-          const entry = { ...status, baseRef };
-          this.baseStatuses.set(wt.path, entry);
-          if (
-            !prev ||
-            prev.behind !== entry.behind ||
-            prev.conflicts !== entry.conflicts ||
-            prev.baseRef !== entry.baseRef
-          ) {
-            changed = true;
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          this.output.appendLine(
-            `Base status failed for ${wt.branch}: ${message}`,
-          );
-        }
-      };
-      // Bounded parallelism: probes are independent
-      const queue = targets.slice();
-      await Promise.all(
-        Array.from({ length: Math.min(4, queue.length) }, async () => {
-          for (;;) {
-            const wt = queue.shift();
-            if (!wt) {
-              return;
-            }
-            await worker(wt);
-          }
-        }),
-      );
-      for (const key of [...this.baseStatuses.keys()]) {
-        if (!live.has(key)) {
-          this.baseStatuses.delete(key);
-          changed = true;
-        }
-      }
-      if (changed) {
-        this._onDidChangeTreeData.fire();
-      }
-    } finally {
-      this.baseStatusInFlight = false;
-    }
-  }
-
   private async getSnapshot(
     worktreePath: string,
   ): Promise<WorktreeSnapshot | undefined> {
@@ -1309,7 +652,7 @@ export class WorktreeTreeProvider
     }
     const t0 = Date.now();
     try {
-      const overridden = this.baseOverrides.get(worktreePath);
+      const overridden = this.baseStatus.getOverride(worktreePath);
       const tBase = Date.now();
       const baseRef = await this.worktreeBaseFor(worktreePath);
       if (!overridden) {
@@ -1338,6 +681,88 @@ export class WorktreeTreeProvider
       return undefined;
     }
   }
+
+  // ---- bases & badges (delegates) ------------------------------------------
+
+  getBaseRef(worktreePath: string): string | undefined {
+    return (
+      this.baseStatus.getOverride(worktreePath) ??
+      this.snapshotCache.get(worktreePath)?.compare.baseRef
+    );
+  }
+
+  async setBaseRef(worktreePath: string, baseRef: string): Promise<void> {
+    const preferred = await this.baseStatus.setOverride(worktreePath, baseRef);
+    this.snapshotCache.delete(worktreePath);
+    this.compareErrors.delete(worktreePath);
+    this.output.appendLine(`Base ref for ${worktreePath} → ${preferred}`);
+    this._onDidChangeTreeData.fire();
+  }
+
+  worktreeBaseFor(worktreePath: string): Promise<string> {
+    return this.baseStatus.baseFor(worktreePath);
+  }
+
+  getBaseStatus(worktreePath: string) {
+    return this.baseStatus.status(worktreePath);
+  }
+
+  refreshBaseStatuses(): Promise<void> {
+    return this.baseStatus.refresh();
+  }
+
+  private defaultBaseRef(): string {
+    return vscode.workspace
+      .getConfiguration('worktreeCompare')
+      .get<string>('defaultBaseRef', 'main');
+  }
+
+  /**
+   * Fallback for compare-base inference. While integration is active,
+   * lanes land on the integration base, so it is the sane default —
+   * per-worktree inference (reflog/upstream) and overrides still win.
+   */
+  private compareFallbackBaseRef(): string {
+    return this.integration.getPath()
+      ? integrationBaseRef()
+      : this.defaultBaseRef();
+  }
+
+  // ---- integration (delegates) ---------------------------------------------
+
+  getIntegration(): IntegrationState | undefined {
+    return this.integration.getState();
+  }
+
+  runIntegrationRebuild(reason: string): Promise<RebuildResult> {
+    return this.integration.runRebuild(reason);
+  }
+
+  addIntegrationCandidate(branch: string): Promise<void> {
+    return this.integration.addCandidate(branch);
+  }
+
+  removeIntegrationCandidate(branch: string): Promise<RebuildResult> {
+    return this.integration.removeCandidate(branch);
+  }
+
+  applyToIntegration(branch: string): Promise<RebuildResult> {
+    return this.integration.apply(branch);
+  }
+
+  hideFromIntegration(branch: string): Promise<RebuildResult> {
+    return this.integration.hide(branch);
+  }
+
+  setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
+    return this.integration.setLaneWip(branch, enabled);
+  }
+
+  abortIntegrationMerge(): Promise<void> {
+    return this.integration.abortMerge();
+  }
+
+  // ---- rendering ------------------------------------------------------------
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
@@ -1412,11 +837,7 @@ export class WorktreeTreeProvider
           const selectedPr = this.getPullRequest(worktreePath);
           if (selectedPr && prHasMergeConflicts(selectedPr)) {
             nodes.push(
-              new ConflictWarningItem(
-                worktreePath,
-                selectedPr,
-                compare.baseRef,
-              ),
+              new ConflictWarningItem(worktreePath, selectedPr, compare.baseRef),
             );
           }
 
@@ -1493,28 +914,27 @@ export class WorktreeTreeProvider
   /** Worktrees shown in the list — the integration checkout lives under
    *  the Integration row instead. */
   private listedWorktrees(): DiscoveredWorktree[] {
-    return this.worktrees.filter((wt) => wt.path !== this.integrationPath);
+    return this.worktrees.filter(
+      (wt) => wt.path !== this.integration.getPath(),
+    );
   }
 
   private getWorktreeListChildren(): TreeNode[] {
     const selected = this.getSelectedPath();
     const baseRef = integrationBaseRef();
+    const state = this.integration.getState();
     return this.listedWorktrees().map((wt) => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);
       let integration: IntegrationRowInfo | undefined;
-      if (
-        this.integrationPath &&
-        !wt.detached &&
-        isLaneBranch(wt.branch, baseRef)
-      ) {
+      if (state && !wt.detached && isLaneBranch(wt.branch, baseRef)) {
         integration = {
           role: 'lane',
-          applied: this.integrationLanes.includes(wt.branch),
-          candidate: this.integrationCandidates.includes(wt.branch),
+          applied: state.lanes.includes(wt.branch),
+          candidate: state.candidates.includes(wt.branch),
         };
       }
-      const baseStatus = this.baseStatuses.get(wt.path);
+      const baseStatus = this.baseStatus.status(wt.path);
       return new WorktreeListItem(
         wt,
         wt.path === selected,
@@ -1665,58 +1085,13 @@ export class WorktreeTreeProvider
     if (this.contentDebounce) {
       clearTimeout(this.contentDebounce);
     }
-    if (this.watchRootTimer) {
-      clearTimeout(this.watchRootTimer);
-      this.watchRootTimer = undefined;
-    }
-    this.gitWatcherGeneration++;
-    for (const w of this.gitWatchers) {
-      w.dispose();
-    }
-    this.gitWatchers = [];
     for (const d of this.disposables) {
       d.dispose();
     }
     this._onDidChangeTreeData.dispose();
     this._onDidChangeWorktrees.dispose();
+    this._onGitActivity.dispose();
   }
-}
-
-function isPathInside(fsPath: string, root: string): boolean {
-  const resolved = path.resolve(fsPath);
-  const rootResolved = path.resolve(root);
-  return (
-    resolved === rootResolved ||
-    resolved.startsWith(rootResolved + path.sep)
-  );
-}
-
-/**
- * Skip hot-follow for paths that churn hard and are not useful for SCM UI.
- * Only segments INSIDE the worktree count — a repo living under /tmp (or
- * below a parent named build/out/…) must not lose reactivity wholesale.
- */
-function shouldIgnoreHotFollowPath(fsPath: string, worktreeRoot: string): boolean {
-  const rel = path.relative(path.resolve(worktreeRoot), path.resolve(fsPath));
-  const parts = rel.split(/[/\\]/);
-  for (const part of parts) {
-    if (
-      part === 'node_modules' ||
-      part === '.git' ||
-      part === 'dist' ||
-      part === 'out' ||
-      part === 'build' ||
-      part === '.next' ||
-      part === 'coverage' ||
-      part === '.turbo' ||
-      part === '.cache' ||
-      part === 'tmp' ||
-      part === '.DS_Store'
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /** Cheap equality for deciding whether the tree UI needs a rebuild. */
