@@ -287,11 +287,6 @@ export class WorktreeTreeProvider
     );
   }
 
-  /** Branch names currently checked out (for Remote PRs panel hide filter). */
-  getLocalBranchNames(): string[] {
-    return this.worktrees.filter((w) => !w.detached).map((w) => w.branch);
-  }
-
   async setSelectedPath(worktreePath: string): Promise<void> {
     this.selectedPath = worktreePath;
     this.selectionDecorations.setSelectedPath(worktreePath);

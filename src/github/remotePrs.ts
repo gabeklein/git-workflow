@@ -275,19 +275,3 @@ export async function createWorktreeForPr(
   return destDir;
 }
 
-export function formatRemotePrDescription(pr: RemotePullRequest): string {
-  const bits: string[] = [];
-  if (pr.authorLogin) {
-    bits.push(pr.authorLogin);
-  }
-  if (pr.baseRefName && pr.headRefName) {
-    bits.push(`${pr.baseRefName} ← ${pr.headRefName}`);
-  }
-  if (pr.hasLocalWorktree) {
-    bits.push('local');
-  }
-  if (typeof pr.changedFiles === 'number') {
-    bits.push(`${pr.changedFiles} files`);
-  }
-  return bits.join(' · ');
-}
