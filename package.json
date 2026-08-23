@@ -125,6 +125,12 @@
           ],
           "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable \u2014 but resolved-away edits silently miss from the combined tree."
         },
+        "worktreeCompare.integrationFetchIntervalMs": {
+          "type": "number",
+          "default": 300000,
+          "minimum": 0,
+          "description": "While integration mode is on, `git fetch origin <base>` this often (ms) so the integration tree tracks where PRs actually land; a moved tip triggers an auto-rebuild and landed lanes retire. 0 = never fetch automatically (manual Rebuild still fetches first)."
+        },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
           "default": true,

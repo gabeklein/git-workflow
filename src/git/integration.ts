@@ -271,7 +271,7 @@ export async function snapshotWorktreeCommit(
 }
 
 export type RebuildResult =
-  | { ok: true; lanes: string[]; skipped: string[] }
+  | { ok: true; lanes: string[]; skipped: string[]; landed: string[] }
   | {
       ok: false;
       code: 'busy' | 'dirty' | 'unique' | 'conflict' | 'error';
@@ -284,14 +284,88 @@ async function resolveBaseSha(
   baseRef: string,
 ): Promise<string | undefined> {
   const name = baseRef.replace(/^origin\//, '');
-  for (const ref of [`refs/heads/${name}`, `origin/${name}`, baseRef]) {
+  const sha = async (ref: string) => {
     try {
-      return (await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
+      return (
+        await git(cwd, ['rev-parse', '--verify', `${ref}^{commit}`])
+      ).trim();
     } catch {
-      // try next
+      return undefined;
+    }
+  };
+  // When both exist, prefer the DESCENDANT: the remote tip when PRs land
+  // on the host, the local tip in local-only workflows where the user
+  // advances the base directly. Diverged → origin (a fetch reconciles).
+  const remote = await sha(`origin/${name}`);
+  const local = await sha(`refs/heads/${name}`);
+  if (remote && local && remote !== local) {
+    if (await gitOk(cwd, ['merge-base', '--is-ancestor', remote, local])) {
+      return local;
+    }
+    return remote;
+  }
+  return remote ?? local ?? sha(baseRef);
+}
+
+/** Best-effort `git fetch origin <base>` so origin/<base> tracks reality. */
+export async function fetchIntegrationBase(
+  cwd: string,
+  baseRef: string,
+): Promise<boolean> {
+  const name = baseRef.replace(/^origin\//, '');
+  return gitOk(cwd, ['fetch', 'origin', name]);
+}
+
+/**
+ * Lanes that LANDED: merging them into the base changes nothing. One
+ * predicate for badges and retirement, deliberately content-based:
+ * - ancestry (true-merge landings) — merging an ancestor is a no-op;
+ * - content-neutral (squash/rebase landings) — a STRICT off-tree merge
+ *   yields the base tree unchanged.
+ * Revert-safe by construction: after a squash-merge is reverted, merging
+ * the lane again WOULD change the tree, so it is not landed.
+ */
+export async function findLandedLanes(
+  cwd: string,
+  baseRef: string,
+  lanes: string[],
+): Promise<string[]> {
+  const baseSha = await resolveBaseSha(cwd, baseRef);
+  if (!baseSha) {
+    return [];
+  }
+  let baseTree: string;
+  try {
+    baseTree = (await git(cwd, ['rev-parse', `${baseSha}^{tree}`])).trim();
+  } catch {
+    return [];
+  }
+  const landed: string[] = [];
+  for (const lane of lanes) {
+    let laneSha: string;
+    try {
+      laneSha = (
+        await git(cwd, ['rev-parse', '--verify', `refs/heads/${lane}^{commit}`])
+      ).trim();
+    } catch {
+      continue; // branch gone — not our call to make
+    }
+    if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
+      landed.push(lane);
+      continue;
+    }
+    try {
+      const result = await mergeOffTree(cwd, baseSha, laneSha, {
+        strict: true,
+      });
+      if (result.kind === 'tree' && result.tree === baseTree) {
+        landed.push(lane);
+      }
+    } catch {
+      // probe failure ⇒ not landed
     }
   }
-  return undefined;
+  return landed;
 }
 
 /**
@@ -303,6 +377,7 @@ async function mergeOffTree(
   cwd: string,
   ours: string,
   theirs: string,
+  opts?: { strict?: boolean },
 ): Promise<
   | { kind: 'tree'; tree: string }
   | { kind: 'conflict'; files: string[] }
@@ -313,7 +388,9 @@ async function mergeOffTree(
       'merge-tree',
       '--write-tree',
       '--name-only',
-      ...autoResolveArgs(),
+      // strict: decisions (like landed detection) must not vary with the
+      // user's auto-resolve preference
+      ...(opts?.strict ? [] : autoResolveArgs()),
       ours,
       theirs,
     ]);
@@ -429,6 +506,11 @@ export async function rebuildIntegration(
       };
     }
 
+    // One landed predicate (ancestry ∪ content-neutral, strict)
+    const landedSet = new Set(
+      await findLandedLanes(workingPath, baseRef, lanes).catch(() => []),
+    );
+
     // Wip lanes: overlay uncommitted worktree edits via ephemeral snapshots
     const wipLanes = new Set(
       (await listWipLanes(workingPath).catch(() => [])).filter((l) =>
@@ -453,6 +535,7 @@ export async function rebuildIntegration(
     let current = baseSha;
     const skipped: string[] = [];
     const merged: string[] = [];
+    const landed: string[] = [];
     for (const lane of lanes) {
       let laneSha: string;
       try {
@@ -467,6 +550,7 @@ export async function rebuildIntegration(
         skipped.push(lane);
         continue;
       }
+      let isSnapshot = false;
       if (wipLanes.has(lane)) {
         const checkout = laneCheckouts.get(lane);
         if (checkout) {
@@ -474,11 +558,18 @@ export async function rebuildIntegration(
             const snapshot = await snapshotWorktreeCommit(checkout, lane);
             if (snapshot) {
               laneSha = snapshot;
+              isSnapshot = true;
             }
           } catch {
             // snapshot failed — merge the branch tip instead
           }
         }
+      }
+      // Landed: merging the branch tip adds nothing (strict, precomputed).
+      // A wip snapshot is never landed — its uncommitted edits remain.
+      if (!isSnapshot && landedSet.has(lane)) {
+        landed.push(lane);
+        continue;
       }
       // Lane already contained in the chain (e.g. no commits yet): nothing
       // to merge — and commit-tree would collapse duplicate parents into a
@@ -497,7 +588,7 @@ export async function rebuildIntegration(
       }
       const result = await mergeOffTree(workingPath, current, laneSha);
       if (result.kind === 'unsupported') {
-        return rebuildInWorktree(workingPath, baseSha, lanes);
+        return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
       }
       if (result.kind === 'conflict') {
         const files = result.files.slice(0, 5).join(', ');
@@ -525,9 +616,19 @@ export async function rebuildIntegration(
       merged.push(lane);
     }
 
+    // Retire landed lanes while still holding the lock — the applied file
+    // is shared with the shell script, so it only changes under the lock
+    if (landed.length > 0) {
+      await writeLaneFile(
+        workingPath,
+        APPLIED_FILE,
+        lanes.filter((l) => !landed.includes(l)),
+      );
+    }
+
     // Single working-tree update; git rewrites only files whose content changed
     await git(workingPath, ['reset', '--hard', current]);
-    return { ok: true, lanes: merged, skipped };
+    return { ok: true, lanes: merged, skipped, landed };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, code: 'error', message };
@@ -541,10 +642,12 @@ async function rebuildInWorktree(
   workingPath: string,
   baseSha: string,
   lanes: string[],
+  landedSet: Set<string>,
 ): Promise<RebuildResult> {
   await git(workingPath, ['reset', '--hard', baseSha]);
   const skipped: string[] = [];
   const merged: string[] = [];
+  const landed: string[] = [];
   for (const lane of lanes) {
     if (
       !(await gitOk(workingPath, [
@@ -554,6 +657,10 @@ async function rebuildInWorktree(
       ]))
     ) {
       skipped.push(lane);
+      continue;
+    }
+    if (landedSet.has(lane)) {
+      landed.push(lane);
       continue;
     }
     try {
@@ -579,7 +686,15 @@ async function rebuildInWorktree(
       return { ok: false, code: 'conflict', message, lane };
     }
   }
-  return { ok: true, lanes: merged, skipped };
+  // Caller holds the rebuild lock — safe to retire landed lanes here too
+  if (landed.length > 0) {
+    await writeLaneFile(
+      workingPath,
+      APPLIED_FILE,
+      lanes.filter((l) => !landed.includes(l)),
+    );
+  }
+  return { ok: true, lanes: merged, skipped, landed };
 }
 
 /**
