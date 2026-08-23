@@ -42,7 +42,7 @@ function buildFixture() {
 
   // Bare origin so landing/fetch flows are real
   const origin = path.join(root, 'origin.git');
-  git(root, ['init', '-q', '--bare', 'origin.git']);
+  git(root, ['init', '-q', '-b', 'main', '--bare', 'origin.git']);
   git(repo, ['remote', 'add', 'origin', origin]);
   git(repo, ['push', '-qu', 'origin', 'main']);
 
@@ -102,6 +102,9 @@ for (const key of Object.keys(process.env)) {
 
 try {
   await runTests({
+    // Pinned: CI resolves 'stable' over the network each run (flaky) and a
+    // moving target would silently change what we test against.
+    version: '1.134.0',
     extensionDevelopmentPath,
     extensionTestsPath: path.join(__dirname, 'suite.cjs'),
     launchArgs: [
@@ -120,7 +123,7 @@ try {
   });
   console.log('[edh-test] PASS');
 } catch (err) {
-  console.error(`[edh-test] FAIL: ${err instanceof Error ? err.message : err}`);
+  console.error('[edh-test] FAIL:', err instanceof Error ? (err.stack ?? err.message) : err);
   process.exitCode = 1;
 } finally {
   rmSync(root, { recursive: true, force: true });
