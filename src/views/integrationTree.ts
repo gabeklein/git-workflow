@@ -57,11 +57,13 @@ export class IntegrationTreeProvider
       (branch) =>
         new IntegrationLaneItem(branch, integration.lanes.includes(branch), {
           conflicted:
-            integration.error?.code === 'conflict' &&
-            integration.error.lane === branch,
+            (integration.error?.code === 'conflict' &&
+              integration.error.lane === branch) ||
+            integration.conflicts.includes(branch),
           worktreePath: branchToPath.get(branch),
           wip: integration.wip.includes(branch),
           landed: integration.landed.includes(branch),
+          resolving: integration.resolving.includes(branch),
         }),
     );
   }

@@ -4,6 +4,7 @@ import {
   registerIntegrationCommands,
   reportIntegrationResult,
 } from './commands/integrationCommands';
+import { registerLaneOpsCommands } from './commands/laneOpsCommands';
 import { registerWorktreeCommands } from './commands/worktreeCommands';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { integrationBaseRef } from './git/integration';
@@ -143,6 +144,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
     ...registerWorktreeCommands(treeProvider, log),
     ...registerIntegrationCommands(context, treeProvider, log),
     ...registerBranchCommands(treeProvider, branchesProvider, log),
+    ...registerLaneOpsCommands(treeProvider, log),
   );
 
   // Read-only view-state hooks for the EDH test suite: assertions on what
