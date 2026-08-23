@@ -1132,6 +1132,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
         baseStatus: (worktreePath: string) =>
           treeProvider.getBaseStatus(worktreePath),
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
+        logFile: () => log.logFile,
       },
     };
   }

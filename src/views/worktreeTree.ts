@@ -909,6 +909,9 @@ export class WorktreeTreeProvider
     if (!hit || shouldIgnoreHotFollowPath(uri.fsPath)) {
       return;
     }
+    this.output.appendLine(
+      `Wip edit under ${hit.branch} (${path.basename(uri.fsPath)}) — rebuild scheduled`,
+    );
     if (this.wipDebounce) {
       clearTimeout(this.wipDebounce);
     }

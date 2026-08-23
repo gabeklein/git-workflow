@@ -274,7 +274,20 @@ async function run() {
   ];
   for (const [name, fn] of scenarios) {
     console.log(`[suite] ▸ ${name}`);
-    await fn();
+    try {
+      await fn();
+    } catch (err) {
+      // Surface the extension's own log so CI failures are diagnosable
+      try {
+        const tail = fs
+          .readFileSync(api.logFile(), 'utf8')
+          .split('\n')
+          .slice(-80)
+          .join('\n');
+        console.log('[suite] extension log tail:\n' + tail);
+      } catch {}
+      throw err;
+    }
   }
   console.log('[suite] all scenarios passed');
 }
