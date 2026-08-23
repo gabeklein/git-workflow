@@ -148,11 +148,15 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout
 
-**Worktree** panel:
+**Worktrees** panel (selector — header shows the count):
 
 ```
-▼ <selected-branch>                 description: · N worktrees
-  branch rows (PR / pushed / local)  ← click to focus
+branch rows (PR / pushed / local / applied)  ← click to focus
+```
+
+**Changes** panel (presentation — header shows the focused branch):
+
+```
 ⚠ PR #N has merge conflicts          ← GitHub conflicts only
 ▼ Commits · N                        description: → base [@sha]
 ▼ Staged / Unstaged                  ← hidden if empty; commit via context menu

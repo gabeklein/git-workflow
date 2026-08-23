@@ -1153,15 +1153,34 @@ export class WorktreeTreeProvider
   }
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
+    if (element) {
+      return []; // worktree rows are leaves; details live in the Changes view
+    }
+    if (this.loading && this.worktrees.length === 0) {
+      return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
+    }
+    if (this.worktrees.length === 0) {
+      return [
+        new MessageItem(
+          'No worktrees found',
+          'No worktrees registered with this repo (git worktree list)',
+        ),
+      ];
+    }
+    return this.getWorktreeListChildren();
+  }
+
+  /**
+   * Children for the Changes view (rendered by ChangesTreeProvider):
+   * Commits / Staged / Unstaged / Full Diff for the selected worktree.
+   */
+  async getChangesChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
       if (!element) {
-        return await this.getRootChildren();
+        return await this.getChangesRootChildren();
       }
       switch (element.kind) {
         case 'group':
-          if (element.group === 'worktrees') {
-            return this.getWorktreeListChildren();
-          }
           return await this.getAheadChildren();
         case 'section':
           return await this.getSectionChildren(element);
@@ -1179,40 +1198,17 @@ export class WorktreeTreeProvider
     }
   }
 
-  private async getRootChildren(): Promise<TreeNode[]> {
+  private async getChangesRootChildren(): Promise<TreeNode[]> {
     const nodes: TreeNode[] = [];
 
     if (this.loading && this.worktrees.length === 0) {
-      nodes.push(
-        new MessageItem('Scanning worktrees…', undefined, 'loading~spin'),
-      );
+      nodes.push(new MessageItem('Scanning worktrees…', undefined, 'loading~spin'));
     } else if (this.worktrees.length === 0) {
-      nodes.push(
-        new MessageItem(
-          'No worktrees found',
-          'No worktrees registered with this repo (git worktree list)',
-        ),
-      );
+      nodes.push(new MessageItem('No worktrees found'));
     } else {
       const selected = this.getSelected();
-      const n = this.listedWorktrees().length;
-      const worktreesLabel = selected
-        ? selected.branch + (selected.detached ? ' (detached)' : '')
-        : 'Worktrees';
-      // Label = branch; description = "· N worktrees"
-      const worktreesDesc =
-        n === 1 ? '· 1 worktree' : `· ${n} worktrees`;
-      nodes.push(
-        new GroupItem(
-          worktreesLabel,
-          'worktrees',
-          vscode.TreeItemCollapsibleState.Expanded,
-          worktreesDesc,
-        ),
-      );
-
       if (!selected) {
-        nodes.push(new MessageItem('Select a worktree above'));
+        nodes.push(new MessageItem('Select a worktree in the panel above'));
       } else {
         const snap = await this.getSnapshot(selected.path);
         if (!snap) {
