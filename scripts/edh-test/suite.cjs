@@ -137,18 +137,21 @@ async function wipOverlay() {
     'integration chain contains the ephemeral wip snapshot commit',
   );
 
-  // Event path: an editor save re-rebuilds without any command
+  // Event path: an editor save re-rebuilds without any command.
+  // WorkspaceEdit (not TextEditor.edit): headless workbenches may have no
+  // active editor, and a silently-failed edit must not fake a pass.
   const doc = await vscode.workspace.openTextDocument(
     path.join(laneA, 'wip.txt'),
   );
-  const editor = await vscode.window.showTextDocument(doc);
-  await editor.edit((b) =>
-    b.replace(
-      new vscode.Range(0, 0, doc.lineCount, 0),
-      'uncommitted v2 via save\n',
-    ),
+  const we = new vscode.WorkspaceEdit();
+  we.replace(
+    doc.uri,
+    new vscode.Range(0, 0, doc.lineCount, 0),
+    'uncommitted v2 via save\n',
   );
-  await doc.save();
+  assert(await vscode.workspace.applyEdit(we), 'workspace edit applied');
+  assert(doc.isDirty, 'document is dirty after edit');
+  assert(await doc.save(), 'document saved (fires onDidSaveTextDocument)');
   await poll('save in the lane re-rebuilds the integration tree', 30000, () =>
     fs
       .readFileSync(path.join(working, 'wip.txt'), 'utf8')
