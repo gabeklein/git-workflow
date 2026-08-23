@@ -1,7 +1,7 @@
 {
   "name": "git-workflow",
   "displayName": "Git Workflow",
-  "description": "Discover git worktrees and compare each Working Tree against its base ref — GitLens-style, editable diffs.",
+  "description": "Discover git worktrees and compare each Working Tree against its base ref \u2014 GitLens-style, editable diffs.",
   "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
@@ -47,7 +47,11 @@
         },
         "worktreeCompare.includeRootCheckout": {
           "type": "string",
-          "enum": ["dirty", "always", "never"],
+          "enum": [
+            "dirty",
+            "always",
+            "never"
+          ],
           "default": "dirty",
           "enumDescriptions": [
             "Only list the root checkout when it has uncommitted changes (hide when empty/clean)",
@@ -58,7 +62,10 @@
         },
         "worktreeCompare.squashLayout": {
           "type": "string",
-          "enum": ["list", "tree"],
+          "enum": [
+            "list",
+            "tree"
+          ],
           "default": "list",
           "description": "How to show files under Full Diff: flat list or nested directory tree."
         },
@@ -82,7 +89,10 @@
         },
         "worktreeCompare.githubPullRequests": {
           "type": "string",
-          "enum": ["auto", "off"],
+          "enum": [
+            "auto",
+            "off"
+          ],
           "default": "auto",
           "enumDescriptions": [
             "Use the GitHub CLI (gh) when available to detect PRs for worktree branches",
@@ -98,18 +108,22 @@
         "worktreeCompare.integrationBaseRef": {
           "type": "string",
           "default": "",
-          "description": "Base ref integration rebuilds start from (origin/… preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
+          "description": "Base ref integration rebuilds start from (origin/\u2026 preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
         },
         "worktreeCompare.integrationAutoResolve": {
           "type": "string",
-          "enum": ["off", "whitespace", "lane-wins"],
+          "enum": [
+            "off",
+            "whitespace",
+            "lane-wins"
+          ],
           "default": "whitespace",
           "enumDescriptions": [
             "Strict: any clash fails the rebuild. Non-overlapping edits to the same file still merge (git default).",
-            "Also resolve clashes where both sides differ only in whitespace — e.g. two lanes applied the same change with different formatting (-X ignore-space-change).",
-            "Resolve every remaining text clash toward the incoming lane (-X theirs) — covers adjacent-line edits; the other side's clashing hunk is dropped."
+            "Also resolve clashes where both sides differ only in whitespace \u2014 e.g. two lanes applied the same change with different formatting (-X ignore-space-change).",
+            "Resolve every remaining text clash toward the incoming lane (-X theirs) \u2014 covers adjacent-line edits; the other side's clashing hunk is dropped."
           ],
-          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable — but resolved-away edits silently miss from the combined tree."
+          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable \u2014 but resolved-away edits silently miss from the combined tree."
         },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
@@ -153,7 +167,7 @@
     "viewsWelcome": [
       {
         "view": "worktreeCompare.integration",
-        "contents": "Integration mode is off.\nCombine feature branches onto a base — without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
+        "contents": "Integration mode is off.\nCombine feature branches onto a base \u2014 without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
       }
     ],
     "commands": [
@@ -165,7 +179,7 @@
       },
       {
         "command": "worktreeCompare.selectWorktree",
-        "title": "Select Worktree…",
+        "title": "Select Worktree\u2026",
         "icon": "$(list-selection)",
         "category": "Git Workflow"
       },
@@ -181,7 +195,7 @@
       },
       {
         "command": "worktreeCompare.deleteWorktree",
-        "title": "Delete Worktree…",
+        "title": "Delete Worktree\u2026",
         "icon": "$(trash)",
         "category": "Git Workflow"
       },
@@ -216,14 +230,14 @@
       },
       {
         "command": "worktreeCompare.commitStaged",
-        "title": "Commit Staged…",
+        "title": "Commit Staged\u2026",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasStaged"
       },
       {
         "command": "worktreeCompare.commitUnstaged",
-        "title": "Commit Unstaged…",
+        "title": "Commit Unstaged\u2026",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasUnstaged && !worktreeCompare.hasStaged"
@@ -274,7 +288,7 @@
       },
       {
         "command": "worktreeCompare.createWorktreeFromBranch",
-        "title": "Create Worktree…",
+        "title": "Create Worktree\u2026",
         "icon": "$(repo-clone)",
         "category": "Git Workflow"
       },
@@ -302,7 +316,7 @@
       },
       {
         "command": "worktreeCompare.enableIntegration",
-        "title": "Enable Integration Mode…",
+        "title": "Enable Integration Mode\u2026",
         "icon": "$(combine)",
         "category": "Git Workflow"
       },
@@ -328,12 +342,12 @@
       },
       {
         "command": "worktreeCompare.disableIntegration",
-        "title": "Disable Integration Mode…",
+        "title": "Disable Integration Mode\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.changeIntegrationBase",
-        "title": "Change Integration Base…",
+        "title": "Change Integration Base\u2026",
         "icon": "$(git-compare)",
         "category": "Git Workflow"
       }
@@ -530,11 +544,13 @@
     "vsix": "npm run package && mkdir -p artifacts && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --skip-license -o artifacts/git-workflow-$npm_package_version.vsix",
     "install:local": "node scripts/install-local.mjs",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test:edh": "node esbuild.js && node scripts/edh-test/run.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^3.1.0",
     "esbuild": "^0.25.0",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.7.0"
