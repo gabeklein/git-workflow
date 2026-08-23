@@ -1209,7 +1209,14 @@ export class WorktreeTreeProvider
    * Row badges: how each lane relates to its base. Bounded-parallel, and
    * memoized by refSha:baseSha so probes rerun only when a tip moves.
    */
-  private async refreshBaseStatuses(): Promise<void> {
+  /** Row badge for a worktree (undefined = up to date / unknown). */
+  getBaseStatus(
+    worktreePath: string,
+  ): { behind: number; ahead: number; conflicts: boolean; baseRef: string } | undefined {
+    return this.baseStatuses.get(worktreePath);
+  }
+
+  async refreshBaseStatuses(): Promise<void> {
     if (this.baseStatusInFlight) {
       return;
     }

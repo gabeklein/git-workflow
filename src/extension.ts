@@ -47,7 +47,7 @@ import type { BranchItem, RemotePrFileItem } from './views/nodes';
 /** Branch the root checkout was on before enabling integration on it. */
 const INTEGRATION_RETURN_KEY = 'worktreeCompare.integrationReturnBranch';
 
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): unknown {
   const output = vscode.window.createOutputChannel('Git Workflow');
   context.subscriptions.push(output);
   const log = createFileBackedLogger(context, output);
@@ -1119,6 +1119,23 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
   );
+
+  // Read-only view-state hooks for the EDH test suite: assertions on what
+  // the panels SHOW (badges, selection, integration state), which git-level
+  // checks can't reach. Gated — absent in normal sessions.
+  if (process.env.GW_TEST_HOOKS === '1') {
+    return {
+      test: {
+        worktrees: () => treeProvider.getWorktrees(),
+        selectedPath: () => treeProvider.getSelectedPath(),
+        integration: () => treeProvider.getIntegration(),
+        baseStatus: (worktreePath: string) =>
+          treeProvider.getBaseStatus(worktreePath),
+        refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
+      },
+    };
+  }
+  return undefined;
 }
 
 function reportIntegrationResult(

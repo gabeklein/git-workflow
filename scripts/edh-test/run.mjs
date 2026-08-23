@@ -114,6 +114,7 @@ try {
     ],
     extensionTestsEnv: {
       GW_FIXTURE_REPO: repo,
+      GW_TEST_HOOKS: '1',
       GW_FIXTURE_LANDING: path.join(root, 'landing'),
     },
   });
