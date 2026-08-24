@@ -184,6 +184,8 @@ branch rows (PR / pushed / local / applied)  ← click to focus
 ▶ Full Diff · N new · M modified · …  ← collapsed until opened
 ```
 
+**Files** panel (explorer for the focused worktree — header shows its branch): browse and open the worktree's files as **real editable buffers**, not diffs. The listing is git-driven (tracked + untracked, `.gitignore` respected — no `node_modules` noise) and follows focus. `New File…` / `Delete` via the title button and context menus; it refreshes on git activity and file events. A custom panel rather than swapping workspace folders, because converting a single-folder window to multi-root restarts the extension host.
+
 **Branches** panel (separate): every branch — local, remote, PR-only — newest first, tagged with `worktree` / `PR #N` / `conflicts` / `remote` / `local only`. Create a worktree from any row (inline action); PR rows expand into read-only file diffs; click a row with a worktree to focus it.
 
 Selection is persisted per workspace. Compare defaults to merge-base of the integration tip (not “must rebase” when main moves).

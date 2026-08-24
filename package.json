@@ -198,6 +198,10 @@
           "name": "Changes"
         },
         {
+          "id": "worktreeCompare.files",
+          "name": "Files"
+        },
+        {
           "id": "worktreeCompare.integration",
           "name": "Integration"
         },
@@ -455,6 +459,23 @@
         "title": "Catch Up Integration Base",
         "icon": "$(arrow-up)",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.refreshFiles",
+        "title": "Refresh Files",
+        "icon": "$(refresh)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.newFileInWorktree",
+        "title": "New File…",
+        "icon": "$(new-file)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.deleteWorktreeEntry",
+        "title": "Delete",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -483,6 +504,16 @@
           "command": "worktreeCompare.refreshBranches",
           "when": "view == worktreeCompare.branches",
           "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.newFileInWorktree",
+          "when": "view == worktreeCompare.files",
+          "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.refreshFiles",
+          "when": "view == worktreeCompare.files",
+          "group": "navigation@2"
         },
         {
           "command": "worktreeCompare.rebuildIntegration",
@@ -525,6 +556,16 @@
           "command": "worktreeCompare.toggleSquashLayout",
           "when": "view == worktreeCompare.changes && viewItem == section:squash",
           "group": "inline"
+        },
+        {
+          "command": "worktreeCompare.newFileInWorktree",
+          "when": "view == worktreeCompare.files && viewItem == explorerFolder",
+          "group": "1_files@1"
+        },
+        {
+          "command": "worktreeCompare.deleteWorktreeEntry",
+          "when": "view == worktreeCompare.files && viewItem =~ /^explorer(File|Folder)$/",
+          "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.openPullRequest",
