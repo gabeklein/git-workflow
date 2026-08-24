@@ -30,31 +30,46 @@ export function integrationBaseRef(): string {
   return dedicated || config.get<string>('defaultBaseRef', 'main');
 }
 
-export type AutoResolveMode = 'off' | 'whitespace' | 'lane-wins';
+export type AutoResolveMode = 'off' | 'whitespace' | 'best-effort';
 
 /**
  * How far a lane merge may auto-resolve clashes. Non-overlapping hunks in
- * the same file always merge — git does that by default. This governs the
- * rest: 'whitespace' resolves formatting-only clashes; 'lane-wins' resolves
- * every text clash toward the incoming lane (covers adjacent-line edits,
- * at the cost of possibly dropping the other side's neighboring edit).
+ * the same file always merge — git does that by default. Beyond that:
+ * 'whitespace' also resolves formatting-only clashes plus everything the
+ * LOSSLESS resolver can prove safe (union of insert-only sides, linewise
+ * 3-way); 'best-effort' (default — integration is a preview of unlanded
+ * work) additionally resolves remaining text clashes toward the incoming
+ * lane, TAGGED on the lane row so dropped hunks are never silent.
+ * 'lane-wins' is accepted as a legacy alias for 'best-effort'.
  */
 export function integrationAutoResolve(): AutoResolveMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<string>('integrationAutoResolve', 'whitespace');
-  return v === 'off' || v === 'lane-wins' ? v : 'whitespace';
+    .get<string>('integrationAutoResolve', 'best-effort');
+  if (v === 'off' || v === 'whitespace') {
+    return v;
+  }
+  return 'best-effort';
 }
 
 export function autoResolveArgs(): string[] {
+  // Never -X theirs here: silent hunk-dropping during the merge would
+  // bypass the resolver's lossless rules AND its lossy tagging. The
+  // theirs fallback lives in resolveConflictedTree, per file, reported.
+  return integrationAutoResolve() === 'off'
+    ? []
+    : ['-X', 'ignore-space-change'];
+}
+
+/** What the per-file conflict resolver may do after a conflicted merge. */
+export function conflictResolverMode(): 'none' | 'lossless' | 'full' {
   switch (integrationAutoResolve()) {
-    case 'lane-wins':
-      // theirs implies whitespace clashes resolve too
-      return ['-X', 'theirs', '-X', 'ignore-space-change'];
+    case 'off':
+      return 'none';
     case 'whitespace':
-      return ['-X', 'ignore-space-change'];
+      return 'lossless';
     default:
-      return [];
+      return 'full';
   }
 }
 

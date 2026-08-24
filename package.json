@@ -115,15 +115,15 @@
           "enum": [
             "off",
             "whitespace",
-            "lane-wins"
+            "best-effort"
           ],
-          "default": "whitespace",
+          "default": "best-effort",
           "enumDescriptions": [
             "Strict: any clash fails the rebuild. Non-overlapping edits to the same file still merge (git default).",
-            "Also resolve clashes where both sides differ only in whitespace \u2014 e.g. two lanes applied the same change with different formatting (-X ignore-space-change).",
-            "Resolve every remaining text clash toward the incoming lane (-X theirs) \u2014 covers adjacent-line edits; the other side's clashing hunk is dropped."
+            "Also resolve whitespace-only clashes plus everything provably LOSSLESS: union when both lanes only inserted lines (changelog appends, import lists) and linewise 3-way for adjacent-line edits.",
+            "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane \u2014 the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
           ],
-          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is derived, so aggressive modes are recoverable \u2014 but resolved-away edits silently miss from the combined tree."
+          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work \u2014 lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
         },
         "worktreeCompare.catchUpStrategy": {
           "type": "string",

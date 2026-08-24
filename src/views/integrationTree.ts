@@ -65,6 +65,7 @@ export class IntegrationTreeProvider
           landed: integration.landed.includes(branch),
           resolving: integration.resolving.includes(branch),
           auto: !integration.explicit.includes(branch),
+          autoResolved: integration.autoResolved.find((r) => r.lane === branch),
         }),
     );
   }

@@ -27,6 +27,7 @@ import {
   rebuildIntegration,
   setWipLane,
   type RebuildResult,
+  type ResolvedLane,
 } from '../git/integration';
 import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 
@@ -59,6 +60,8 @@ export interface IntegrationState {
   conflicts: string[];
   /** Candidates with a paused base merge in their worktree. */
   resolving: string[];
+  /** Lanes whose conflicts the last rebuild's resolver settled. */
+  autoResolved: ResolvedLane[];
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -82,6 +85,8 @@ export class IntegrationController implements vscode.Disposable {
   private conflicts: string[] = [];
   /** Candidates with a paused base merge in their worktree. */
   private resolving: string[] = [];
+  /** Resolver outcomes from the last successful rebuild. */
+  private autoResolved: ResolvedLane[] = [];
   /** Conflict-probe memo (refSha:baseSha) for the lane-vs-base re-probe. */
   private readonly probeMemo = new Map<string, boolean>();
   private error: { code: string; message: string; lane?: string } | undefined;
@@ -109,6 +114,7 @@ export class IntegrationController implements vscode.Disposable {
       landed: this.landed.slice(),
       conflicts: this.conflicts.slice(),
       resolving: this.resolving.slice(),
+      autoResolved: this.autoResolved.slice(),
       error: this.error,
     };
   }
@@ -133,6 +139,7 @@ export class IntegrationController implements vscode.Disposable {
       this.landed = [];
       this.conflicts = [];
       this.resolving = [];
+      this.autoResolved = [];
       this.error = undefined;
       this.fingerprint = undefined;
       return;
@@ -304,7 +311,7 @@ export class IntegrationController implements vscode.Disposable {
     if (this.lanes.includes(branch)) {
       return this.runRebuild(enabled ? `wip on ${branch}` : `wip off ${branch}`);
     }
-    return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [] };
+    return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
   }
 
   /**
@@ -410,6 +417,20 @@ export class IntegrationController implements vscode.Disposable {
       const result = await rebuildIntegration(workingPath, integrationBaseRef());
       if (result.ok) {
         this.error = undefined;
+        this.autoResolved = result.resolved;
+        for (const r of result.resolved) {
+          this.host.output.appendLine(
+            `Lane ${r.lane} auto-resolved${
+              r.lossless.length > 0
+                ? ` · lossless: ${r.lossless.join(', ')}`
+                : ''
+            }${
+              r.lossy.length > 0
+                ? ` · lane-wins (hunks dropped): ${r.lossy.join(', ')}`
+                : ''
+            }`,
+          );
+        }
         // Landed lanes were retired by the rebuild itself (under its lock);
         // rows stay as candidates with the 'landed' tag
         for (const lane of result.landed) {
@@ -487,7 +508,7 @@ export class IntegrationController implements vscode.Disposable {
     }
     await this.refreshState();
     this.host.fireTreeData();
-    return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [] };
+    return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
   }
 
   /** Add this branch as a lane and rebuild. */
