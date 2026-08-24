@@ -559,6 +559,59 @@ async function pettyConflicts() {
   assert(!api.integration()?.error, 'no integration error state');
 }
 
+async function deadLanePrune() {
+  const candidates = () => api.integration()?.candidates ?? [];
+
+  // A lane that will "die": applied, wip-flagged, then branch-deleted
+  const laneDead = path.join(repo, '.worktrees', 'feat-dead');
+  git(repo, ['fetch', '-q', 'origin']);
+  git(repo, [
+    'worktree', 'add', '-q', '.worktrees/feat-dead', '-b', 'feat/dead', 'origin/main',
+  ]);
+  fs.writeFileSync(path.join(laneDead, 'dead.txt'), 'short-lived\n');
+  git(laneDead, ['add', '-A']);
+  git(laneDead, ['commit', '-qm', 'feat/dead work']);
+  await poll('feat/dead applies to integration', 30000, async () => {
+    await vscode.commands.executeCommand('worktreeCompare.applyToIntegration', {
+      worktreePath: laneDead,
+    });
+    return applied().includes('feat/dead');
+  });
+
+  // Seed the other state files the way the shell script / agents can:
+  // wip flag on the doomed lane, plus a branch that never existed at all
+  // (the mistyped-entry case) straight into focus-candidates.
+  const stateFile = (f) => path.join(repo, '.git', f);
+  fs.appendFileSync(stateFile('focus-wip'), 'feat/dead\n');
+  fs.appendFileSync(stateFile('focus-candidates'), 'feat/never-existed\n');
+
+  // Kill the worktree AND the branch — the "worktree died" shape
+  git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-dead']);
+  git(repo, ['branch', '-D', 'feat/dead']);
+
+  await poll('dead + ghost lanes are pruned from every state file', 30000, async () => {
+    await vscode.commands.executeCommand('worktreeCompare.refresh');
+    return (
+      !applied().includes('feat/dead') &&
+      !readLanes('focus-candidates').includes('feat/dead') &&
+      !readLanes('focus-candidates').includes('feat/never-existed') &&
+      !readLanes('focus-wip').includes('feat/dead')
+    );
+  });
+  await poll('view state: dead lane leaves the Integration panel', 15000, () =>
+    !candidates().includes('feat/dead') &&
+    !candidates().includes('feat/never-existed'),
+  );
+  assert(
+    applied().includes('feat/p1') && applied().includes('feat/p2'),
+    'live lanes survive the prune',
+  );
+  await poll('integration tree drops the dead lane content', 20000, () =>
+    !fs.existsSync(path.join(working, 'dead.txt')),
+  );
+  assert(!api.integration()?.error, 'no integration error state after prune');
+}
+
 async function run() {
   const scenarios = [
     ['activation', activation],
@@ -571,6 +624,7 @@ async function run() {
     ['auto membership', autoMembership],
     ['auto rebase', autoRebase],
     ['petty conflicts', pettyConflicts],
+    ['dead lane prune', deadLanePrune],
   ];
   for (const [name, fn] of scenarios) {
     console.log(`[suite] ▸ ${name}`);

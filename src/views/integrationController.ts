@@ -420,8 +420,11 @@ export class IntegrationController implements vscode.Disposable {
     this.rebuildInFlight = true;
     const t0 = Date.now();
     try {
-      if (reason === 'manual') {
-        // Manual rebuild = "give me reality": refresh the base tip first
+      if (reason.startsWith('manual')) {
+        // Manual rebuild = "give me reality": refresh the base tip first.
+        // startsWith: a manual request queued behind an in-flight rebuild
+        // reruns as 'manual (queued)' and must still fetch — skipping it
+        // left dependent state (landed, badges) on a stale origin.
         this.lastBaseFetchAt = Date.now();
         await fetchIntegrationBase(workingPath, integrationBaseRef());
       }
