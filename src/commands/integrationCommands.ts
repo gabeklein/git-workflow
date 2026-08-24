@@ -360,11 +360,10 @@ export function registerIntegrationCommands(
           return;
         }
         try {
-          await treeProvider.addIntegrationCandidate(wt.branch);
-          void vscode.window.setStatusBarMessage(
-            `Git Workflow: ${wt.branch} added — check it under Integration to merge it in`,
-            4000,
-          );
+          // Adding means "put it in the preview": applied immediately —
+          // the checkbox is for taking a lane OUT, not for finishing an add
+          const result = await treeProvider.applyToIntegration(wt.branch);
+          reportIntegrationResult(result, `added ${wt.branch} to the preview`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Git Workflow: ${message}`);
