@@ -490,18 +490,21 @@ export class IntegrationController implements vscode.Disposable {
     if (this.rebuildInFlight) {
       // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
       // follow-up run — it re-reads the lane files, so it applies whatever
-      // state the caller just wrote.
-      this.rebuildQueued = reason;
+      // state the caller just wrote. Reasons ACCUMULATE: overwriting lost
+      // a queued manual's fetch when hide/apply queued after it, leaving
+      // landed/badge state on a stale origin (CI-only timing).
+      this.rebuildQueued = this.rebuildQueued
+        ? `${this.rebuildQueued} + ${reason}`
+        : reason;
       return { ok: false, code: 'busy', message: 'rebuild already running' };
     }
     this.rebuildInFlight = true;
     const t0 = Date.now();
     try {
-      if (reason.startsWith('manual')) {
+      if (reason.includes('manual')) {
         // Manual rebuild = "give me reality": refresh the base tip first.
-        // startsWith: a manual request queued behind an in-flight rebuild
-        // reruns as 'manual (queued)' and must still fetch — skipping it
-        // left dependent state (landed, badges) on a stale origin.
+        // includes(): the manual marker must survive queueing — both the
+        // '(queued)' suffix and accumulation with other queued reasons.
         this.lastBaseFetchAt = Date.now();
         await fetchIntegrationBase(workingPath, integrationBaseRef());
       }
