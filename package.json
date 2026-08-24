@@ -481,7 +481,7 @@
         },
         {
           "command": "worktreeCompare.abortIntegrationMerge",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationMergePaused",
           "group": "1_config@2"
         },
         {
@@ -625,11 +625,6 @@
           "command": "worktreeCompare.excludeWipFromIntegration",
           "when": "view == worktreeCompare.integration && viewItem =~ /WipOn/",
           "group": "2_integration@2"
-        },
-        {
-          "command": "worktreeCompare.disableIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^integrationStatusOn/",
-          "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.deleteWorktree",
