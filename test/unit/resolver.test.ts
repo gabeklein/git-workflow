@@ -13,7 +13,6 @@
  *     resolve lane-wins TAGGED LOSSY under full;
  *   - delete-vs-edit stays a real conflict in every tier.
  */
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -287,11 +286,18 @@ async function integrate(
     } else {
       tree = step.tree;
     }
-    current = execFileSync(
-      'git',
-      ['commit-tree', tree, '-p', current, '-p', sha, '-m', `integrate ${name}`],
-      { cwd: repo, encoding: 'utf8' },
-    ).trim();
+    // helpers.git, not a raw spawn: commit-tree needs the committer
+    // identity the helper injects (CI runners have no global git config)
+    current = git(repo, [
+      'commit-tree',
+      tree,
+      '-p',
+      current,
+      '-p',
+      sha,
+      '-m',
+      `integrate ${name}`,
+    ]);
   }
   return { tip: current, lossy, lossless };
 }
