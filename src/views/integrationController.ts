@@ -6,6 +6,7 @@ import {
   abortIntegrationMerge,
   addAppliedLane,
   addCandidateLane,
+  addExcludedLane,
   alignIntegrationBranchName,
   baseStatusFor,
   dropAppliedLane,
@@ -19,7 +20,9 @@ import {
   isIntegrationAutoRebuildEnabled,
   isLaneBranch,
   listAppliedLanes,
+  dropExcludedLane,
   listCandidateLanes,
+  listExcludedLanes,
   listWipLanes,
   rebuildIntegration,
   setWipLane,
@@ -37,6 +40,9 @@ export interface IntegrationHost {
   refreshCompare(worktreePath: string): void;
   /** Selection landed on the integration checkout — move it to a real lane. */
   moveSelectionOff(worktreePath: string): void;
+  /** Override ?? genuine inference for a worktree's base — undefined when
+   *  there is no evidence (auto-membership must never enroll on a guess). */
+  genuineBaseFor(worktreePath: string): Promise<string | undefined>;
 }
 
 export interface IntegrationState {
@@ -44,6 +50,9 @@ export interface IntegrationState {
   branch: string;
   lanes: string[];
   candidates: string[];
+  /** Explicitly-added candidates (focus-candidates file); the rest of the
+   *  candidates are auto members (base matches) or script-applied lanes. */
+  explicit: string[];
   wip: string[];
   landed: string[];
   /** Applied lanes whose tips conflict with the base (probed off-tree). */
@@ -61,8 +70,10 @@ export interface IntegrationState {
 export class IntegrationController implements vscode.Disposable {
   private integrationPath: string | undefined;
   private lanes: string[] = [];
-  /** Union of the candidates file and applied lanes — rows under Integration. */
+  /** Everything shown under Integration: explicit + applied + auto members. */
   private candidates: string[] = [];
+  /** Explicitly-added candidates (focus-candidates file). */
+  private explicit: string[] = [];
   /** Candidates whose tips are contained in the base (they landed). */
   private landed: string[] = [];
   /** Lanes whose uncommitted edits overlay into rebuilds. */
@@ -93,6 +104,7 @@ export class IntegrationController implements vscode.Disposable {
       branch: integrationBranch(),
       lanes: this.lanes.slice(),
       candidates: this.candidates.slice(),
+      explicit: this.explicit.slice(),
       wip: this.wip.slice(),
       landed: this.landed.slice(),
       conflicts: this.conflicts.slice(),
@@ -117,6 +129,7 @@ export class IntegrationController implements vscode.Disposable {
       this.integrationPath = undefined;
       this.lanes = [];
       this.candidates = [];
+      this.explicit = [];
       this.landed = [];
       this.conflicts = [];
       this.resolving = [];
@@ -143,9 +156,35 @@ export class IntegrationController implements vscode.Disposable {
     this.integrationPath = wt.path;
     try {
       this.lanes = await listAppliedLanes(wt.path);
-      const candidates = await listCandidateLanes(wt.path);
+      const explicit = await listCandidateLanes(wt.path);
+      this.explicit = explicit;
+      const excluded = await listExcludedLanes(wt.path);
+      // Auto-membership: a worktree whose own base — override or GENUINE
+      // inference, never the configured fallback — matches the integration
+      // base is a candidate automatically. Stacked lanes (base = parent
+      // branch) stay out, and so do branches whose base we merely guessed.
+      const integBase = integrationBaseRef().replace(/^origin\//, '');
+      const auto: string[] = [];
+      for (const w of this.host.getWorktrees()) {
+        if (
+          w.detached ||
+          w.path === wt.path ||
+          explicit.includes(w.branch) ||
+          this.lanes.includes(w.branch) ||
+          excluded.includes(w.branch) ||
+          !isLaneBranch(w.branch, integrationBaseRef())
+        ) {
+          continue;
+        }
+        const base = await this.host.genuineBaseFor(w.path);
+        if (base && base.replace(/^origin\//, '') === integBase) {
+          auto.push(w.branch);
+        }
+      }
       // Applied lanes (e.g. from the shell script) always show as candidates
-      this.candidates = [...new Set([...candidates, ...this.lanes])].sort();
+      this.candidates = [
+        ...new Set([...explicit, ...this.lanes, ...auto]),
+      ].sort();
       this.wip = await listWipLanes(wt.path);
       this.landed = await findLandedLanes(
         wt.path,
@@ -191,6 +230,7 @@ export class IntegrationController implements vscode.Disposable {
       this.host.output.appendLine(`Read lanes failed: ${message}`);
       this.lanes = [];
       this.candidates = [];
+      this.explicit = [];
       this.wip = [];
       this.landed = [];
       this.conflicts = [];
@@ -423,17 +463,25 @@ export class IntegrationController implements vscode.Disposable {
     if (!isLaneBranch(branch, integrationBaseRef())) {
       throw new Error(`${branch} cannot be an integration lane`);
     }
+    // Re-adding is also how an excluded auto member comes back
+    await dropExcludedLane(this.integrationPath, branch);
     await addCandidateLane(this.integrationPath, branch);
     await this.refreshState();
     this.host.fireTreeData();
   }
 
-  /** Drop a branch from the Integration row; rebuild if it was applied. */
+  /**
+   * Drop a branch from the Integration row; rebuild if it was applied.
+   * Also records an exclusion — auto members (base matches) would just
+   * reappear on the next refresh otherwise, and Remove must be a real
+   * exit for every row. Add to Integration clears the exclusion.
+   */
   async removeCandidate(branch: string): Promise<RebuildResult> {
     if (!this.integrationPath) {
       return { ok: false, code: 'error', message: 'no integration worktree' };
     }
     await dropCandidateLane(this.integrationPath, branch);
+    await addExcludedLane(this.integrationPath, branch);
     if (this.lanes.includes(branch)) {
       return this.hide(branch);
     }
@@ -455,6 +503,8 @@ export class IntegrationController implements vscode.Disposable {
       };
     }
     // Persist candidacy too, so unchecking later keeps the row visible
+    // (and applying an excluded branch is an explicit opt back in)
+    await dropExcludedLane(this.integrationPath, branch);
     await addCandidateLane(this.integrationPath, branch);
     await addAppliedLane(this.integrationPath, branch);
     return this.runRebuild(`apply ${branch}`);

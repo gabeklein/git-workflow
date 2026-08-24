@@ -1,7 +1,11 @@
 import type { DiscoveredWorktree } from '../discovery/scanner';
 import { baseStatusFor } from '../git/integration';
 import { baseMergeInProgress, rebaseInProgress } from '../git/laneOps';
-import { preferRemoteTrackingRef, resolveBaseRef } from '../git/worktree';
+import {
+  inferBaseRef,
+  preferRemoteTrackingRef,
+  resolveBaseRef,
+} from '../git/worktree';
 
 export interface BaseStatusHost {
   readonly output: { appendLine(value: string): void };
@@ -36,6 +40,8 @@ export class BaseStatusTracker {
   private readonly overrides = new Map<string, string>();
   /** Inferred per-worktree base (path\0branch → ref). */
   private readonly inferred = new Map<string, string>();
+  /** Genuine-inference results only (path\0branch → ref | ''=none). */
+  private readonly genuine = new Map<string, string>();
   /** Row badges: path → status vs its base. */
   private readonly statuses = new Map<string, WorktreeBaseState>();
   /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
@@ -58,9 +64,11 @@ export class BaseStatusTracker {
 
   /** Drop cached inference for one worktree (all branches). */
   invalidate(worktreePath: string): void {
-    for (const key of [...this.inferred.keys()]) {
-      if (key.startsWith(`${worktreePath}\0`)) {
-        this.inferred.delete(key);
+    for (const map of [this.inferred, this.genuine]) {
+      for (const key of [...map.keys()]) {
+        if (key.startsWith(`${worktreePath}\0`)) {
+          map.delete(key);
+        }
       }
     }
   }
@@ -68,6 +76,7 @@ export class BaseStatusTracker {
   /** Full refresh drops inference (overrides persist). */
   invalidateAll(): void {
     this.inferred.clear();
+    this.genuine.clear();
   }
 
   async baseFor(worktreePath: string): Promise<string> {
@@ -85,6 +94,30 @@ export class BaseStatusTracker {
     }
     const base = await resolveBaseRef(worktreePath, this.host.fallbackBaseRef());
     this.inferred.set(key, base);
+    return base;
+  }
+
+  /**
+   * Override ?? GENUINE inference (branch config / reflog / upstream) —
+   * never the configured fallback, which equals the integration base while
+   * integration is on. undefined = no evidence; auto flows (membership
+   * derivation in particular) must not enroll on a guess.
+   */
+  async genuineBaseFor(worktreePath: string): Promise<string | undefined> {
+    const override = this.overrides.get(worktreePath);
+    if (override) {
+      return override;
+    }
+    const branch =
+      this.host.getWorktrees().find((w) => w.path === worktreePath)?.branch ??
+      '';
+    const key = `${worktreePath}\0${branch}`;
+    const cached = this.genuine.get(key);
+    if (cached !== undefined) {
+      return cached || undefined;
+    }
+    const base = await inferBaseRef(worktreePath);
+    this.genuine.set(key, base ?? '');
     return base;
   }
 
