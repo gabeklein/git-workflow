@@ -673,7 +673,7 @@
     "install:local": "node scripts/install-local.mjs",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:edh": "node esbuild.js && node scripts/edh-test/run.mjs",
+    "test:edh": "node esbuild.js && node test/edh/run.mjs",
     "test:unit": "vitest run",
     "test": "npm run check-types:test && npm run test:unit && npm run test:edh",
     "check-types:test": "tsc --noEmit -p test/edh/tsconfig.json && tsc --noEmit -p test/unit/tsconfig.json"

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /**
  * Live EDH validation: boots a real VS Code Extension Development Host on a
- * generated sample repo and runs the mocha scenarios from test/edh/ INSIDE
- * the extension host, driving the extension's registered commands and
- * asserting on real git state. `npm run test:edh`.
+ * generated sample repo and runs the mocha scenarios beside this file
+ * INSIDE the extension host, driving the extension's registered commands
+ * and asserting on real git state. `npm run test:edh`.
  *
- * The scenarios are sequential and build on each other — test/edh/index.ts
- * runs the files in filename order (hence the numeric prefixes) and bails
- * on the first failure.
+ * The scenarios are sequential and build on each other — index.ts runs
+ * the files in its explicit ORDER and bails on the first failure.
  */
 import { execFileSync } from 'node:child_process';
 import {
@@ -94,13 +93,15 @@ function buildFixture() {
   return { root, repo };
 }
 
-/** Compile test/edh/*.ts → out-test/edh/*.cjs for the extension host. */
+/** Compile the .ts beside this file → out-test/edh/*.cjs for the EDH. */
 async function buildTests() {
-  const testDir = path.resolve(extensionDevelopmentPath, 'test', 'edh');
   const outDir = path.resolve(extensionDevelopmentPath, 'out-test', 'edh');
-  const entryPoints = readdirSync(testDir)
+  // Stale compiled tests would trip index.ts's ORDER sync check (or worse,
+  // silently run deleted scenarios) — always build into a clean dir.
+  rmSync(outDir, { recursive: true, force: true });
+  const entryPoints = readdirSync(__dirname)
     .filter((f) => f === 'index.ts' || f.endsWith('.test.ts'))
-    .map((f) => path.join(testDir, f));
+    .map((f) => path.join(__dirname, f));
   await build({
     entryPoints,
     bundle: true,

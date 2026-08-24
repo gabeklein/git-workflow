@@ -1,15 +1,35 @@
 /**
- * EDH test entry (extensionTestsPath): collects the compiled *.test.cjs
- * files beside it and runs them with mocha, in filename order — the
- * scenarios are sequential and build on each other, hence the numeric
- * prefixes and bail-on-first-failure.
+ * EDH test entry (extensionTestsPath): runs the compiled *.test.cjs files
+ * beside it with mocha. The scenarios are sequential and build on each
+ * other — ORDER below is the execution order, and the run bails on the
+ * first failure. A test file missing from ORDER is a hard error, so new
+ * files must be placed deliberately rather than landing wherever
+ * alphabetical order puts them.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import Mocha from 'mocha';
 import { getApi } from './helpers';
 
+const ORDER = [
+  'overlay.test.cjs', //     activation, enroll/apply, selection, wip overlay
+  'landing.test.cjs', //     landed lifecycle, base badges
+  'catch-up.test.cjs', //    manual rebase/merge catch-up flows
+  'membership.test.cjs', //  auto membership, auto rebase
+  'conflicts.test.cjs', //   petty-conflict resolver, dead lane prune
+];
+
 export async function run(): Promise<void> {
+  const present = fs
+    .readdirSync(__dirname)
+    .filter((f) => f.endsWith('.test.cjs'));
+  const unknown = present.filter((f) => !ORDER.includes(f));
+  const missing = ORDER.filter((f) => !present.includes(f));
+  if (unknown.length > 0 || missing.length > 0) {
+    throw new Error(
+      `test files out of sync with ORDER — unknown: [${unknown.join(', ')}], missing: [${missing.join(', ')}]`,
+    );
+  }
   const mocha = new Mocha({
     ui: 'bdd',
     color: true,
@@ -17,10 +37,7 @@ export async function run(): Promise<void> {
     timeout: 120_000,
     slow: 5_000,
   });
-  for (const file of fs
-    .readdirSync(__dirname)
-    .filter((f) => f.endsWith('.test.cjs'))
-    .sort()) {
+  for (const file of ORDER) {
     mocha.addFile(path.join(__dirname, file));
   }
   await new Promise<void>((resolve, reject) => {
