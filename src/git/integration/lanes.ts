@@ -91,6 +91,30 @@ export async function dropCandidateLane(
 }
 
 /**
+ * Base pin: the sha integration rebuilds are FROZEN to. Written on enable
+ * and kept across reloads; the effective base follows origin/<base> when
+ * that is a descendant of the pin (published movement is always legit)
+ * and holds the pin otherwise — so commits made directly on the local
+ * base branch never silently retarget the preview. Catch Up Integration
+ * Base advances the pin deliberately.
+ */
+const BASE_PIN_FILE = 'focus-base';
+
+export async function readBasePin(cwd: string): Promise<string | undefined> {
+  const lines = await readLaneFile(cwd, BASE_PIN_FILE);
+  const sha = lines[0]?.trim();
+  return sha && /^[0-9a-f]{7,40}$/i.test(sha) ? sha : undefined;
+}
+
+export async function writeBasePin(cwd: string, sha: string): Promise<void> {
+  await writeLaneFile(cwd, BASE_PIN_FILE, [sha]);
+}
+
+export async function clearBasePin(cwd: string): Promise<void> {
+  await writeLaneFile(cwd, BASE_PIN_FILE, []);
+}
+
+/**
  * Exclusions: branches the user removed from Integration that would
  * otherwise auto-enroll (their base matches the integration base). This
  * is what gives every auto row a real exit — Remove persists here instead

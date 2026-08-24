@@ -428,6 +428,18 @@
         "command": "worktreeCompare.resolveLaneConflict",
         "title": "Resolve Conflict with Base…",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.branchifyBaseDrift",
+        "title": "Move New Base Commits to a Branch\u2026",
+        "icon": "$(git-branch)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.catchUpIntegrationBase",
+        "title": "Catch Up Integration Base",
+        "icon": "$(arrow-up)",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -563,6 +575,26 @@
           "command": "worktreeCompare.removeFromIntegration",
           "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneCandidate/",
           "group": "2_integration@1"
+        },
+        {
+          "command": "worktreeCompare.branchifyBaseDrift",
+          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "group": "inline@1"
+        },
+        {
+          "command": "worktreeCompare.catchUpIntegrationBase",
+          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "group": "inline@2"
+        },
+        {
+          "command": "worktreeCompare.branchifyBaseDrift",
+          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "group": "1_drift@1"
+        },
+        {
+          "command": "worktreeCompare.catchUpIntegrationBase",
+          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "group": "1_drift@2"
         },
         {
           "command": "worktreeCompare.resolveLaneConflict",

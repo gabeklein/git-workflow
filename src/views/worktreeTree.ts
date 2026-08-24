@@ -739,6 +739,10 @@ export class WorktreeTreeProvider
     return this.integration.runRebuild(reason);
   }
 
+  catchUpIntegrationBase(): Promise<RebuildResult> {
+    return this.integration.catchUpBase();
+  }
+
   addIntegrationCandidate(branch: string): Promise<void> {
     return this.integration.addCandidate(branch);
   }

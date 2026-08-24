@@ -1,8 +1,15 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
+import { git } from '../git/exec';
+import { gitOk } from '../git/exec';
+import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress } from '../git/laneOps';
 import {
+  clearBasePin,
+  readBasePin,
+  resolveBaseSha,
+  writeBasePin,
   abortIntegrationMerge,
   addAppliedLane,
   addCandidateLane,
@@ -63,6 +70,9 @@ export interface IntegrationState {
   resolving: string[];
   /** Lanes whose conflicts the last rebuild's resolver settled. */
   autoResolved: ResolvedLane[];
+  /** Local <base> carries commits the frozen base does not — offer
+   *  Convert-to-Branch / Catch Up instead of silently retargeting. */
+  baseDrift?: { ahead: number; sha: string; resetTo: string };
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -88,6 +98,9 @@ export class IntegrationController implements vscode.Disposable {
   private resolving: string[] = [];
   /** Resolver outcomes from the last successful rebuild. */
   private autoResolved: ResolvedLane[] = [];
+  private baseDrift:
+    | { ahead: number; sha: string; resetTo: string }
+    | undefined;
   /** Conflict-probe memo (refSha:baseSha) for the lane-vs-base re-probe. */
   private readonly probeMemo = new Map<string, boolean>();
   private error: { code: string; message: string; lane?: string } | undefined;
@@ -116,6 +129,7 @@ export class IntegrationController implements vscode.Disposable {
       conflicts: this.conflicts.slice(),
       resolving: this.resolving.slice(),
       autoResolved: this.autoResolved.slice(),
+      baseDrift: this.baseDrift,
       error: this.error,
     };
   }
@@ -141,6 +155,7 @@ export class IntegrationController implements vscode.Disposable {
       this.conflicts = [];
       this.resolving = [];
       this.autoResolved = [];
+      this.baseDrift = undefined;
       this.error = undefined;
       this.fingerprint = undefined;
       return;
@@ -173,6 +188,55 @@ export class IntegrationController implements vscode.Disposable {
           `Integration lanes pruned (branch gone): ${pruned.join(', ')}`,
         );
       }
+      // Freeze the base on first sight of this integration checkout: the
+      // pin is what rebuilds anchor to; only published (origin) movement
+      // or an explicit Catch Up advances it. Enable/base-change clear it,
+      // so it re-pins fresh; reloads keep it — that IS the freeze.
+      if (!(await readBasePin(wt.path))) {
+        const fresh = await resolveBaseSha(wt.path, integrationBaseRef());
+        if (fresh) {
+          await writeBasePin(wt.path, fresh);
+          this.host.output.appendLine(
+            `Integration base pinned at ${fresh.slice(0, 10)} (${integrationBaseRef()})`,
+          );
+        }
+      }
+      // Drift: local <base> carries commits the frozen base does not —
+      // the panel offers Convert-to-Branch / Catch Up instead of the
+      // preview silently retargeting onto unpublished work. Computed into
+      // a local and assigned ONCE: blanking this.baseDrift up front left
+      // a transient no-drift window during every refresh (row flicker,
+      // and readers mid-refresh saw undefined while drift persisted).
+      let drift: { ahead: number; sha: string; resetTo: string } | undefined;
+      const effective = await resolveBaseSha(wt.path, integrationBaseRef());
+      const baseName = integrationBaseRef().replace(/^origin\//, '');
+      const localSha = await revParseCommit(wt.path, `refs/heads/${baseName}`);
+      if (
+        effective &&
+        localSha &&
+        localSha !== effective &&
+        !(await gitOk(wt.path, [
+          'merge-base',
+          '--is-ancestor',
+          localSha,
+          effective,
+        ]))
+      ) {
+        const ahead =
+          Number(
+            (
+              await git(wt.path, [
+                'rev-list',
+                '--count',
+                `${effective}..${localSha}`,
+              ]).catch(() => '0')
+            ).trim(),
+          ) || 0;
+        if (ahead > 0) {
+          drift = { ahead, sha: localSha, resetTo: effective };
+        }
+      }
+      this.baseDrift = drift;
       this.lanes = await listAppliedLanes(wt.path);
       const explicit = await listCandidateLanes(wt.path);
       this.explicit = explicit;
@@ -389,6 +453,9 @@ export class IntegrationController implements vscode.Disposable {
       this.host.fireTreeData();
       return;
     }
+    // The pin belongs to the OLD base — drop it so refreshState re-pins
+    // fresh on the new one.
+    await clearBasePin(this.integrationPath).catch(() => {});
     try {
       const renamed = await alignIntegrationBranchName(this.integrationPath);
       if (renamed) {
@@ -552,6 +619,23 @@ export class IntegrationController implements vscode.Disposable {
     }
     await dropAppliedLane(this.integrationPath, branch);
     return this.runRebuild(`hide ${branch}`);
+  }
+
+  /**
+   * Deliberately advance the frozen base to the local <base> tip (the
+   * Catch Up exit for base drift) and rebuild onto it.
+   */
+  async catchUpBase(): Promise<RebuildResult> {
+    if (!this.integrationPath || !this.baseDrift) {
+      return { ok: false, code: 'error', message: 'no base drift to catch up' };
+    }
+    await writeBasePin(this.integrationPath, this.baseDrift.sha);
+    this.host.output.appendLine(
+      `Integration base caught up to ${this.baseDrift.sha.slice(0, 10)}`,
+    );
+    const result = await this.runRebuild('base caught up');
+    this.host.refresh();
+    return result;
   }
 
   /** Abort a conflicted lane merge, leaving the tree at the last good state. */
