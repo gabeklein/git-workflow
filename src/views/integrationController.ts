@@ -24,6 +24,7 @@ import {
   listCandidateLanes,
   listExcludedLanes,
   listWipLanes,
+  pruneDeadLanes,
   rebuildIntegration,
   setWipLane,
   type RebuildResult,
@@ -162,6 +163,16 @@ export class IntegrationController implements vscode.Disposable {
     }
     this.integrationPath = wt.path;
     try {
+      // Dead lanes: a branch deleted out from under Integration (its
+      // worktree died — landed and cleaned up, agent teardown) leaves
+      // ghost rows in the lane files. Prune before reading, so a lane
+      // that no longer exists never renders or re-enters a rebuild.
+      const pruned = await pruneDeadLanes(wt.path);
+      if (pruned.length > 0) {
+        this.host.output.appendLine(
+          `Integration lanes pruned (branch gone): ${pruned.join(', ')}`,
+        );
+      }
       this.lanes = await listAppliedLanes(wt.path);
       const explicit = await listCandidateLanes(wt.path);
       this.explicit = explicit;
