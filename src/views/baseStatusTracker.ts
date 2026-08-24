@@ -1,6 +1,18 @@
 import type { DiscoveredWorktree } from '../discovery/scanner';
-import { baseStatusFor } from '../git/integration';
-import { baseMergeInProgress, rebaseInProgress } from '../git/laneOps';
+import {
+  autoRebaseLanes,
+  baseStatusFor,
+  catchUpStrategy,
+  isLaneBranch,
+} from '../git/integration';
+import {
+  abortBaseMerge,
+  abortLaneRebase,
+  baseMergeInProgress,
+  rebaseInProgress,
+  startBaseMerge,
+  startLaneRebase,
+} from '../git/laneOps';
 import {
   inferBaseRef,
   preferRemoteTrackingRef,
@@ -46,6 +58,9 @@ export class BaseStatusTracker {
   private readonly statuses = new Map<string, WorktreeBaseState>();
   /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
   private readonly probeMemo = new Map<string, boolean>();
+  /** Auto catch-up attempts already made, path → refSha:baseSha — one
+   *  attempt per tip pair, so a failure never loops. */
+  private readonly autoTried = new Map<string, string>();
   private inFlight = false;
 
   constructor(private readonly host: BaseStatusHost) {}
@@ -206,6 +221,9 @@ export class BaseStatusTracker {
           ) {
             changed = true;
           }
+          if (await this.autoCatchUp(wt, entry, status.refSha, status.baseSha)) {
+            changed = true;
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           this.host.output.appendLine(
@@ -238,5 +256,77 @@ export class BaseStatusTracker {
     } finally {
       this.inFlight = false;
     }
+  }
+
+  /**
+   * Proactive catch-up (autoRebaseLanes: local-only): a linked worktree
+   * that is clean, behind, conflict-free, and UNPUSHED is brought up to
+   * date as the base moves — pushed branches are never rewritten
+   * automatically. Method follows catchUpStrategy (scope stays
+   * unpushed-only). Attempts are memoized per (tip, base) so a failure
+   * never loops; a conflicting attempt aborts immediately — the user did
+   * not ask for this operation, so it must never leave a paused state —
+   * and the row shows 'conflicts with <base>' for the manual flow.
+   * Returns true when the row's status changed.
+   */
+  private async autoCatchUp(
+    wt: DiscoveredWorktree,
+    entry: WorktreeBaseState,
+    refSha: string,
+    baseSha: string,
+  ): Promise<boolean> {
+    if (
+      autoRebaseLanes() === 'off' ||
+      entry.behind === 0 ||
+      entry.conflicts ||
+      wt.isRootCheckout ||
+      wt.isMainWorktree ||
+      wt.publishState !== 'local' ||
+      !isLaneBranch(wt.branch, entry.baseRef)
+    ) {
+      return false;
+    }
+    const key = `${refSha}:${baseSha}`;
+    if (this.autoTried.get(wt.path) === key) {
+      return false;
+    }
+    this.autoTried.set(wt.path, key);
+    try {
+      const viaMerge = catchUpStrategy() === 'merge';
+      const result = viaMerge
+        ? await startBaseMerge(wt.path, entry.baseRef, wt.branch)
+        : await startLaneRebase(wt.path, entry.baseRef);
+      if (result.status === 'done') {
+        this.host.output.appendLine(
+          `Auto-${viaMerge ? 'merged base into' : 'rebased'} ${wt.branch} (was ${entry.behind} behind ${entry.baseRef})`,
+        );
+        this.statuses.set(wt.path, {
+          ...entry,
+          behind: 0,
+          conflicts: false,
+        });
+        return true;
+      }
+      if (result.status === 'conflicts') {
+        await (viaMerge
+          ? abortBaseMerge(wt.path)
+          : abortLaneRebase(wt.path)
+        ).catch(() => {});
+        this.statuses.set(wt.path, { ...entry, conflicts: true });
+        this.host.output.appendLine(
+          `Auto catch-up ${wt.branch} conflicts with ${entry.baseRef} — aborted, row marked`,
+        );
+        return true;
+      }
+      this.host.output.appendLine(
+        `Auto catch-up ${wt.branch} skipped (${result.status}: ${result.message})`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(
+        `Auto catch-up ${wt.branch} failed: ${message}`,
+      );
+    }
+    return false;
   }
 }

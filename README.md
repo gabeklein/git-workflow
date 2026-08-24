@@ -110,6 +110,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.integrationAutoRebuild` | `true` | Rebuild the integration tree when base / lane tips move |
 | `worktreeCompare.integrationFetchIntervalMs` | `300000` | Fetch `origin/<base>` this often while integration is on (`0` = off); landed lanes retire automatically |
 | `worktreeCompare.catchUpStrategy` | `auto` | How **Catch Up with Base** works: `auto` (rebase unpushed lanes, merge pushed ones), `rebase`, or `merge` |
+| `worktreeCompare.autoRebaseLanes` | `off` | `local-only` auto-catches-up clean, behind, conflict-free, **unpushed** linked worktrees as the base moves |
 
 ## Integration worktree (overlay)
 
@@ -135,6 +136,8 @@ The integration checkout is rebuilt as **base + a merge of each applied lane**, 
 ## Catching lanes up with the base
 
 Base conflicts dominate multi-branch workflows (peer-lane conflicts are rare), so staleness is surfaced on the **worktree rows**: `N behind <base>`, `conflicts with <base>`, `rebasing`, or `merging base`. Every badge is computed against the same per-worktree base the Commits/Full Diff views use, and the paused states are probed from real git state (`rebase-merge`/`MERGE_HEAD`) — operations started in a terminal show the same controls.
+
+With `autoRebaseLanes: local-only` (**off** by default — moving your branch is a side effect you opt into), linked worktrees that are **clean, unpushed, behind, and conflict-free** are caught up automatically as the base moves, using `catchUpStrategy`'s method. Pushed branches are never rewritten automatically. Attempts are memoized per (tip, base) so failures don't loop, and a conflicting attempt aborts immediately — auto operations never leave a paused rebase/merge behind — marking the row `conflicts with <base>` for the manual flow.
 
 Manual flow, from the row's context menu:
 

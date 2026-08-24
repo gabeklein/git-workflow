@@ -73,6 +73,22 @@ export function catchUpStrategy(): CatchUpStrategy {
   return v === 'rebase' || v === 'merge' ? v : 'auto';
 }
 
+export type AutoRebaseMode = 'off' | 'local-only';
+
+/**
+ * Proactive catch-up: automatically bring lanes up to date as the base
+ * moves. 'local-only' touches ONLY linked worktrees that are clean,
+ * behind, conflict-free, and unpushed — pushed branches are never
+ * rewritten automatically. Default off: moving a user's branch is a side
+ * effect they must opt into.
+ */
+export function autoRebaseLanes(): AutoRebaseMode {
+  const v = vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<string>('autoRebaseLanes', 'off');
+  return v === 'local-only' ? v : 'off';
+}
+
 /** Branches that must never be applied as a lane. */
 export function isLaneBranch(branch: string, baseRef: string): boolean {
   if (!branch || branch === 'HEAD' || branch === 'unknown') {
