@@ -312,6 +312,16 @@ export function registerIntegrationCommands(
             throw new Error(`branch ${branch} already exists`);
           }
           await git(integration.path, ['branch', branch, drift.sha]);
+          // Record where the branch forked: created from a raw sha, its
+          // reflog says 'Created from <sha>' and inference would resolve
+          // the base to its own tip (0 ahead, empty diff). This config key
+          // is inference's first stop; genuineBaseFor reads it too, so the
+          // branch also auto-enrolls as an integration member by base.
+          await git(integration.path, [
+            'config',
+            `branch.${branch}.vscode-merge-base`,
+            baseName,
+          ]);
           if (baseCheckoutPath) {
             // --keep refuses rather than clobber local file changes
             await git(baseCheckoutPath, ['reset', '--keep', drift.resetTo]);

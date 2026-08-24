@@ -105,6 +105,13 @@ describe('base pin & drift lane', () => {
       resetTo,
       'main returned to the frozen base point',
     );
+    // Created from a raw sha, the branch would otherwise infer its own
+    // tip as base (0 ahead, empty diff) — branchify must record the fork
+    assert.equal(
+      git(repo, ['config', '--get', 'branch.feat/main-work.vscode-merge-base']),
+      'main',
+      'branchified lane records its base for the comparator',
+    );
     await poll('drift lane clears after branchify', 15000, async () => {
       await run('worktreeCompare.refresh');
       return !drift();
