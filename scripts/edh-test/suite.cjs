@@ -257,7 +257,9 @@ async function baseBadges() {
   git(laneA, ['add', 'a.txt']);
   git(laneA, ['commit', '-qm', 'lane edits a.txt']);
   await vscode.commands.executeCommand('worktreeCompare.rebuildIntegration');
-  await poll('view state: lane shows conflicts-with-base badge', 15000, async () => {
+  // 30s: this depends on the manual rebuild's base fetch having landed,
+  // which can queue behind an in-flight rebuild (observed flaking at 15s)
+  await poll('view state: lane shows conflicts-with-base badge', 30000, async () => {
     await api.refreshBaseStatuses();
     return api.baseStatus(laneA)?.conflicts === true;
   });
@@ -414,6 +416,75 @@ async function autoMembership() {
   );
 }
 
+async function autoRebase() {
+  const laneC = path.join(repo, '.worktrees', 'feat-c');
+  const gitOk = (cwd, args) => {
+    try {
+      git(cwd, args);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const rebasePaused = () => {
+    const p = git(laneC, ['rev-parse', '--git-path', 'rebase-merge']);
+    return fs.existsSync(path.resolve(laneC, p));
+  };
+
+  // Give feat/c its own commit so catch-up is a real rebase. It is
+  // unpushed (no origin/feat/c) — exactly the auto-eligible shape.
+  fs.writeFileSync(path.join(laneC, 'c.txt'), 'lane c v1\n');
+  git(laneC, ['add', 'c.txt']);
+  git(laneC, ['commit', '-qm', 'feat c']);
+  const featATip = git(repo, ['rev-parse', 'feat/a']);
+
+  const config = vscode.workspace.getConfiguration('worktreeCompare');
+  await config.update(
+    'autoRebaseLanes',
+    'local-only',
+    vscode.ConfigurationTarget.Workspace,
+  );
+  try {
+    await poll('unpushed lane auto-rebases onto the base', 30000, async () => {
+      await api.refreshBaseStatuses();
+      return gitOk(repo, ['merge-base', '--is-ancestor', 'origin/main', 'feat/c']);
+    });
+    assert(!rebasePaused(), 'auto attempt left no paused rebase behind');
+    assert(
+      git(repo, ['show', 'feat/c:c.txt']).trim() === 'lane c v1',
+      'auto-rebased tip still carries the lane commit',
+    );
+
+    // Base gains a conflicting c.txt → lane must be MARKED, not attempted
+    fs.writeFileSync(path.join(landing, 'c.txt'), 'base disagrees on c\n');
+    git(landing, ['add', 'c.txt']);
+    git(landing, ['commit', '-qm', 'base adds c.txt']);
+    git(landing, ['push', '-q']);
+    git(repo, ['fetch', '-q', 'origin']);
+    const cTip = git(repo, ['rev-parse', 'feat/c']);
+    await poll('conflicting lane gets the badge instead of an attempt', 30000, async () => {
+      await api.refreshBaseStatuses();
+      return api.baseStatus(laneC)?.conflicts === true;
+    });
+    assert(
+      git(repo, ['rev-parse', 'feat/c']) === cTip,
+      'conflicting lane tip is untouched',
+    );
+    assert(!rebasePaused(), 'no paused rebase after the conflict pass');
+    // feat/a is behind now too, but pushed — auto must never rewrite it
+    assert(
+      git(repo, ['rev-parse', 'feat/a']) === featATip,
+      'pushed lane feat/a is never auto-rewritten',
+    );
+  } finally {
+    await config.update(
+      'autoRebaseLanes',
+      undefined,
+      vscode.ConfigurationTarget.Workspace,
+    );
+  }
+}
+
 async function run() {
   const scenarios = [
     ['activation', activation],
@@ -424,6 +495,7 @@ async function run() {
     ['base badges', baseBadges],
     ['manual catch-up', manualCatchUp],
     ['auto membership', autoMembership],
+    ['auto rebase', autoRebase],
   ];
   for (const [name, fn] of scenarios) {
     console.log(`[suite] ▸ ${name}`);

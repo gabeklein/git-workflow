@@ -140,6 +140,19 @@
           ],
           "description": "How Catch Up with Base brings a lane up to date with its base."
         },
+        "worktreeCompare.autoRebaseLanes": {
+          "type": "string",
+          "enum": [
+            "off",
+            "local-only"
+          ],
+          "default": "off",
+          "enumDescriptions": [
+            "Never catch lanes up automatically — rows show 'N behind' / 'conflicts with <base>' with manual actions.",
+            "Automatically catch up linked worktrees that are clean, behind the base, conflict-free, and NOT pushed (method follows catchUpStrategy). Pushed branches are never rewritten automatically — use Rebase onto Base…, which offers a force-push with lease."
+          ],
+          "description": "Keep feature worktrees caught up with the base automatically when it is safe. A conflicting attempt aborts cleanly and marks the row 'conflicts with <base>'. Off by default: moving your branch is a side effect you opt into."
+        },
         "worktreeCompare.integrationFetchIntervalMs": {
           "type": "number",
           "default": 300000,
