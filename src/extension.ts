@@ -104,6 +104,11 @@ export function activate(context: vscode.ExtensionContext): unknown {
       'worktreeCompare.integrationOn',
       Boolean(integration),
     );
+    void vscode.commands.executeCommand(
+      'setContext',
+      'worktreeCompare.integrationMergePaused',
+      Boolean(integration?.mergePaused),
+    );
   };
   updateIntegrationView();
   context.subscriptions.push(

@@ -1,8 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
-import { git } from '../git/exec';
-import { gitOk } from '../git/exec';
+import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress } from '../git/laneOps';
 import {
@@ -73,6 +72,9 @@ export interface IntegrationState {
   /** Local <base> carries commits the frozen base does not — offer
    *  Convert-to-Branch / Catch Up instead of silently retargeting. */
   baseDrift?: { ahead: number; sha: string; resetTo: string; included: boolean };
+  /** A git merge is paused in the integration checkout itself (external
+   *  script / by hand) — Abort Integration Merge only applies then. */
+  mergePaused: boolean;
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -96,6 +98,7 @@ export class IntegrationController implements vscode.Disposable {
   private conflicts: string[] = [];
   /** Candidates with a paused base merge in their worktree. */
   private resolving: string[] = [];
+  private mergePaused = false;
   /** Resolver outcomes from the last successful rebuild. */
   private autoResolved: ResolvedLane[] = [];
   private baseDrift:
@@ -130,6 +133,7 @@ export class IntegrationController implements vscode.Disposable {
       resolving: this.resolving.slice(),
       autoResolved: this.autoResolved.slice(),
       baseDrift: this.baseDrift,
+      mergePaused: this.mergePaused,
       error: this.error,
     };
   }
@@ -156,6 +160,7 @@ export class IntegrationController implements vscode.Disposable {
       this.resolving = [];
       this.autoResolved = [];
       this.baseDrift = undefined;
+      this.mergePaused = false;
       this.error = undefined;
       this.fingerprint = undefined;
       return;
@@ -326,6 +331,11 @@ export class IntegrationController implements vscode.Disposable {
         }
       }
       this.resolving = resolving;
+      // MERGE_HEAD in the integration checkout itself (external script /
+      // by hand) — gates the Abort Integration Merge menu item, which
+      // otherwise showed permanently for a state the off-tree engine
+      // can no longer produce.
+      this.mergePaused = await baseMergeInProgress(wt.path);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.host.output.appendLine(`Read lanes failed: ${message}`);
