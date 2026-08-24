@@ -2,7 +2,7 @@ import { git, gitOk } from '../exec';
 import { revParseCommit } from '../plumbing';
 import { integrationBaseRef } from './config';
 import { mergeOffTree } from './merge';
-import { listAppliedLanes, readBasePin } from './lanes';
+import { listAppliedLanes, listExcludedLanes, readBasePin } from './lanes';
 
 export async function resolveBaseSha(
   cwd: string,
@@ -177,6 +177,19 @@ export async function integrationFingerprint(
 ): Promise<string> {
   const lanes = await listAppliedLanes(cwd);
   const parts: string[] = [`base\0${await resolveBaseSha(cwd, baseRef)}`];
+  // The drift lane (unpushed commits on the local base) is part of the
+  // preview: the pinned base line above deliberately does not move when
+  // the local base does, so track it separately — a commit on main must
+  // trigger a rebuild even though the base itself holds.
+  const baseName = baseRef.replace(/^origin\//, '');
+  const excluded = await listExcludedLanes(cwd).catch((): string[] => []);
+  parts.push(
+    `drift\0${
+      excluded.includes(baseName)
+        ? 'excluded'
+        : ((await revParseCommit(cwd, `refs/heads/${baseName}`)) ?? 'none')
+    }`,
+  );
   for (const lane of lanes) {
     const sha =
       (await revParseCommit(cwd, `refs/heads/${lane}`)) ?? 'missing';

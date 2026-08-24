@@ -72,7 +72,7 @@ export interface IntegrationState {
   autoResolved: ResolvedLane[];
   /** Local <base> carries commits the frozen base does not — offer
    *  Convert-to-Branch / Catch Up instead of silently retargeting. */
-  baseDrift?: { ahead: number; sha: string; resetTo: string };
+  baseDrift?: { ahead: number; sha: string; resetTo: string; included: boolean };
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -99,7 +99,7 @@ export class IntegrationController implements vscode.Disposable {
   /** Resolver outcomes from the last successful rebuild. */
   private autoResolved: ResolvedLane[] = [];
   private baseDrift:
-    | { ahead: number; sha: string; resetTo: string }
+    | { ahead: number; sha: string; resetTo: string; included: boolean }
     | undefined;
   /** Conflict-probe memo (refSha:baseSha) for the lane-vs-base re-probe. */
   private readonly probeMemo = new Map<string, boolean>();
@@ -193,7 +193,16 @@ export class IntegrationController implements vscode.Disposable {
       // or an explicit Catch Up advances it. Enable/base-change clear it,
       // so it re-pins fresh; reloads keep it — that IS the freeze.
       if (!(await readBasePin(wt.path))) {
-        const fresh = await resolveBaseSha(wt.path, integrationBaseRef());
+        // Pin at the PUBLISHED tip when one exists: if local <base> is
+        // already ahead at first sight (commits made before integration
+        // loaded), that segment is drift to SURFACE as a lane — not floor
+        // to swallow. The descendant-preferring legacy resolution would
+        // pin the drifted tip and hide it forever. No origin → local.
+        const initName = integrationBaseRef().replace(/^origin\//, '');
+        const fresh =
+          (await revParseCommit(wt.path, `origin/${initName}`)) ??
+          (await revParseCommit(wt.path, `refs/heads/${initName}`)) ??
+          (await resolveBaseSha(wt.path, integrationBaseRef()));
         if (fresh) {
           await writeBasePin(wt.path, fresh);
           this.host.output.appendLine(
@@ -207,7 +216,9 @@ export class IntegrationController implements vscode.Disposable {
       // a local and assigned ONCE: blanking this.baseDrift up front left
       // a transient no-drift window during every refresh (row flicker,
       // and readers mid-refresh saw undefined while drift persisted).
-      let drift: { ahead: number; sha: string; resetTo: string } | undefined;
+      let drift:
+        | { ahead: number; sha: string; resetTo: string; included: boolean }
+        | undefined;
       const effective = await resolveBaseSha(wt.path, integrationBaseRef());
       const baseName = integrationBaseRef().replace(/^origin\//, '');
       const localSha = await revParseCommit(wt.path, `refs/heads/${baseName}`);
@@ -233,7 +244,15 @@ export class IntegrationController implements vscode.Disposable {
             ).trim(),
           ) || 0;
         if (ahead > 0) {
-          drift = { ahead, sha: localSha, resetTo: effective };
+          drift = {
+            ahead,
+            sha: localSha,
+            resetTo: effective,
+            // Included by default: unpushed base work is unlanded work,
+            // shown in the preview like any lane. Uncheck persists the
+            // base name in focus-excluded.
+            included: !(await listExcludedLanes(wt.path)).includes(baseName),
+          };
         }
       }
       this.baseDrift = drift;
@@ -480,18 +499,21 @@ export class IntegrationController implements vscode.Disposable {
     if (this.rebuildInFlight) {
       // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
       // follow-up run — it re-reads the lane files, so it applies whatever
-      // state the caller just wrote.
-      this.rebuildQueued = reason;
+      // state the caller just wrote. Reasons ACCUMULATE: overwriting lost
+      // a queued manual's fetch when hide/apply queued after it, leaving
+      // landed/badge state on a stale origin (CI-only timing).
+      this.rebuildQueued = this.rebuildQueued
+        ? `${this.rebuildQueued} + ${reason}`
+        : reason;
       return { ok: false, code: 'busy', message: 'rebuild already running' };
     }
     this.rebuildInFlight = true;
     const t0 = Date.now();
     try {
-      if (reason.startsWith('manual')) {
+      if (reason.includes('manual')) {
         // Manual rebuild = "give me reality": refresh the base tip first.
-        // startsWith: a manual request queued behind an in-flight rebuild
-        // reruns as 'manual (queued)' and must still fetch — skipping it
-        // left dependent state (landed, badges) on a stale origin.
+        // includes(): the manual marker must survive queueing — both the
+        // '(queued)' suffix and accumulation with other queued reasons.
         this.lastBaseFetchAt = Date.now();
         await fetchIntegrationBase(workingPath, integrationBaseRef());
       }
@@ -625,6 +647,28 @@ export class IntegrationController implements vscode.Disposable {
    * Deliberately advance the frozen base to the local <base> tip (the
    * Catch Up exit for base drift) and rebuild onto it.
    */
+  /**
+   * Toggle whether the base's unpushed commits (the drift lane) join the
+   * preview. Exclusion persists as the base name in focus-excluded, so
+   * "never show main's local noise" survives future commits.
+   */
+  async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    const baseName = integrationBaseRef().replace(/^origin\//, '');
+    if (included) {
+      await dropExcludedLane(this.integrationPath, baseName);
+    } else {
+      await addExcludedLane(this.integrationPath, baseName);
+    }
+    await this.refreshState();
+    this.host.fireTreeData();
+    return this.runRebuild(
+      included ? `include ${baseName} drift` : `exclude ${baseName} drift`,
+    );
+  }
+
   async catchUpBase(): Promise<RebuildResult> {
     if (!this.integrationPath || !this.baseDrift) {
       return { ok: false, code: 'error', message: 'no base drift to catch up' };

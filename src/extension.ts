@@ -115,6 +115,17 @@ export function activate(context: vscode.ExtensionContext): unknown {
   context.subscriptions.push(
     integrationView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
+        if (item.kind === 'integrationBaseDrift') {
+          const included = state === vscode.TreeItemCheckboxState.Checked;
+          const result = await treeProvider.setBaseDriftIncluded(included);
+          reportIntegrationResult(
+            result,
+            included
+              ? `${item.baseName} unpushed work included`
+              : `${item.baseName} unpushed work excluded`,
+          );
+          continue;
+        }
         if (item.kind !== 'integrationLane') {
           continue;
         }
@@ -159,6 +170,28 @@ export function activate(context: vscode.ExtensionContext): unknown {
         baseStatus: (worktreePath: string) =>
           treeProvider.getBaseStatus(worktreePath),
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
+        setBaseDriftIncluded: (included: boolean) =>
+          treeProvider.setBaseDriftIncluded(included),
+        // RENDERED Integration rows — the exact TreeItems VS Code paints
+        // (state hooks alone let "state right, row missing" bugs pass)
+        integrationRows: () =>
+          integrationProvider.getChildren().map((item) => ({
+            kind: (item as { kind?: string }).kind,
+            label:
+              typeof item.label === 'string'
+                ? item.label
+                : (item.label?.label ?? ''),
+            description:
+              typeof item.description === 'string' ? item.description : '',
+            contextValue: item.contextValue,
+            checkbox:
+              item.checkboxState === undefined
+                ? undefined
+                : (typeof item.checkboxState === 'object'
+                    ? item.checkboxState.state
+                    : item.checkboxState) ===
+                  vscode.TreeItemCheckboxState.Checked,
+          })),
         logFile: () => log.logFile,
       },
     };

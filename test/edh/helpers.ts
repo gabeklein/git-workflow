@@ -22,9 +22,23 @@ export interface TestApi {
     candidates: string[];
     landed: string[];
     autoResolved: { lane: string; lossless: string[]; lossy: string[] }[];
-    baseDrift?: { ahead: number; sha: string; resetTo: string };
+    baseDrift?: {
+      ahead: number;
+      sha: string;
+      resetTo: string;
+      included: boolean;
+    };
     error?: unknown;
   } | undefined;
+  setBaseDriftIncluded(included: boolean): Promise<unknown>;
+  /** The RENDERED Integration panel rows (what VS Code actually paints). */
+  integrationRows(): {
+    kind?: string;
+    label: string;
+    description: string;
+    contextValue?: string;
+    checkbox?: boolean;
+  }[];
   selectedPath(): string | undefined;
   worktrees(): { path: string; branch: string }[];
   baseStatus(worktreePath: string): {

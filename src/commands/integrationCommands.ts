@@ -13,7 +13,10 @@ import {
   switchToIntegrationBranch,
   type RebuildResult,
 } from '../git/integration';
-import { suggestWorktreePath } from '../git/branches';
+import {
+  createWorktreeForBranch,
+  suggestWorktreePath,
+} from '../git/branches';
 import { isWorktreeDirty } from '../git/plumbing';
 import { listWorktreeAdmin, removeWorktree } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
@@ -312,6 +315,16 @@ export function registerIntegrationCommands(
             throw new Error(`branch ${branch} already exists`);
           }
           await git(integration.path, ['branch', branch, drift.sha]);
+          // Record where the branch forked: created from a raw sha, its
+          // reflog says 'Created from <sha>' and inference would resolve
+          // the base to its own tip (0 ahead, empty diff). This config key
+          // is inference's first stop; genuineBaseFor reads it too, so the
+          // branch also auto-enrolls as an integration member by base.
+          await git(integration.path, [
+            'config',
+            `branch.${branch}.vscode-merge-base`,
+            baseName,
+          ]);
           if (baseCheckoutPath) {
             // --keep refuses rather than clobber local file changes
             await git(baseCheckoutPath, ['reset', '--keep', drift.resetTo]);
@@ -332,6 +345,43 @@ export function registerIntegrationCommands(
             `moved ${drift.ahead} commit(s) to ${branch}`,
           );
           treeProvider.refresh();
+          // Branchified drift is usually work someone wants to CONTINUE —
+          // offer the checkout. Not awaited: nothing depends on the answer.
+          const workspaceRoot =
+            vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ??
+            treeProvider.getRepoCwd();
+          const repoCwd = treeProvider.getRepoCwd();
+          if (workspaceRoot && repoCwd) {
+            void vscode.window
+              .showInformationMessage(
+                `Git Workflow: ${branch} holds the moved commits — create a worktree to keep working on it?`,
+                'Create Worktree',
+              )
+              .then(async (pick) => {
+                if (pick !== 'Create Worktree') {
+                  return;
+                }
+                try {
+                  const dest = suggestWorktreePath(
+                    workspaceRoot,
+                    branch.replace(/[^\w.-]+/g, '-'),
+                  );
+                  await createWorktreeForBranch(repoCwd, branch, true, dest);
+                  log.appendLine(`Worktree created for ${branch}: ${dest}`);
+                  treeProvider.refresh();
+                  void vscode.window.setStatusBarMessage(
+                    `Git Workflow: worktree created at ${dest}`,
+                    4000,
+                  );
+                } catch (err) {
+                  const message =
+                    err instanceof Error ? err.message : String(err);
+                  void vscode.window.showErrorMessage(
+                    `Git Workflow: could not create worktree — ${message}`,
+                  );
+                }
+              });
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Branchify base drift failed: ${message}`);
@@ -350,11 +400,10 @@ export function registerIntegrationCommands(
           return;
         }
         try {
-          await treeProvider.addIntegrationCandidate(wt.branch);
-          void vscode.window.setStatusBarMessage(
-            `Git Workflow: ${wt.branch} added — check it under Integration to merge it in`,
-            4000,
-          );
+          // Adding means "put it in the preview": applied immediately —
+          // the checkbox is for taking a lane OUT, not for finishing an add
+          const result = await treeProvider.applyToIntegration(wt.branch);
+          reportIntegrationResult(result, `added ${wt.branch} to the preview`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Git Workflow: ${message}`);
