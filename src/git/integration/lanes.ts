@@ -6,6 +6,7 @@ import { integrationBranch } from './config';
 export const APPLIED_FILE = 'focus-applied';
 export const CANDIDATES_FILE = 'focus-candidates';
 const WIP_FILE = 'focus-wip';
+const EXCLUDED_FILE = 'focus-excluded';
 export const LOCK_DIR = 'focus-working.lock';
 
 export async function commonDir(cwd: string): Promise<string> {
@@ -85,6 +86,39 @@ export async function dropCandidateLane(
   await writeLaneFile(
     cwd,
     CANDIDATES_FILE,
+    lanes.filter((l) => l !== lane),
+  );
+}
+
+/**
+ * Exclusions: branches the user removed from Integration that would
+ * otherwise auto-enroll (their base matches the integration base). This
+ * is what gives every auto row a real exit — Remove persists here instead
+ * of the row reappearing on the next refresh.
+ */
+export async function listExcludedLanes(cwd: string): Promise<string[]> {
+  return readLaneFile(cwd, EXCLUDED_FILE);
+}
+
+export async function addExcludedLane(
+  cwd: string,
+  lane: string,
+): Promise<void> {
+  const lanes = await listExcludedLanes(cwd);
+  if (!lanes.includes(lane)) {
+    lanes.push(lane);
+    await writeLaneFile(cwd, EXCLUDED_FILE, lanes);
+  }
+}
+
+export async function dropExcludedLane(
+  cwd: string,
+  lane: string,
+): Promise<void> {
+  const lanes = await listExcludedLanes(cwd);
+  await writeLaneFile(
+    cwd,
+    EXCLUDED_FILE,
     lanes.filter((l) => l !== lane),
   );
 }

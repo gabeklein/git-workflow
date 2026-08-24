@@ -249,20 +249,16 @@ async function baseFromUpstream(
 }
 
 /**
- * Best-effort base ref for comparison (where the worktree/branch started):
- * 1. branch config (vscode-merge-base, etc.)
- * 2. reflog "Created from <ref>" / "checkout: moving from <ref>"
- * 3. upstream, when it is not the feature branch itself
- * 4. closest ancestor among main/staging/develop (+ origin/*)
- * 5. configured default / hard fallbacks
- *
- * Bare names like `staging` are upgraded to `origin/staging` when present
- * so compare uses a current remote tip rather than a stale local branch.
+ * GENUINE inference only — evidence about where THIS branch started:
+ * branch config (vscode-merge-base, etc.), reflog "Created from <ref>" /
+ * "checkout: moving from <ref>", or upstream (when it is not the feature
+ * branch itself). undefined = no evidence; callers that GUESS (candidate
+ * scan, configured default) must not treat their fallback as inference —
+ * auto-membership in particular never enrolls on a guess.
  */
-export async function resolveBaseRef(
+export async function inferBaseRef(
   worktreePath: string,
-  defaultBaseRef: string,
-): Promise<string> {
+): Promise<string | undefined> {
   let branch = '';
   try {
     branch = (
@@ -272,19 +268,29 @@ export async function resolveBaseRef(
     branch = '';
   }
 
-  const fromConfig = await baseFromBranchConfig(worktreePath, branch);
-  if (fromConfig) {
-    return fromConfig;
-  }
+  return (
+    (await baseFromBranchConfig(worktreePath, branch)) ??
+    (await baseFromReflog(worktreePath, branch)) ??
+    (await baseFromUpstream(worktreePath, branch))
+  );
+}
 
-  const fromReflog = await baseFromReflog(worktreePath, branch);
-  if (fromReflog) {
-    return fromReflog;
-  }
-
-  const fromUpstream = await baseFromUpstream(worktreePath, branch);
-  if (fromUpstream) {
-    return fromUpstream;
+/**
+ * Best-effort base ref for comparison (where the worktree/branch started):
+ * 1. genuine inference (branch config / reflog / upstream — inferBaseRef)
+ * 2. closest ancestor among main/staging/develop (+ origin/*)
+ * 3. configured default / hard fallbacks
+ *
+ * Bare names like `staging` are upgraded to `origin/staging` when present
+ * so compare uses a current remote tip rather than a stale local branch.
+ */
+export async function resolveBaseRef(
+  worktreePath: string,
+  defaultBaseRef: string,
+): Promise<string> {
+  const inferred = await inferBaseRef(worktreePath);
+  if (inferred) {
+    return inferred;
   }
 
   // Skip closest-ancestor scan by default — it can spawn dozens of git

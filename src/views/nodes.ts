@@ -183,6 +183,9 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       landed?: boolean;
       /** A base merge is paused in the lane's worktree */
       resolving?: boolean;
+      /** Auto member (its base matches the integration base), or a lane
+       *  applied outside the extension — not an explicit add. */
+      auto?: boolean;
     },
   ) {
     super(branch, vscode.TreeItemCollapsibleState.None);
@@ -257,6 +260,9 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         ? 'Landed — merging this lane into the base changes nothing. Safe to remove this row and delete the branch/worktree.'
         : undefined,
       opts?.missing ? 'The branch no longer exists.' : undefined,
+      opts?.auto
+        ? 'Auto member — its base matches the integration base. Remove from Integration hides it until it is added back.'
+        : undefined,
     ]
       .filter((x): x is string => Boolean(x))
       .join('\n');

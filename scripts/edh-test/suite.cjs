@@ -360,6 +360,60 @@ async function manualCatchUp() {
   );
 }
 
+async function autoMembership() {
+  const candidates = () => api.integration()?.candidates ?? [];
+
+  // A fresh worktree based on main should enroll with NO add command;
+  // a lane stacked on feat/c (its base is its parent branch) must not.
+  git(repo, ['branch', 'feat/c']);
+  git(repo, ['worktree', 'add', '-q', '.worktrees/feat-c', 'feat/c']);
+  git(repo, ['branch', 'feat/stack', 'feat/c']);
+  git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stack', 'feat/stack']);
+  await poll('feat/c auto-enrolls (its base matches)', 30000, async () => {
+    await vscode.commands.executeCommand('worktreeCompare.refresh');
+    return candidates().includes('feat/c');
+  });
+  assert(
+    !candidates().includes('feat/stack'),
+    'stacked lane (based on feat/c) is NOT auto-enrolled',
+  );
+  assert(
+    !readLanes('focus-candidates').includes('feat/c'),
+    'auto member is derived, not written to focus-candidates',
+  );
+
+  // Remove must be a real exit: the exclusion persists across refreshes
+  await vscode.commands.executeCommand(
+    'worktreeCompare.removeFromIntegration',
+    { branch: 'feat/c' },
+  );
+  await poll('removed auto member disappears', 20000, () =>
+    !candidates().includes('feat/c'),
+  );
+  assert(
+    readLanes('focus-excluded').includes('feat/c'),
+    'exclusion persisted to focus-excluded',
+  );
+  await vscode.commands.executeCommand('worktreeCompare.refresh');
+  await new Promise((r) => setTimeout(r, 1500));
+  assert(
+    !candidates().includes('feat/c'),
+    'excluded member stays gone after a refresh',
+  );
+
+  // Add to Integration is the way back — it clears the exclusion
+  await vscode.commands.executeCommand('worktreeCompare.addToIntegration', {
+    worktreePath: path.join(repo, '.worktrees', 'feat-c'),
+  });
+  await poll('re-added member returns', 20000, () =>
+    candidates().includes('feat/c'),
+  );
+  assert(
+    !readLanes('focus-excluded').includes('feat/c'),
+    'exclusion cleared on re-add',
+  );
+}
+
 async function run() {
   const scenarios = [
     ['activation', activation],
@@ -369,6 +423,7 @@ async function run() {
     ['landed lifecycle', landedLifecycle],
     ['base badges', baseBadges],
     ['manual catch-up', manualCatchUp],
+    ['auto membership', autoMembership],
   ];
   for (const [name, fn] of scenarios) {
     console.log(`[suite] ▸ ${name}`);

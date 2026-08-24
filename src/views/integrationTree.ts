@@ -43,7 +43,7 @@ export class IntegrationTreeProvider
       return [
         new MessageItem(
           'No lanes yet',
-          'Right-click a worktree → Add to Integration',
+          'Worktrees based on the integration base appear here automatically',
         ),
       ];
     }
@@ -64,6 +64,7 @@ export class IntegrationTreeProvider
           wip: integration.wip.includes(branch),
           landed: integration.landed.includes(branch),
           resolving: integration.resolving.includes(branch),
+          auto: !integration.explicit.includes(branch),
         }),
     );
   }
