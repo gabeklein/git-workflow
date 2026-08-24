@@ -1,7 +1,7 @@
 {
   "name": "git-workflow",
   "displayName": "Git Workflow",
-  "description": "Discover git worktrees and compare each Working Tree against its base ref \u2014 GitLens-style, editable diffs.",
+  "description": "Discover git worktrees and compare each Working Tree against its base ref — GitLens-style, editable diffs.",
   "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
@@ -108,7 +108,7 @@
         "worktreeCompare.integrationBaseRef": {
           "type": "string",
           "default": "",
-          "description": "Base ref integration rebuilds start from (origin/\u2026 preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
+          "description": "Base ref integration rebuilds start from (origin/… preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
         },
         "worktreeCompare.integrationAutoResolve": {
           "type": "string",
@@ -121,9 +121,9 @@
           "enumDescriptions": [
             "Strict: any clash fails the rebuild. Non-overlapping edits to the same file still merge (git default).",
             "Also resolve whitespace-only clashes plus everything provably LOSSLESS: union when both lanes only inserted lines (changelog appends, import lists) and linewise 3-way for adjacent-line edits.",
-            "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane \u2014 the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
+            "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane — the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
           ],
-          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work \u2014 lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
+          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work — lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
         },
         "worktreeCompare.catchUpStrategy": {
           "type": "string",
@@ -205,7 +205,7 @@
     "viewsWelcome": [
       {
         "view": "worktreeCompare.integration",
-        "contents": "Integration mode is off.\nCombine feature branches onto a base \u2014 without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
+        "contents": "Integration mode is off.\nCombine feature branches onto a base — without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
       }
     ],
     "commands": [
@@ -217,7 +217,7 @@
       },
       {
         "command": "worktreeCompare.selectWorktree",
-        "title": "Select Worktree\u2026",
+        "title": "Select Worktree…",
         "icon": "$(list-selection)",
         "category": "Git Workflow"
       },
@@ -233,7 +233,7 @@
       },
       {
         "command": "worktreeCompare.deleteWorktree",
-        "title": "Delete Worktree\u2026",
+        "title": "Delete Worktree…",
         "icon": "$(trash)",
         "category": "Git Workflow"
       },
@@ -268,14 +268,14 @@
       },
       {
         "command": "worktreeCompare.commitStaged",
-        "title": "Commit Staged\u2026",
+        "title": "Commit Staged…",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasStaged"
       },
       {
         "command": "worktreeCompare.commitUnstaged",
-        "title": "Commit Unstaged\u2026",
+        "title": "Commit Unstaged…",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasUnstaged && !worktreeCompare.hasStaged"
@@ -326,7 +326,7 @@
       },
       {
         "command": "worktreeCompare.createWorktreeFromBranch",
-        "title": "Create Worktree\u2026",
+        "title": "Create Worktree…",
         "icon": "$(repo-clone)",
         "category": "Git Workflow"
       },
@@ -354,7 +354,7 @@
       },
       {
         "command": "worktreeCompare.enableIntegration",
-        "title": "Enable Integration Mode\u2026",
+        "title": "Enable Integration Mode…",
         "icon": "$(combine)",
         "category": "Git Workflow"
       },
@@ -380,28 +380,28 @@
       },
       {
         "command": "worktreeCompare.disableIntegration",
-        "title": "Disable Integration Mode\u2026",
+        "title": "Disable Integration Mode…",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.changeIntegrationBase",
-        "title": "Change Integration Base\u2026",
+        "title": "Change Integration Base…",
         "icon": "$(git-compare)",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.catchUpWithBase",
-        "title": "Catch Up with Base\u2026",
+        "title": "Catch Up with Base…",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.rebaseOntoBase",
-        "title": "Rebase onto Base\u2026",
+        "title": "Rebase onto Base…",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.mergeFromBase",
-        "title": "Merge from Base\u2026",
+        "title": "Merge from Base…",
         "category": "Git Workflow"
       },
       {
@@ -426,7 +426,7 @@
       },
       {
         "command": "worktreeCompare.resolveLaneConflict",
-        "title": "Resolve Conflict with Base\u2026",
+        "title": "Resolve Conflict with Base…",
         "category": "Git Workflow"
       }
     ],
@@ -673,14 +673,20 @@
     "install:local": "node scripts/install-local.mjs",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
-    "test:edh": "node esbuild.js && node scripts/edh-test/run.mjs"
+    "test:edh": "node esbuild.js && node test/edh/run.mjs",
+    "test:unit": "vitest run",
+    "test": "npm run check-types:test && npm run test:unit && npm run test:edh",
+    "check-types:test": "tsc --noEmit -p test/edh/tsconfig.json && tsc --noEmit -p test/unit/tsconfig.json"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.17.0",
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^3.1.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.2",
+    "mocha": "^11.8.0",
     "npm-run-all": "^4.1.5",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.11"
   }
 }

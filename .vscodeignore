@@ -2,6 +2,9 @@
 .vscode-test/**
 src/**
 scripts/**
+test/**
+out-test/**
+vitest.config.mts
 node_modules/**
 .gitignore
 .eslintrc*

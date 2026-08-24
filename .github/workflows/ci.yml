@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - uses: actions/cache@v4
         with:
@@ -20,5 +20,9 @@ jobs:
           key: vscode-test-${{ runner.os }}-1.134.0
       - run: npm ci
       - run: npx tsc --noEmit
-      # Live Extension Development Host suite (real VS Code, sample repo)
+      - run: npm run check-types:test
+      # Fast unit layer (vitest, scratch repos, no extension host)
+      - run: npm run test:unit
+      # Live Extension Development Host suite (real VS Code, sample repo);
+      # xvfb: VS Code has no headless mode — give it a virtual display
       - run: xvfb-run -a npm run test:edh
