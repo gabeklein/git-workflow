@@ -3,7 +3,11 @@ import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
-import { autoResolveArgs, integrationBranch } from './config';
+import {
+  autoResolveArgs,
+  conflictResolverMode,
+  integrationBranch,
+} from './config';
 import {
   APPLIED_FILE,
   LOCK_DIR,
@@ -12,7 +16,7 @@ import {
   listWipLanes,
   writeLaneFile,
 } from './lanes';
-import { mergeOffTree } from './merge';
+import { mergeOffTree, resolveConflictedTree } from './merge';
 import { findLandedLanes, resolveBaseSha } from './status';
 
 
@@ -79,8 +83,24 @@ export async function snapshotWorktreeCommit(
   }
 }
 
+/** A lane whose conflicts the resolver settled instead of failing. */
+export interface ResolvedLane {
+  lane: string;
+  /** Files resolved losslessly (union insert / linewise 3-way). */
+  lossless: string[];
+  /** Files resolved toward the lane — a clashing hunk was dropped. */
+  lossy: string[];
+}
+
 export type RebuildResult =
-  | { ok: true; lanes: string[]; skipped: string[]; landed: string[] }
+  | {
+      ok: true;
+      lanes: string[];
+      skipped: string[];
+      landed: string[];
+      /** Lanes that needed the conflict resolver (empty = clean merges). */
+      resolved: ResolvedLane[];
+    }
   | {
       ok: false;
       code: 'busy' | 'dirty' | 'unique' | 'conflict' | 'error';
@@ -129,20 +149,27 @@ export async function rebuildIntegration(
       };
     }
 
-    // Unique-commit guard: refuse only when HEAD carries non-merge commits
-    // that exist on NO other branch — i.e. work that would truly be lost.
-    // Commits from formerly-applied lanes still live on their branches, and
-    // ephemeral wip snapshots (ours, by subject marker) are derived state.
+    // Unique-commit guard: refuse only when the user committed DIRECTLY on
+    // the integration checkout — those commits sit on HEAD's first-parent
+    // line as non-merges. Lane content always arrives via merge second
+    // parents, so this is immune to lanes being rebased afterwards (their
+    // old commits leave every branch but stay buried in the chain — the
+    // previous --branches formulation wedged the rebuild forever on that).
     const unique = (
       await git(workingPath, [
         'log',
         '--no-merges',
+        '--first-parent',
         '--format=%H%x00%s',
         'HEAD',
         '--not',
         baseSha,
+        // Belt for a diverged/force-pushed base: anything still on a
+        // branch or remote is not lost. (--exclude expires per glob.)
         `--exclude=${integrationBranch()}`,
         '--branches',
+        `--exclude=*/${integrationBranch()}`,
+        '--remotes',
       ]).catch(() => '')
     )
       .split('\n')
@@ -189,6 +216,7 @@ export async function rebuildIntegration(
     const skipped: string[] = [];
     const merged: string[] = [];
     const landed: string[] = [];
+    const resolved: ResolvedLane[] = [];
     for (const lane of lanes) {
       let laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
       if (!laneSha) {
@@ -235,21 +263,47 @@ export async function rebuildIntegration(
       if (result.kind === 'unsupported') {
         return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
       }
+      let mergedTree: string;
       if (result.kind === 'conflict') {
-        const files = result.files.slice(0, 5).join(', ');
-        return {
-          ok: false,
-          code: 'conflict',
+        // Petty-conflict resolver: lossless rules first (union of
+        // insert-only sides, linewise 3-way), then — in best-effort mode —
+        // lane-wins per file, reported so the UI can tag the row.
+        const mode = conflictResolverMode();
+        const resolution =
+          mode === 'none'
+            ? { unresolved: result.files }
+            : await resolveConflictedTree(
+                workingPath,
+                current,
+                laneSha,
+                result.tree,
+                result.files,
+                mode,
+              ).catch(() => ({ unresolved: result.files }));
+        if ('unresolved' in resolution) {
+          const files = resolution.unresolved.slice(0, 5).join(', ');
+          return {
+            ok: false,
+            code: 'conflict',
+            lane,
+            message: `lane ${lane} conflicts${files ? `: ${files}` : ''}${
+              resolution.unresolved.length > 5 ? ', …' : ''
+            } (checkout untouched)`,
+          };
+        }
+        mergedTree = resolution.tree;
+        resolved.push({
           lane,
-          message: `lane ${lane} conflicts${files ? `: ${files}` : ''}${
-            result.files.length > 5 ? ', …' : ''
-          } (checkout untouched)`,
-        };
+          lossless: resolution.lossless,
+          lossy: resolution.lossy,
+        });
+      } else {
+        mergedTree = result.tree;
       }
       current = (
         await git(workingPath, [
           'commit-tree',
-          result.tree,
+          mergedTree,
           '-p',
           current,
           '-p',
@@ -273,7 +327,7 @@ export async function rebuildIntegration(
 
     // Single working-tree update; git rewrites only files whose content changed
     await git(workingPath, ['reset', '--hard', current]);
-    return { ok: true, lanes: merged, skipped, landed };
+    return { ok: true, lanes: merged, skipped, landed, resolved };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, code: 'error', message };
@@ -335,7 +389,7 @@ async function rebuildInWorktree(
       lanes.filter((l) => !landed.includes(l)),
     );
   }
-  return { ok: true, lanes: merged, skipped, landed };
+  return { ok: true, lanes: merged, skipped, landed, resolved: [] };
 }
 
 /**

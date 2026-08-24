@@ -186,6 +186,8 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       /** Auto member (its base matches the integration base), or a lane
        *  applied outside the extension — not an explicit add. */
       auto?: boolean;
+      /** The last rebuild resolved this lane's clashes instead of failing. */
+      autoResolved?: { lossless: string[]; lossy: string[] };
     },
   ) {
     super(branch, vscode.TreeItemCollapsibleState.None);
@@ -228,6 +230,14 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         'pass-filled',
         new vscode.ThemeColor('charts.green'),
       );
+    } else if (opts?.autoResolved && opts.autoResolved.lossy.length > 0) {
+      // Lossless resolutions stay silent — they are what a human would
+      // have done. Dropped hunks are never silent.
+      this.description = opts?.wip ? 'auto-resolved · +wip' : 'auto-resolved';
+      this.iconPath = new vscode.ThemeIcon(
+        'git-merge',
+        new vscode.ThemeColor('charts.yellow'),
+      );
     } else if (opts?.wip) {
       this.description = '+wip';
       this.iconPath = new vscode.ThemeIcon(
@@ -260,6 +270,14 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         ? 'Landed — merging this lane into the base changes nothing. Safe to remove this row and delete the branch/worktree.'
         : undefined,
       opts?.missing ? 'The branch no longer exists.' : undefined,
+      opts?.autoResolved && opts.autoResolved.lossy.length > 0
+        ? `Auto-resolved lane-wins (clashing hunks from the other side were dropped): ${opts.autoResolved.lossy.join(', ')}. Catch the lane up with its base to make this exact.`
+        : undefined,
+      opts?.autoResolved &&
+      opts.autoResolved.lossy.length === 0 &&
+      opts.autoResolved.lossless.length > 0
+        ? `Clashes auto-resolved losslessly (both sides kept): ${opts.autoResolved.lossless.join(', ')}.`
+        : undefined,
       opts?.auto
         ? 'Auto member — its base matches the integration base. Remove from Integration hides it until it is added back.'
         : undefined,
