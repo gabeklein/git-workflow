@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { git } from '../exec';
+import { git, gitOk } from '../exec';
 import { integrationBranch } from './config';
 
 export const APPLIED_FILE = 'focus-applied';
@@ -121,6 +121,53 @@ export async function dropExcludedLane(
     EXCLUDED_FILE,
     lanes.filter((l) => l !== lane),
   );
+}
+
+/**
+ * Prune dead lanes: a branch deleted out from under Integration (its
+ * worktree died — landed and cleaned up, agent teardown, `git branch -D`)
+ * must not linger as a ghost row. Drops every lane whose local branch no
+ * longer exists from all four state files. The applied file is shared
+ * with the shell script and only changes under the rebuild lock, so the
+ * writes happen inside it; when the lock is already held, nothing is
+ * pruned this round and the next refresh retries. Returns the pruned
+ * lane names.
+ */
+export async function pruneDeadLanes(cwd: string): Promise<string[]> {
+  const files = [APPLIED_FILE, CANDIDATES_FILE, WIP_FILE, EXCLUDED_FILE];
+  const named = [
+    ...new Set((await Promise.all(files.map((f) => readLaneFile(cwd, f)))).flat()),
+  ];
+  const dead: string[] = [];
+  for (const lane of named) {
+    if (
+      !(await gitOk(cwd, ['rev-parse', '-q', '--verify', `refs/heads/${lane}`]))
+    ) {
+      dead.push(lane);
+    }
+  }
+  if (dead.length === 0) {
+    return [];
+  }
+  const lock = path.join(await commonDir(cwd), LOCK_DIR);
+  try {
+    await fs.mkdir(lock);
+  } catch {
+    return [];
+  }
+  try {
+    for (const file of files) {
+      // Re-read under the lock — a rebuild may have rewritten the file
+      const lanes = await readLaneFile(cwd, file);
+      const kept = lanes.filter((l) => !dead.includes(l));
+      if (kept.length !== lanes.length) {
+        await writeLaneFile(cwd, file, kept);
+      }
+    }
+  } finally {
+    await fs.rmdir(lock).catch(() => {});
+  }
+  return dead.sort();
 }
 
 /**
