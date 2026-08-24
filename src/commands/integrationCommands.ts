@@ -13,7 +13,10 @@ import {
   switchToIntegrationBranch,
   type RebuildResult,
 } from '../git/integration';
-import { suggestWorktreePath } from '../git/branches';
+import {
+  createWorktreeForBranch,
+  suggestWorktreePath,
+} from '../git/branches';
 import { isWorktreeDirty } from '../git/plumbing';
 import { listWorktreeAdmin, removeWorktree } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
@@ -342,6 +345,43 @@ export function registerIntegrationCommands(
             `moved ${drift.ahead} commit(s) to ${branch}`,
           );
           treeProvider.refresh();
+          // Branchified drift is usually work someone wants to CONTINUE —
+          // offer the checkout. Not awaited: nothing depends on the answer.
+          const workspaceRoot =
+            vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ??
+            treeProvider.getRepoCwd();
+          const repoCwd = treeProvider.getRepoCwd();
+          if (workspaceRoot && repoCwd) {
+            void vscode.window
+              .showInformationMessage(
+                `Git Workflow: ${branch} holds the moved commits — create a worktree to keep working on it?`,
+                'Create Worktree',
+              )
+              .then(async (pick) => {
+                if (pick !== 'Create Worktree') {
+                  return;
+                }
+                try {
+                  const dest = suggestWorktreePath(
+                    workspaceRoot,
+                    branch.replace(/[^\w.-]+/g, '-'),
+                  );
+                  await createWorktreeForBranch(repoCwd, branch, true, dest);
+                  log.appendLine(`Worktree created for ${branch}: ${dest}`);
+                  treeProvider.refresh();
+                  void vscode.window.setStatusBarMessage(
+                    `Git Workflow: worktree created at ${dest}`,
+                    4000,
+                  );
+                } catch (err) {
+                  const message =
+                    err instanceof Error ? err.message : String(err);
+                  void vscode.window.showErrorMessage(
+                    `Git Workflow: could not create worktree — ${message}`,
+                  );
+                }
+              });
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Branchify base drift failed: ${message}`);
