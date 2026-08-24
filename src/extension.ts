@@ -115,6 +115,17 @@ export function activate(context: vscode.ExtensionContext): unknown {
   context.subscriptions.push(
     integrationView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
+        if (item.kind === 'integrationBaseDrift') {
+          const included = state === vscode.TreeItemCheckboxState.Checked;
+          const result = await treeProvider.setBaseDriftIncluded(included);
+          reportIntegrationResult(
+            result,
+            included
+              ? `${item.baseName} unpushed work included`
+              : `${item.baseName} unpushed work excluded`,
+          );
+          continue;
+        }
         if (item.kind !== 'integrationLane') {
           continue;
         }
@@ -159,6 +170,8 @@ export function activate(context: vscode.ExtensionContext): unknown {
         baseStatus: (worktreePath: string) =>
           treeProvider.getBaseStatus(worktreePath),
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
+        setBaseDriftIncluded: (included: boolean) =>
+          treeProvider.setBaseDriftIncluded(included),
         logFile: () => log.logFile,
       },
     };

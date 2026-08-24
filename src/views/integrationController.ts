@@ -72,7 +72,7 @@ export interface IntegrationState {
   autoResolved: ResolvedLane[];
   /** Local <base> carries commits the frozen base does not — offer
    *  Convert-to-Branch / Catch Up instead of silently retargeting. */
-  baseDrift?: { ahead: number; sha: string; resetTo: string };
+  baseDrift?: { ahead: number; sha: string; resetTo: string; included: boolean };
   error?: { code: string; message: string; lane?: string };
 }
 
@@ -99,7 +99,7 @@ export class IntegrationController implements vscode.Disposable {
   /** Resolver outcomes from the last successful rebuild. */
   private autoResolved: ResolvedLane[] = [];
   private baseDrift:
-    | { ahead: number; sha: string; resetTo: string }
+    | { ahead: number; sha: string; resetTo: string; included: boolean }
     | undefined;
   /** Conflict-probe memo (refSha:baseSha) for the lane-vs-base re-probe. */
   private readonly probeMemo = new Map<string, boolean>();
@@ -207,7 +207,9 @@ export class IntegrationController implements vscode.Disposable {
       // a local and assigned ONCE: blanking this.baseDrift up front left
       // a transient no-drift window during every refresh (row flicker,
       // and readers mid-refresh saw undefined while drift persisted).
-      let drift: { ahead: number; sha: string; resetTo: string } | undefined;
+      let drift:
+        | { ahead: number; sha: string; resetTo: string; included: boolean }
+        | undefined;
       const effective = await resolveBaseSha(wt.path, integrationBaseRef());
       const baseName = integrationBaseRef().replace(/^origin\//, '');
       const localSha = await revParseCommit(wt.path, `refs/heads/${baseName}`);
@@ -233,7 +235,15 @@ export class IntegrationController implements vscode.Disposable {
             ).trim(),
           ) || 0;
         if (ahead > 0) {
-          drift = { ahead, sha: localSha, resetTo: effective };
+          drift = {
+            ahead,
+            sha: localSha,
+            resetTo: effective,
+            // Included by default: unpushed base work is unlanded work,
+            // shown in the preview like any lane. Uncheck persists the
+            // base name in focus-excluded.
+            included: !(await listExcludedLanes(wt.path)).includes(baseName),
+          };
         }
       }
       this.baseDrift = drift;
@@ -625,6 +635,28 @@ export class IntegrationController implements vscode.Disposable {
    * Deliberately advance the frozen base to the local <base> tip (the
    * Catch Up exit for base drift) and rebuild onto it.
    */
+  /**
+   * Toggle whether the base's unpushed commits (the drift lane) join the
+   * preview. Exclusion persists as the base name in focus-excluded, so
+   * "never show main's local noise" survives future commits.
+   */
+  async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
+    if (!this.integrationPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    const baseName = integrationBaseRef().replace(/^origin\//, '');
+    if (included) {
+      await dropExcludedLane(this.integrationPath, baseName);
+    } else {
+      await addExcludedLane(this.integrationPath, baseName);
+    }
+    await this.refreshState();
+    this.host.fireTreeData();
+    return this.runRebuild(
+      included ? `include ${baseName} drift` : `exclude ${baseName} drift`,
+    );
+  }
+
   async catchUpBase(): Promise<RebuildResult> {
     if (!this.integrationPath || !this.baseDrift) {
       return { ok: false, code: 'error', message: 'no base drift to catch up' };

@@ -22,9 +22,15 @@ export interface TestApi {
     candidates: string[];
     landed: string[];
     autoResolved: { lane: string; lossless: string[]; lossy: string[] }[];
-    baseDrift?: { ahead: number; sha: string; resetTo: string };
+    baseDrift?: {
+      ahead: number;
+      sha: string;
+      resetTo: string;
+      included: boolean;
+    };
     error?: unknown;
   } | undefined;
+  setBaseDriftIncluded(included: boolean): Promise<unknown>;
   selectedPath(): string | undefined;
   worktrees(): { path: string; branch: string }[];
   baseStatus(worktreePath: string): {

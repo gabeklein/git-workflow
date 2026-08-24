@@ -171,26 +171,48 @@ export class RemotePrFileItem extends vscode.TreeItem {
  * offers the two exits: move the commits to a feature branch (they join
  * the preview as a lane) or catch the base up on purpose.
  */
+/**
+ * The base's unpushed commits, shown as a LANE: the frozen base defines
+ * the floor, and everything unlanded — main's own local work included —
+ * is a checkable lane. Checked by default (unpushed base work is almost
+ * always meant to be seen); unchecking persists. Pushing lands it and the
+ * row disappears.
+ */
 export class BaseDriftItem extends vscode.TreeItem {
   readonly kind = 'integrationBaseDrift' as const;
 
   constructor(
     readonly baseName: string,
-    readonly drift: { ahead: number; sha: string; resetTo: string },
+    readonly drift: {
+      ahead: number;
+      sha: string;
+      resetTo: string;
+      included: boolean;
+    },
   ) {
-    super(`${baseName} moved`, vscode.TreeItemCollapsibleState.None);
+    super(baseName, vscode.TreeItemCollapsibleState.None);
     this.contextValue = 'integrationBaseDrift';
-    this.description = `+${drift.ahead} commit(s) not integrated`;
+    this.description = `+${drift.ahead} unpushed`;
+    this.checkboxState = {
+      state: drift.included
+        ? vscode.TreeItemCheckboxState.Checked
+        : vscode.TreeItemCheckboxState.Unchecked,
+      tooltip: drift.included
+        ? `${baseName}'s unpushed commits are merged into the preview — uncheck to leave them out (persists)`
+        : `Merge ${baseName}'s unpushed commits into the preview`,
+    };
     this.iconPath = new vscode.ThemeIcon(
-      'warning',
-      new vscode.ThemeColor('list.warningForeground'),
+      'repo',
+      drift.included ? new vscode.ThemeColor('charts.yellow') : undefined,
     );
     this.tooltip = [
-      `${baseName} has ${drift.ahead} commit(s) the integration base does not — the preview stays frozen rather than silently retargeting onto unpublished work.`,
+      `${baseName} has ${drift.ahead} unpushed commit(s). The integration base stays frozen — unpushed base work is unlanded work, so it rides along as a lane instead of silently becoming the floor.`,
       '',
-      'Move New Base Commits to a Branch… turns them into a feature branch (it joins the preview as a lane) and returns the base branch to the frozen point.',
-      'Catch Up Integration Base advances the frozen base to the current tip on purpose.',
-      'Pushing the base branch also advances the frozen base (published movement always follows).',
+      drift.included
+        ? 'Included in the preview. Uncheck to leave it out (the choice persists across future commits).'
+        : 'Excluded from the preview. Check to merge it in.',
+      'Pushing the base lands it — the frozen base advances and this row disappears.',
+      'Context menu: Move New Base Commits to a Branch… (make it real feature work) · Catch Up Integration Base (make it the floor on purpose).',
     ].join('\n');
   }
 }

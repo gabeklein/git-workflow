@@ -13,6 +13,7 @@ import {
   LOCK_DIR,
   commonDir,
   listAppliedLanes,
+  listExcludedLanes,
   listWipLanes,
   writeLaneFile,
 } from './lanes';
@@ -191,6 +192,35 @@ export async function rebuildIntegration(
       await findLandedLanes(workingPath, baseRef, lanes).catch(() => []),
     );
 
+    // Base drift as a lane: unpushed commits on the local base branch are
+    // NOT base movement (the pin holds) — they are unlanded work, so by
+    // default they join the preview like any lane, merged FIRST. Uncheck
+    // (the base name in focus-excluded) opts out; pushing lands them and
+    // the segment stops existing. The chain list is separate from `lanes`
+    // so retirement/wip bookkeeping never sees the synthetic entry.
+    const baseName = baseRef.replace(/^origin\//, '');
+    const chainLanes = lanes.slice();
+    {
+      const localBase = await revParseCommit(
+        workingPath,
+        `refs/heads/${baseName}`,
+      );
+      const excluded = await listExcludedLanes(workingPath).catch((): string[] => []);
+      if (
+        localBase &&
+        localBase !== baseSha &&
+        !excluded.includes(baseName) &&
+        !(await gitOk(workingPath, [
+          'merge-base',
+          '--is-ancestor',
+          localBase,
+          baseSha,
+        ]))
+      ) {
+        chainLanes.unshift(baseName);
+      }
+    }
+
     // Wip lanes: overlay uncommitted worktree edits via ephemeral snapshots
     const wipLanes = new Set(
       (await listWipLanes(workingPath).catch(() => [])).filter((l) =>
@@ -217,7 +247,7 @@ export async function rebuildIntegration(
     const merged: string[] = [];
     const landed: string[] = [];
     const resolved: ResolvedLane[] = [];
-    for (const lane of lanes) {
+    for (const lane of chainLanes) {
       let laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
       if (!laneSha) {
         skipped.push(lane);

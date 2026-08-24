@@ -743,6 +743,10 @@ export class WorktreeTreeProvider
     return this.integration.catchUpBase();
   }
 
+  setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
+    return this.integration.setBaseDriftIncluded(included);
+  }
+
   addIntegrationCandidate(branch: string): Promise<void> {
     return this.integration.addCandidate(branch);
   }
