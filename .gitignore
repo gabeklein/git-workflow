@@ -6,3 +6,4 @@ out/
 *.log
 .vscode-test/
 artifacts/
+out-test/

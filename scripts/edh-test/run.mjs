@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 /**
  * Live EDH validation: boots a real VS Code Extension Development Host on a
- * generated sample repo and runs scripts/edh-test/suite.cjs INSIDE the
- * extension host, driving the extension's registered commands and asserting
- * on real git state. `npm run test:edh`.
+ * generated sample repo and runs the mocha scenarios from test/edh/ INSIDE
+ * the extension host, driving the extension's registered commands and
+ * asserting on real git state. `npm run test:edh`.
+ *
+ * The scenarios are sequential and build on each other — test/edh/index.ts
+ * runs the files in filename order (hence the numeric prefixes) and bails
+ * on the first failure.
  */
 import { execFileSync } from 'node:child_process';
 import {
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -16,6 +21,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { runTests } from '@vscode/test-electron';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +94,28 @@ function buildFixture() {
   return { root, repo };
 }
 
+/** Compile test/edh/*.ts → out-test/edh/*.cjs for the extension host. */
+async function buildTests() {
+  const testDir = path.resolve(extensionDevelopmentPath, 'test', 'edh');
+  const outDir = path.resolve(extensionDevelopmentPath, 'out-test', 'edh');
+  const entryPoints = readdirSync(testDir)
+    .filter((f) => f === 'index.ts' || f.endsWith('.test.ts'))
+    .map((f) => path.join(testDir, f));
+  await build({
+    entryPoints,
+    bundle: true,
+    format: 'cjs',
+    platform: 'node',
+    external: ['vscode', 'mocha'],
+    outdir: outDir,
+    outExtension: { '.js': '.cjs' },
+    sourcemap: 'inline',
+    logLevel: 'error',
+  });
+  return path.join(outDir, 'index.cjs');
+}
+
+const extensionTestsPath = await buildTests();
 const { root, repo } = buildFixture();
 console.log(`[edh-test] fixture: ${repo}`);
 
@@ -106,7 +134,7 @@ try {
     // moving target would silently change what we test against.
     version: '1.134.0',
     extensionDevelopmentPath,
-    extensionTestsPath: path.join(__dirname, 'suite.cjs'),
+    extensionTestsPath,
     launchArgs: [
       repo,
       '--disable-extensions',

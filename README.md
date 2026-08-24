@@ -60,7 +60,9 @@ npm run install:local
 | `npm run package` | Production `dist/` only |
 | `npm run vsix` | Production build + `artifacts/*.vsix` |
 | `npm run install:local` | Build → VSIX → editor install → vscode-server mirror |
-| `npm run test:edh` | Live EDH test: sample repo + real VS Code, drives integration commands |
+| `npm run test` | Type-check tests, then unit + EDH suites |
+| `npm run test:unit` | Vitest unit tests (`test/unit/*.test.ts`): pure-git logic against scratch repos |
+| `npm run test:edh` | Live EDH suite (`test/edh/*.test.ts`, mocha): sample repo + real VS Code, drives integration commands |
 
 ### Install notes
 
