@@ -1,7 +1,8 @@
 import { git, gitOk } from '../exec';
 import { revParseCommit } from '../plumbing';
+import { integrationBaseRef } from './config';
 import { mergeOffTree } from './merge';
-import { listAppliedLanes } from './lanes';
+import { listAppliedLanes, readBasePin } from './lanes';
 
 export async function resolveBaseSha(
   cwd: string,
@@ -9,10 +10,30 @@ export async function resolveBaseSha(
 ): Promise<string | undefined> {
   const name = baseRef.replace(/^origin\//, '');
   const sha = (ref: string) => revParseCommit(cwd, ref);
-  // When both exist, prefer the DESCENDANT: the remote tip when PRs land
-  // on the host, the local tip in local-only workflows where the user
-  // advances the base directly. Diverged → origin (a fetch reconciles).
   const remote = await sha(`origin/${name}`);
+
+  // Base pin (integration base only): the base FOLLOWS origin when that
+  // is a descendant of the pin — published movement is always legit —
+  // and otherwise holds the pin, so commits made directly on the local
+  // base branch never silently retarget the preview. Drift is surfaced
+  // on the Integration panel with Convert-to-Branch / Catch Up exits.
+  if (name === integrationBaseRef().replace(/^origin\//, '')) {
+    const pin = await readBasePin(cwd);
+    if (pin && (await sha(pin))) {
+      if (
+        remote &&
+        remote !== pin &&
+        (await gitOk(cwd, ['merge-base', '--is-ancestor', pin, remote]))
+      ) {
+        return remote;
+      }
+      return pin;
+    }
+  }
+
+  // No pin: prefer the DESCENDANT when both exist — the remote tip when
+  // PRs land on the host, the local tip in local-only workflows where the
+  // user advances the base directly. Diverged → origin (a fetch reconciles).
   const local = await sha(`refs/heads/${name}`);
   if (remote && local && remote !== local) {
     if (await gitOk(cwd, ['merge-base', '--is-ancestor', remote, local])) {

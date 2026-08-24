@@ -2,7 +2,9 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 /** Command registrations — split by domain; wired from extension.ts. */
 import { pickBaseRef } from '../compare/pickBaseRef';
+import { git, gitOk } from '../git/exec';
 import {
+  clearBasePin,
   createIntegrationWorktree,
   deleteIntegrationBranch,
   integrationBaseRef,
@@ -13,7 +15,7 @@ import {
 } from '../git/integration';
 import { suggestWorktreePath } from '../git/branches';
 import { isWorktreeDirty } from '../git/plumbing';
-import { removeWorktree } from '../git/worktreeAdmin';
+import { listWorktreeAdmin, removeWorktree } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
 /** Branch the root checkout was on before enabling integration on it. */
@@ -69,6 +71,9 @@ export function registerIntegrationCommands(
         }
 
         try {
+          // Enabling re-freezes the base at NOW — a stale pin from a
+          // previous session must not resurrect an old base.
+          await clearBasePin(repoCwd).catch(() => {});
           if (mode.id === 'main') {
             if (await isWorktreeDirty(workspaceRoot)) {
               void vscode.window.showErrorMessage(
@@ -180,6 +185,9 @@ export function registerIntegrationCommands(
           if (cwd && (await deleteIntegrationBranch(cwd))) {
             log.appendLine(`Integration branch deleted: ${integration.branch}`);
           }
+          if (cwd) {
+            await clearBasePin(cwd).catch(() => {});
+          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Disable integration failed: ${message}`);
@@ -225,6 +233,110 @@ export function registerIntegrationCommands(
           log.appendLine(`Change integration base failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not change base — ${message}`,
+          );
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.catchUpIntegrationBase',
+      async () => {
+        const result = await treeProvider.catchUpIntegrationBase();
+        reportIntegrationResult(result, 'integration base caught up');
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.branchifyBaseDrift',
+      // nameArg: menus pass nothing (prompt); tests/automation may pass
+      // the branch name directly.
+      async (nameArg?: unknown) => {
+        const integration = treeProvider.getIntegration();
+        const drift = integration?.baseDrift;
+        if (!integration || !drift) {
+          return;
+        }
+        const baseName = integrationBaseRef().replace(/^origin\//, '');
+        // The base branch may be checked out (often a clean root that the
+        // Worktrees list hides) — resolve its checkout from git itself,
+        // because moving the ref under a live checkout must reset there.
+        let baseCheckoutPath: string | undefined;
+        try {
+          const admin = await listWorktreeAdmin(integration.path);
+          baseCheckoutPath = [...admin.values()].find(
+            (s) => !s.detached && s.branch === baseName,
+          )?.path;
+        } catch {
+          // fall through — update-ref path below handles no-checkout
+        }
+        // TRACKED changes only: untracked files (.vscode/, scratch) never
+        // block — reset --keep leaves them alone and refuses on its own
+        // if content would actually be lost.
+        const trackedDirty = baseCheckoutPath
+          ? (
+              await git(baseCheckoutPath, [
+                'status',
+                '--porcelain=v1',
+                '-uno',
+                '--ignore-submodules=dirty',
+              ]).catch(() => '')
+            ).trim().length > 0
+          : false;
+        if (trackedDirty) {
+          void vscode.window.showErrorMessage(
+            `Git Workflow: ${baseCheckoutPath} has uncommitted changes — commit or stash before moving ${baseName}'s commits to a branch`,
+          );
+          return;
+        }
+        const name =
+          typeof nameArg === 'string' && nameArg.trim()
+            ? nameArg
+            : await vscode.window.showInputBox({
+                prompt: `Branch for the ${drift.ahead} commit(s) on ${baseName}`,
+                value: `${baseName}-work`,
+                ignoreFocusOut: true,
+                validateInput: (v) =>
+                  v.trim() ? undefined : 'Branch name is required',
+              });
+        if (!name?.trim()) {
+          return;
+        }
+        const branch = name.trim();
+        try {
+          if (
+            await gitOk(integration.path, [
+              'show-ref',
+              '--verify',
+              '--quiet',
+              `refs/heads/${branch}`,
+            ])
+          ) {
+            throw new Error(`branch ${branch} already exists`);
+          }
+          await git(integration.path, ['branch', branch, drift.sha]);
+          if (baseCheckoutPath) {
+            // --keep refuses rather than clobber local file changes
+            await git(baseCheckoutPath, ['reset', '--keep', drift.resetTo]);
+          } else {
+            await git(integration.path, [
+              'update-ref',
+              `refs/heads/${baseName}`,
+              drift.resetTo,
+              drift.sha,
+            ]);
+          }
+          log.appendLine(
+            `Base drift → ${branch}: ${drift.ahead} commit(s) moved off ${baseName} (${baseName} back at ${drift.resetTo.slice(0, 10)})`,
+          );
+          const result = await treeProvider.applyToIntegration(branch);
+          reportIntegrationResult(
+            result,
+            `moved ${drift.ahead} commit(s) to ${branch}`,
+          );
+          treeProvider.refresh();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Branchify base drift failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not move commits — ${message}`,
           );
         }
       },

@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
-import { IntegrationLaneItem, MessageItem, type TreeNode } from './nodes';
+import {
+  BaseDriftItem,
+  IntegrationLaneItem,
+  MessageItem,
+  type TreeNode,
+} from './nodes';
+import { integrationBaseRef } from '../git/integration';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
 /**
@@ -39,8 +45,18 @@ export class IntegrationTreeProvider
     if (!integration) {
       return []; // empty → viewsWelcome renders the Enable button
     }
+    const rows: TreeNode[] = [];
+    if (integration.baseDrift) {
+      rows.push(
+        new BaseDriftItem(
+          integrationBaseRef().replace(/^origin\//, ''),
+          integration.baseDrift,
+        ),
+      );
+    }
     if (integration.candidates.length === 0) {
       return [
+        ...rows,
         new MessageItem(
           'No lanes yet',
           'Worktrees based on the integration base appear here automatically',
@@ -53,7 +69,8 @@ export class IntegrationTreeProvider
         .filter((w) => !w.detached)
         .map((w) => [w.branch, w.path] as const),
     );
-    return integration.candidates.map(
+    rows.push(
+      ...integration.candidates.map(
       (branch) =>
         new IntegrationLaneItem(branch, integration.lanes.includes(branch), {
           conflicted:
@@ -67,7 +84,9 @@ export class IntegrationTreeProvider
           auto: !integration.explicit.includes(branch),
           autoResolved: integration.autoResolved.find((r) => r.lane === branch),
         }),
+      ),
     );
+    return rows;
   }
 
   dispose(): void {

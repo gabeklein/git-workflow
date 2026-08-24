@@ -22,6 +22,7 @@ export interface TestApi {
     candidates: string[];
     landed: string[];
     autoResolved: { lane: string; lossless: string[]; lossy: string[] }[];
+    baseDrift?: { ahead: number; sha: string; resetTo: string };
     error?: unknown;
   } | undefined;
   selectedPath(): string | undefined;

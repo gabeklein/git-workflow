@@ -15,6 +15,7 @@ export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
 export type TreeNode =
   | GroupItem
+  | BaseDriftItem
   | IntegrationLaneItem
   | WorktreeListItem
   | ConflictWarningItem
@@ -164,6 +165,36 @@ export class RemotePrFileItem extends vscode.TreeItem {
  * One candidate lane under the Integration row. Checked = the branch is
  * merged into the integration tree; unchecked = candidate only.
  */
+/**
+ * Local <base> moved past the frozen integration base. The preview
+ * deliberately does NOT follow unpublished base movement — this row
+ * offers the two exits: move the commits to a feature branch (they join
+ * the preview as a lane) or catch the base up on purpose.
+ */
+export class BaseDriftItem extends vscode.TreeItem {
+  readonly kind = 'integrationBaseDrift' as const;
+
+  constructor(
+    readonly baseName: string,
+    readonly drift: { ahead: number; sha: string; resetTo: string },
+  ) {
+    super(`${baseName} moved`, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'integrationBaseDrift';
+    this.description = `+${drift.ahead} commit(s) not integrated`;
+    this.iconPath = new vscode.ThemeIcon(
+      'warning',
+      new vscode.ThemeColor('list.warningForeground'),
+    );
+    this.tooltip = [
+      `${baseName} has ${drift.ahead} commit(s) the integration base does not — the preview stays frozen rather than silently retargeting onto unpublished work.`,
+      '',
+      'Move New Base Commits to a Branch… turns them into a feature branch (it joins the preview as a lane) and returns the base branch to the frozen point.',
+      'Catch Up Integration Base advances the frozen base to the current tip on purpose.',
+      'Pushing the base branch also advances the frozen base (published movement always follows).',
+    ].join('\n');
+  }
+}
+
 export class IntegrationLaneItem extends vscode.TreeItem {
   readonly kind = 'integrationLane' as const;
 

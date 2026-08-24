@@ -55,13 +55,14 @@ describe('petty conflicts (best-effort resolver)', () => {
       const content = fs.readFileSync(news, 'utf8');
       return content.includes('- p1 note') && content.includes('- p2 note');
     });
-    const lossless = (api.integration()?.autoResolved ?? []).find(
-      (r) => r.lane === 'feat/p2',
-    );
-    assert.ok(
-      lossless && lossless.lossless.includes('news.txt') && lossless.lossy.length === 0,
-      'union resolution reported as lossless (no tag-worthy loss)',
-    );
+    // Poll, don't assert: the tree content lands (reset --hard inside the
+    // rebuild) a beat before the controller assigns autoResolved state.
+    await poll('union resolution reported as lossless (no tag-worthy loss)', 15000, () => {
+      const r = (api.integration()?.autoResolved ?? []).find(
+        (l) => l.lane === 'feat/p2',
+      );
+      return Boolean(r && r.lossless.includes('news.txt') && r.lossy.length === 0);
+    });
   });
 
   it('builds best-effort on same-line divergence and tags the row lossy', async () => {
@@ -85,13 +86,13 @@ describe('petty conflicts (best-effort resolver)', () => {
         fs.readFileSync(news, 'utf8').startsWith('p2 headline')
       );
     });
-    const lossy = (api.integration()?.autoResolved ?? []).find(
-      (r) => r.lane === 'feat/p2',
-    );
-    assert.ok(
-      lossy && lossy.lossy.includes('news.txt'),
-      'dropped-hunk resolution is tagged lossy on the lane',
-    );
+    // Same content-before-state window as the lossless case above
+    await poll('dropped-hunk resolution is tagged lossy on the lane', 15000, () => {
+      const r = (api.integration()?.autoResolved ?? []).find(
+        (l) => l.lane === 'feat/p2',
+      );
+      return Boolean(r && r.lossy.includes('news.txt'));
+    });
     assert.ok(
       applied().includes('feat/p1') && applied().includes('feat/p2'),
       'both lanes stay applied — the rebuild did not fail',
