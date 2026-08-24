@@ -31,6 +31,14 @@ export interface TestApi {
     error?: unknown;
   } | undefined;
   setBaseDriftIncluded(included: boolean): Promise<unknown>;
+  /** The RENDERED Integration panel rows (what VS Code actually paints). */
+  integrationRows(): {
+    kind?: string;
+    label: string;
+    description: string;
+    contextValue?: string;
+    checkbox?: boolean;
+  }[];
   selectedPath(): string | undefined;
   worktrees(): { path: string; branch: string }[];
   baseStatus(worktreePath: string): {

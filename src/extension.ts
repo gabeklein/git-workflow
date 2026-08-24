@@ -172,6 +172,26 @@ export function activate(context: vscode.ExtensionContext): unknown {
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
         setBaseDriftIncluded: (included: boolean) =>
           treeProvider.setBaseDriftIncluded(included),
+        // RENDERED Integration rows — the exact TreeItems VS Code paints
+        // (state hooks alone let "state right, row missing" bugs pass)
+        integrationRows: () =>
+          integrationProvider.getChildren().map((item) => ({
+            kind: (item as { kind?: string }).kind,
+            label:
+              typeof item.label === 'string'
+                ? item.label
+                : (item.label?.label ?? ''),
+            description:
+              typeof item.description === 'string' ? item.description : '',
+            contextValue: item.contextValue,
+            checkbox:
+              item.checkboxState === undefined
+                ? undefined
+                : (typeof item.checkboxState === 'object'
+                    ? item.checkboxState.state
+                    : item.checkboxState) ===
+                  vscode.TreeItemCheckboxState.Checked,
+          })),
         logFile: () => log.logFile,
       },
     };

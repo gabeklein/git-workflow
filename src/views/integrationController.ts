@@ -193,7 +193,16 @@ export class IntegrationController implements vscode.Disposable {
       // or an explicit Catch Up advances it. Enable/base-change clear it,
       // so it re-pins fresh; reloads keep it — that IS the freeze.
       if (!(await readBasePin(wt.path))) {
-        const fresh = await resolveBaseSha(wt.path, integrationBaseRef());
+        // Pin at the PUBLISHED tip when one exists: if local <base> is
+        // already ahead at first sight (commits made before integration
+        // loaded), that segment is drift to SURFACE as a lane — not floor
+        // to swallow. The descendant-preferring legacy resolution would
+        // pin the drifted tip and hide it forever. No origin → local.
+        const initName = integrationBaseRef().replace(/^origin\//, '');
+        const fresh =
+          (await revParseCommit(wt.path, `origin/${initName}`)) ??
+          (await revParseCommit(wt.path, `refs/heads/${initName}`)) ??
+          (await resolveBaseSha(wt.path, integrationBaseRef()));
         if (fresh) {
           await writeBasePin(wt.path, fresh);
           this.host.output.appendLine(

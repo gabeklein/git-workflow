@@ -29,8 +29,15 @@ describe('base pin & drift lane', () => {
   });
 
   const drift = () => api.integration()?.baseDrift;
-  const pin = () =>
-    fs.readFileSync(path.join(repo, '.git', 'focus-base'), 'utf8').trim();
+  const pin = () => {
+    try {
+      return fs
+        .readFileSync(path.join(repo, '.git', 'focus-base'), 'utf8')
+        .trim();
+    } catch {
+      return ''; // momentarily absent while the controller re-pins
+    }
+  };
 
   it('a commit on local main joins the preview as a lane — the base stays frozen', async () => {
     const pinBefore = pin();
@@ -46,6 +53,16 @@ describe('base pin & drift lane', () => {
       );
     });
     assert.equal(pin(), pinBefore, 'the frozen base (pin) did not move');
+
+    // Render-level: the drift LANE must actually be painted — a checked
+    // checkbox row, not just controller state.
+    const row = api
+      .integrationRows()
+      .find((r) => r.kind === 'integrationBaseDrift');
+    assert.ok(row, 'drift lane row is rendered in the Integration panel');
+    assert.equal(row!.label, 'main', 'row is labeled with the base branch');
+    assert.match(row!.description, /\+\d+ unpushed/, 'row shows +N unpushed');
+    assert.equal(row!.checkbox, true, 'row renders a CHECKED checkbox');
   });
 
   it('unchecking excludes the drift lane, and the choice persists', async () => {
@@ -130,6 +147,23 @@ describe('base pin & drift lane', () => {
     await poll('push clears drift and the work becomes base', 30000, async () => {
       await run('worktreeCompare.refresh');
       return !drift() && fs.existsSync(path.join(working, 'mainwork3.txt'));
+    });
+  });
+
+  it('pin initialization surfaces PRE-EXISTING drift instead of swallowing it', async () => {
+    // Commits made on main BEFORE integration first pins (fresh install,
+    // re-enable) must show as drift too: init pins at the published tip,
+    // never the drifted local descendant.
+    fs.rmSync(path.join(repo, '.git', 'focus-base'));
+    fs.writeFileSync(path.join(repo, 'mainwork4.txt'), 'pre-pin main work\n');
+    git(repo, ['add', 'mainwork4.txt']);
+    git(repo, ['commit', '-qm', 'main work before the pin existed']);
+    await poll('re-initialized pin sits at origin; drift shows', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return (
+        pin() === git(repo, ['rev-parse', 'origin/main']) &&
+        (drift()?.ahead ?? 0) >= 1
+      );
     });
   });
 });
