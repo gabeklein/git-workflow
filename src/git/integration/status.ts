@@ -1,6 +1,6 @@
 import { git, gitOk } from '../exec';
 import { revParseCommit } from '../plumbing';
-import { integrationBaseRef } from './config';
+import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
 import { listAppliedLanes, listExcludedLanes, readBasePin } from './lanes';
 
@@ -245,10 +245,72 @@ export async function integrationFingerprint(
         : ((await revParseCommit(cwd, `refs/heads/${baseName}`)) ?? 'none')
     }`,
   );
+  // Work committed directly on the integration checkout blocks the rebuild
+  // but moves none of the refs above, so without this the tick would never
+  // notice it and the absorb rescue would wait for an unrelated trigger.
+  // A count is enough to fire on, and it is STABLE: after a rebuild the
+  // first-parent line from the base up to HEAD is all merge commits, so
+  // this reads 0 and does not re-arm itself. The authoritative scan
+  // (findStrayCommits) carries the belt for a force-pushed base.
+  const strays = (
+    await git(cwd, [
+      'rev-list',
+      '--count',
+      '--no-merges',
+      '--first-parent',
+      'HEAD',
+      '--not',
+      parts[0].split('\0')[1] ?? 'HEAD',
+    ]).catch(() => '0')
+  ).trim();
+  parts.push(`strays\0${strays}`);
   for (const lane of lanes) {
     const sha =
       (await revParseCommit(cwd, `refs/heads/${lane}`)) ?? 'missing';
     parts.push(`${lane}\0${sha}`);
   }
   return parts.join('\n');
+}
+
+/**
+ * Commits made DIRECTLY on the integration checkout — work that exists on
+ * no other branch and would be destroyed by the next `reset --hard`.
+ *
+ * They sit on HEAD's first-parent line as non-merges; lane content always
+ * arrives via merge second parents, so this is immune to lanes being
+ * rebased afterwards (their old commits leave every branch but stay buried
+ * in the chain). Ephemeral wip snapshots are excluded — the extension made
+ * those, nobody committed them.
+ *
+ * Oldest first, so callers can replay them in order.
+ */
+export async function findStrayCommits(
+  cwd: string,
+  baseSha: string,
+): Promise<{ sha: string; subject: string }[]> {
+  const out = await git(cwd, [
+    'log',
+    '--no-merges',
+    '--first-parent',
+    '--reverse',
+    '--format=%H%x00%s',
+    'HEAD',
+    '--not',
+    baseSha,
+    // Belt for a diverged/force-pushed base: anything still on a branch or
+    // remote is not lost. (--exclude expires per glob.)
+    `--exclude=${integrationBranch()}`,
+    '--branches',
+    `--exclude=*/${integrationBranch()}`,
+    '--remotes',
+  ]).catch(() => '');
+  return out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [sha, subject = ''] = l.split('\0');
+      return { sha, subject };
+    })
+    .filter((c) => !c.subject.startsWith(WIP_SUBJECT));
 }

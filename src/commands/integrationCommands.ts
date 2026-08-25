@@ -483,6 +483,56 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
+      'worktreeCompare.absorbIntegrationCommits',
+      async () => {
+        const result = await treeProvider.absorbIntegrationCommits();
+        if (!result) {
+          return;
+        }
+        if (result.ok) {
+          void vscode.window.showInformationMessage(
+            `Git Workflow: moved ${result.commits} commit(s) onto ${path.basename(result.target)} — they show as unpushed base work.`,
+          );
+          return;
+        }
+        log.appendLine(`Absorb integration commits failed: ${result.message}`);
+        void vscode.window.showErrorMessage(
+          result.code === 'conflict'
+            ? `Git Workflow: those commits clash with the base${
+                result.files?.length ? ` in ${result.files.join(', ')}` : ''
+              } — nothing was moved.`
+            : `Git Workflow: could not absorb — ${result.message}`,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.absorbIntegrationEdits',
+      async () => {
+        const result = await treeProvider.absorbIntegrationEdits();
+        if (result.ok) {
+          void vscode.window.showInformationMessage(
+            `Git Workflow: moved the integration checkout's uncommitted edits onto ${path.basename(result.target)} — review and commit them there.`,
+          );
+          return;
+        }
+        if (result.code === 'nothing') {
+          void vscode.window.setStatusBarMessage(
+            'Git Workflow: integration checkout is clean — nothing to absorb',
+            3000,
+          );
+          return;
+        }
+        log.appendLine(`Absorb integration edits failed: ${result.message}`);
+        void vscode.window.showErrorMessage(
+          result.code === 'conflict'
+            ? `Git Workflow: those edits clash with the base${
+                result.files?.length ? ` in ${result.files.join(', ')}` : ''
+              } — they were left in the integration checkout. Move them onto the lane they belong to instead.`
+            : `Git Workflow: could not absorb — ${result.message}`,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.abortIntegrationMerge',
       async () => {
         try {

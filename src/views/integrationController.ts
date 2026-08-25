@@ -5,6 +5,10 @@ import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
 import {
+  absorbDirtyEdits,
+  absorbStrayCommits,
+  addedPathsInCommits,
+  checkoutForBranch,
   clearBasePin,
   readBasePin,
   resolveBaseSha,
@@ -20,10 +24,12 @@ import {
   ensureIntegrationPushBlocked,
   fetchIntegrationBase,
   findLandedLanes,
+  findStrayCommits,
   integrationBaseRef,
   integrationBranch,
   integrationFingerprint,
   isIntegrationAutoRebuildEnabled,
+  isIntegrationAbsorbEnabled,
   isLaneBranch,
   laneNeverDiverged,
   listAppliedLanes,
@@ -34,6 +40,7 @@ import {
   pruneDeadLanes,
   rebuildIntegration,
   setWipLane,
+  type AbsorbResult,
   type RebuildResult,
   type ResolvedLane,
 } from '../git/integration';
@@ -113,6 +120,9 @@ export class IntegrationController implements vscode.Disposable {
   /** Reason of a rebuild requested while one was in flight — run once after. */
   private rebuildQueued: string | undefined;
   private wipDebounce: NodeJS.Timeout | undefined;
+  /** Integration HEAD of the last auto-absorb attempt — one try per tip,
+   *  so a target that keeps refusing never loops the rebuild queue. */
+  private lastAbsorbHead: string | undefined;
   private lastBaseFetchAt = 0;
 
   constructor(private readonly host: IntegrationHost) {}
@@ -604,6 +614,24 @@ export class IntegrationController implements vscode.Disposable {
       } else if (result.code === 'busy') {
         // Script/hook holds the lock — not an error state for the row
         this.host.output.appendLine(`Integration rebuild busy (${reason})`);
+      } else if (result.code === 'unique' && isIntegrationAbsorbEnabled()) {
+        // Work committed directly on the integration checkout. The rebuild
+        // refuses rather than destroy it, which protects the commits but
+        // deadlocks the preview — absorbing is the exit. On success the
+        // work lands on the base as ordinary drift and the queued rebuild
+        // (below) picks up where this one stopped.
+        const absorbed = await this.absorbStrays();
+        if (absorbed?.ok) {
+          this.error = undefined;
+          this.rebuildQueued = this.rebuildQueued
+            ? `${this.rebuildQueued} + absorbed strays`
+            : 'absorbed strays';
+        } else {
+          this.error = { code: result.code, message: result.message };
+          this.host.output.appendLine(
+            `Integration rebuild failed (${reason}, ${result.code}): ${result.message}`,
+          );
+        }
       } else {
         this.error = {
           code: result.code,
@@ -718,6 +746,171 @@ export class IntegrationController implements vscode.Disposable {
     return this.runRebuild(
       included ? `include ${baseName} drift` : `exclude ${baseName} drift`,
     );
+  }
+
+  /**
+   * The checkout that absorbed work goes to: the base branch's own
+   * worktree. Landing it there makes it ordinary base drift, which is
+   * already a first-class lane with Catch Up and Move-to-Branch exits —
+   * so the rescue needs no escape hatches of its own.
+   */
+  private async absorbTarget(): Promise<string | undefined> {
+    if (!this.integrationPath) {
+      return undefined;
+    }
+    const baseName = integrationBaseRef().replace(/^origin\//, '');
+    return checkoutForBranch(this.integrationPath, baseName);
+  }
+
+  /**
+   * Move commits made directly on the integration branch onto the base.
+   * Runs unattended: a commit is an explicit act marking a unit of work
+   * complete, so nothing is taken out from under anyone. Uncommitted edits
+   * are deliberately NOT absorbed automatically — an agent may still be
+   * mid-write, and yanking files it is about to read back is worse than
+   * the deadlock.
+   */
+  async absorbStrays(
+    options: { confirmed?: boolean } = {},
+  ): Promise<AbsorbResult | undefined> {
+    const workingPath = this.integrationPath;
+    if (!workingPath) {
+      return undefined;
+    }
+    // One attempt per integration tip: a target that keeps refusing (dirty,
+    // or a conflict needing a human) must not re-arm the rebuild queue on
+    // every tick.
+    const head = await revParseCommit(workingPath, 'HEAD');
+    if (!options.confirmed && head && head === this.lastAbsorbHead) {
+      return undefined;
+    }
+    this.lastAbsorbHead = head;
+    const target = await this.absorbTarget();
+    if (!target) {
+      this.host.output.appendLine(
+        'Integration strays: no checkout for the base branch — cannot absorb',
+      );
+      return {
+        ok: false,
+        code: 'no-target',
+        message: 'the base branch has no worktree to absorb into',
+      };
+    }
+    // Added files are the one shape a replay cannot vet (see
+    // addedPathsInCommits). They only carry that risk while lanes are
+    // merged in — with a base-only chain the integration tree IS the base,
+    // so there is no lane context for anything to depend on. In that case
+    // ask instead of moving work unattended.
+    if (!options.confirmed && this.lanes.length > 0) {
+      const baseSha = await resolveBaseSha(workingPath, integrationBaseRef());
+      const strays = baseSha
+        ? await findStrayCommits(workingPath, baseSha)
+        : [];
+      const added = await addedPathsInCommits(
+        workingPath,
+        strays.map((c) => c.sha),
+      );
+      if (added.length > 0) {
+        this.host.output.appendLine(
+          `Integration strays add ${added.join(', ')} — not absorbed automatically (lanes applied)`,
+        );
+        void vscode.window
+          .showWarningMessage(
+            `Git Workflow: the integration checkout has commits adding ${added.join(', ')}. Merged lanes are in this tree, so those files may depend on code the base does not have — absorbing is not automatic here.`,
+            'Absorb Anyway',
+            'Move to a Branch…',
+          )
+          .then((choice) => {
+            if (choice === 'Absorb Anyway') {
+              void vscode.commands.executeCommand(
+                'worktreeCompare.absorbIntegrationCommits',
+              );
+            } else if (choice === 'Move to a Branch…') {
+              void vscode.commands.executeCommand(
+                'worktreeCompare.branchifyBaseDrift',
+              );
+            }
+          });
+        return {
+          ok: false,
+          code: 'needs-confirmation',
+          message: `stray commits add ${added.join(', ')}`,
+          files: added,
+        };
+      }
+    }
+    const result = await absorbStrayCommits(
+      workingPath,
+      integrationBaseRef(),
+      target,
+    );
+    if (result.ok) {
+      const baseName = integrationBaseRef().replace(/^origin\//, '');
+      this.host.output.appendLine(
+        `Absorbed ${result.commits} stray commit(s) from the integration checkout into ${baseName}`,
+      );
+      void vscode.window
+        .showInformationMessage(
+          `Git Workflow: moved ${result.commits} commit(s) made on the integration checkout onto ${baseName} — they now show as unpushed base work.`,
+          'Move to a Branch…',
+        )
+        .then((choice) => {
+          if (choice) {
+            void vscode.commands.executeCommand(
+              'worktreeCompare.branchifyBaseDrift',
+            );
+          }
+        });
+    } else if (result.code !== 'nothing') {
+      this.host.output.appendLine(
+        `Absorbing integration strays failed (${result.code}): ${result.message}${
+          result.files?.length ? ` · ${result.files.join(', ')}` : ''
+        }`,
+      );
+    }
+    return result;
+  }
+
+  /** Absorb stray commits the user explicitly approved, then rebuild. */
+  async absorbStraysConfirmed(): Promise<AbsorbResult | undefined> {
+    const result = await this.absorbStrays({ confirmed: true });
+    if (result?.ok) {
+      await this.runRebuild('absorbed strays (confirmed)');
+      this.host.refresh();
+    }
+    return result;
+  }
+
+  /**
+   * Move UNCOMMITTED integration edits onto the base. Only ever runs from
+   * an explicit command — see absorbStrays for why this is never automatic.
+   */
+  async absorbEdits(): Promise<AbsorbResult> {
+    const workingPath = this.integrationPath;
+    if (!workingPath) {
+      return { ok: false, code: 'error', message: 'no integration worktree' };
+    }
+    const target = await this.absorbTarget();
+    if (!target) {
+      return {
+        ok: false,
+        code: 'no-target',
+        message: 'the base branch has no worktree to absorb into',
+      };
+    }
+    const result = await absorbDirtyEdits(workingPath, target);
+    if (result.ok) {
+      this.host.output.appendLine(
+        `Absorbed uncommitted integration edits into ${target}`,
+      );
+      // The checkout is clean again — the dirty guard no longer blocks
+      await this.runRebuild('absorbed edits');
+    } else {
+      this.host.output.appendLine(
+        `Absorbing integration edits failed (${result.code}): ${result.message}`,
+      );
+    }
+    return result;
   }
 
   async catchUpBase(): Promise<RebuildResult> {

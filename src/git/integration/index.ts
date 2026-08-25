@@ -4,3 +4,4 @@ export * from './merge';
 export * from './status';
 export * from './engine';
 export * from './lifecycle';
+export * from './absorb';

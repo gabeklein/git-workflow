@@ -109,6 +109,12 @@ export function activate(context: vscode.ExtensionContext): unknown {
       'worktreeCompare.integrationMergePaused',
       Boolean(integration?.mergePaused),
     );
+    // Absorb is only offered while the checkout actually holds stray edits
+    void vscode.commands.executeCommand(
+      'setContext',
+      'worktreeCompare.integrationDirty',
+      integration?.error?.code === 'dirty',
+    );
   };
   updateIntegrationView();
   context.subscriptions.push(

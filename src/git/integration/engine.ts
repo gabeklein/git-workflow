@@ -7,6 +7,7 @@ import {
   autoResolveArgs,
   conflictResolverMode,
   integrationBranch,
+  WIP_SUBJECT,
 } from './config';
 import {
   APPLIED_FILE,
@@ -18,7 +19,7 @@ import {
   writeLaneFile,
 } from './lanes';
 import { mergeOffTree, resolveConflictedTree } from './merge';
-import { findLandedLanes, resolveBaseSha } from './status';
+import { findLandedLanes, findStrayCommits, resolveBaseSha } from './status';
 
 
 /**
@@ -40,7 +41,6 @@ import { findLandedLanes, resolveBaseSha } from './status';
  *   <git-common-dir>/focus-working.lock  mkdir lock around rebuilds
  */
 
-const WIP_SUBJECT = 'wip(gw):';
 let wipIndexCounter = 0;
 
 /**
@@ -150,35 +150,12 @@ export async function rebuildIntegration(
       };
     }
 
-    // Unique-commit guard: refuse only when the user committed DIRECTLY on
-    // the integration checkout — those commits sit on HEAD's first-parent
-    // line as non-merges. Lane content always arrives via merge second
-    // parents, so this is immune to lanes being rebased afterwards (their
-    // old commits leave every branch but stay buried in the chain — the
-    // previous --branches formulation wedged the rebuild forever on that).
-    const unique = (
-      await git(workingPath, [
-        'log',
-        '--no-merges',
-        '--first-parent',
-        '--format=%H%x00%s',
-        'HEAD',
-        '--not',
-        baseSha,
-        // Belt for a diverged/force-pushed base: anything still on a
-        // branch or remote is not lost. (--exclude expires per glob.)
-        `--exclude=${integrationBranch()}`,
-        '--branches',
-        `--exclude=*/${integrationBranch()}`,
-        '--remotes',
-      ]).catch(() => '')
-    )
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .filter((l) => !(l.split('\0')[1] ?? '').startsWith(WIP_SUBJECT))
-      .join('\n');
-    if (unique) {
+    // Unique-commit guard: refuse when work was committed DIRECTLY on the
+    // integration checkout. The tree is derived and about to be reset, so
+    // those commits would simply vanish. Absorbing them into a real branch
+    // is the exit (see absorb.ts) — this only refuses to destroy them.
+    const strays = await findStrayCommits(workingPath, baseSha);
+    if (strays.length > 0) {
       return {
         ok: false,
         code: 'unique',
