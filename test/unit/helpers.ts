@@ -22,6 +22,12 @@ export function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
+/** Give a checkout its own committer identity (see makeRepo). */
+function identify(dir: string): void {
+  git(dir, ['config', 'user.email', 'unit@test']);
+  git(dir, ['config', 'user.name', 'unit']);
+}
+
 export interface ScratchRepo {
   root: string;
   repo: string;
@@ -41,6 +47,10 @@ export function makeRepo(opts: { withOrigin?: boolean } = {}): ScratchRepo {
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   git(repo, ['init', '-q', '-b', 'main']);
+  // Repo-LOCAL identity, not just the env vars git() passes: code under
+  // test creates commits through src/git/exec.ts, which carries no author
+  // env of its own, and CI runners have no global git identity.
+  identify(repo);
   fs.writeFileSync(path.join(repo, 'app.txt'), 'line1\nline2\nline3\n');
   git(repo, ['add', '.']);
   git(repo, ['commit', '-qm', 'base']);
@@ -54,6 +64,7 @@ export function makeRepo(opts: { withOrigin?: boolean } = {}): ScratchRepo {
     git(repo, ['push', '-qu', 'origin', 'main']);
     git(root, ['clone', '-q', origin, 'landing']);
     landing = path.join(root, 'landing');
+    identify(landing);
   }
 
   return {
