@@ -27,6 +27,7 @@ describe('auto membership', () => {
   });
 
   const candidates = () => api.integration()?.candidates ?? [];
+  const appliedInView = () => api.integration()?.lanes ?? [];
 
   it('auto-enrolls a lane based on the integration base; stacked lanes stay out', async () => {
     // A fresh worktree based on main should enroll with NO add command;
@@ -43,9 +44,27 @@ describe('auto membership', () => {
       !candidates().includes('feat/stack'),
       'stacked lane (based on feat/c) is NOT auto-enrolled',
     );
+  });
+
+  it('applies the empty lane on sight — nothing to hide, and no landed tag', async () => {
+    // feat/c has no commits of its own, so merging it is a no-op: it joins
+    // the preview immediately, so its FIRST commit needs no checkbox. The
+    // one-shot is recorded in focus-candidates.
+    await poll('empty lane auto-applies', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return appliedInView().includes('feat/c');
+    });
     assert.ok(
-      !readLanes('focus-candidates').includes('feat/c'),
-      'auto member is derived, not written to focus-candidates',
+      readLanes('focus-applied').includes('feat/c'),
+      'auto-apply persisted to focus-applied',
+    );
+    assert.ok(
+      readLanes('focus-candidates').includes('feat/c'),
+      'the one-shot is recorded, so the auto-apply never fights an uncheck',
+    );
+    assert.ok(
+      !(api.integration()?.landed ?? []).includes('feat/c'),
+      'an empty lane is not "landed" — it has nothing to retire',
     );
   });
 
