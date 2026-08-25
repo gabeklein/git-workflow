@@ -15,6 +15,7 @@ import {
 import {
   integrationBaseRef,
   isLaneBranch,
+  type AbsorbResult,
   type RebuildResult,
 } from '../git/integration';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
@@ -769,6 +770,11 @@ export class WorktreeTreeProvider
 
   abortIntegrationMerge(): Promise<void> {
     return this.integration.abortMerge();
+  }
+
+  /** Move uncommitted integration-checkout edits onto the base. */
+  absorbIntegrationEdits(): Promise<AbsorbResult> {
+    return this.integration.absorbEdits();
   }
 
   // ---- rendering ------------------------------------------------------------

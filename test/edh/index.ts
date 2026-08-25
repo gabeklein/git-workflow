@@ -17,7 +17,8 @@ const ORDER = [
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase
   'conflicts.test.cjs', //   petty-conflict resolver, dead lane prune
-  'base-pin.test.cjs', //    frozen base: drift row, branchify, catch up (mutates main — LAST)
+  'base-pin.test.cjs', //    frozen base: drift row, branchify, catch up (mutates main)
+  'absorb.test.cjs', //      stray-work rescue out of the integration checkout (mutates main — LAST)
 ];
 
 export async function run(): Promise<void> {

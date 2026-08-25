@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
 
+/**
+ * Subject prefix of the ephemeral wip snapshot commits rebuilds overlay.
+ * Shared so the stray-commit scan can tell an extension-made snapshot
+ * apart from work a person actually committed on the integration branch.
+ */
+export const WIP_SUBJECT = 'wip(gw):';
+
 export function integrationBranch(): string {
   const template =
     vscode.workspace
@@ -11,6 +18,17 @@ export function integrationBranch(): string {
     '{base}',
     integrationBaseRef().replace(/^origin\//, ''),
   );
+}
+
+/**
+ * Whether work committed directly on the integration checkout is moved to
+ * the base automatically. Off leaves the rebuild refusing (the commits are
+ * still safe) until Absorb is run by hand.
+ */
+export function isIntegrationAbsorbEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<boolean>('integrationAbsorbStrays', true);
 }
 
 export function isIntegrationAutoRebuildEnabled(): boolean {

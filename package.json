@@ -159,6 +159,11 @@
           "minimum": 0,
           "description": "While integration mode is on, `git fetch origin <base>` this often (ms) so the integration tree tracks where PRs actually land; a moved tip triggers an auto-rebuild and landed lanes retire. 0 = never fetch automatically (manual Rebuild still fetches first)."
         },
+        "worktreeCompare.integrationAbsorbStrays": {
+          "type": "boolean",
+          "default": true,
+          "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Off = the rebuild keeps refusing until Absorb Integration Edits is run by hand. Uncommitted edits are never absorbed automatically."
+        },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
           "default": true,
@@ -353,6 +358,11 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.absorbIntegrationEdits",
+        "title": "Absorb Integration Edits…",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.enableIntegration",
         "title": "Enable Integration Mode…",
         "icon": "$(combine)",
@@ -483,6 +493,11 @@
           "command": "worktreeCompare.abortIntegrationMerge",
           "when": "view == worktreeCompare.integration && worktreeCompare.integrationMergePaused",
           "group": "1_config@2"
+        },
+        {
+          "command": "worktreeCompare.absorbIntegrationEdits",
+          "when": "view == worktreeCompare.integration && worktreeCompare.integrationDirty",
+          "group": "1_config@3"
         },
         {
           "command": "worktreeCompare.disableIntegration",
