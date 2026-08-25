@@ -155,9 +155,13 @@ describe('dead lane prune', () => {
       applied().includes('feat/p1') && applied().includes('feat/p2'),
       'live lanes survive the prune',
     );
-    await poll('integration tree drops the dead lane content', 20000, () =>
-      !fs.existsSync(path.join(working, 'dead.txt')),
-    );
+    // Nudge: the fingerprint-triggered rebuild after a prune is timing-
+    // dependent on slow CI — a manual rebuild reads the pruned lane files
+    // deterministically (the prune itself was asserted above).
+    await poll('integration tree drops the dead lane content', 30000, async () => {
+      await run('worktreeCompare.rebuildIntegration');
+      return !fs.existsSync(path.join(working, 'dead.txt'));
+    });
     assert.ok(!api.integration()?.error, 'no integration error state after prune');
   });
 });

@@ -1,7 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findLandedLanes } from '../../src/git/integration/status';
+import {
+  findLandedLanes,
+  laneNeverDiverged,
+} from '../../src/git/integration/status';
 import { addBranch, git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
@@ -79,5 +82,80 @@ describe('findLandedLanes', () => {
     expect(
       await findLandedLanes(scratch.repo, 'origin/main', ['feat/x']),
     ).toEqual([]);
+  });
+
+  // An empty lane is an ancestor of the base like a landed one, but it has
+  // nothing to retire — it is a worktree waiting for its first commit.
+  it('a fresh branch at the base tip is EMPTY, not landed', async () => {
+    git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
+    expect(
+      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+    ).toEqual([]);
+  });
+
+  it('a fresh branch the base has moved past is still empty', async () => {
+    git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
+    land(['commit', '-q', '--allow-empty', '-m', 'base moves on']);
+    expect(
+      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+    ).toEqual([]);
+  });
+
+  it('the first commit makes an empty lane real again', async () => {
+    git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
+    git(scratch.repo, ['checkout', '-q', 'feat/fresh']);
+    fs.writeFileSync(path.join(scratch.repo, 'fresh.txt'), 'work\n');
+    git(scratch.repo, ['add', '-A']);
+    git(scratch.repo, ['commit', '-qm', 'first commit']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    git(scratch.repo, ['push', '-q', 'origin', 'feat/fresh']);
+    expect(
+      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+    ).toEqual([]);
+    // ...and landing it now reads as landed, not empty
+    land([
+      'merge',
+      '-q',
+      '--no-ff',
+      '-m',
+      'Merge feat/fresh',
+      'origin/feat/fresh',
+    ]);
+    expect(
+      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+    ).toEqual(['feat/fresh']);
+  });
+});
+
+describe('laneNeverDiverged', () => {
+  let scratch: ScratchRepo;
+  beforeEach(() => {
+    scratch = makeRepo();
+  });
+  afterEach(() => {
+    scratch.cleanup();
+  });
+
+  const sha = (ref: string) => git(scratch.repo, ['rev-parse', ref]);
+
+  it('separates a fresh branch from a true-merge landing', async () => {
+    git(scratch.repo, ['branch', 'fresh', 'main']);
+    addBranch(scratch.repo, 'done', 'd.txt', 'done\n');
+    git(scratch.repo, ['merge', '-q', '--no-ff', '-m', 'Merge done', 'done']);
+    // main moves further, so neither tip equals the base tip
+    git(scratch.repo, ['commit', '-q', '--allow-empty', '-m', 'more main']);
+
+    const base = sha('main');
+    expect(await laneNeverDiverged(scratch.repo, sha('fresh'), base)).toBe(true);
+    expect(await laneNeverDiverged(scratch.repo, sha('done'), base)).toBe(
+      false,
+    );
+  });
+
+  it('a lane that is no ancestor at all never reads as empty', async () => {
+    addBranch(scratch.repo, 'side', 's.txt', 'side\n');
+    expect(await laneNeverDiverged(scratch.repo, sha('side'), sha('main'))).toBe(
+      false,
+    );
   });
 });

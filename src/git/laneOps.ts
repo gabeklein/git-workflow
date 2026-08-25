@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from './exec';
-import { resolveBaseSha } from './integration';
+import { laneNeverDiverged, resolveBaseSha } from './integration';
 import { gitErrorMessage, isWorktreeDirty } from './plumbing';
 
 /**
@@ -66,6 +66,54 @@ async function startBlocker(worktree: string): Promise<string | undefined> {
     return 'worktree has uncommitted changes — commit or stash first';
   }
   return undefined;
+}
+
+/**
+ * Move an EMPTY lane onto the base.
+ *
+ * A branch with no commits of its own reads as "behind" in the arithmetic
+ * the badges use, while having nothing whatsoever to rebase — the fix is
+ * to re-point it, not to replay anything. Lossless by construction: the
+ * guard is that the lane never diverged from the base's own first-parent
+ * line, so a fast-forward can drop nothing.
+ *
+ * Refuses on a dirty or mid-operation worktree like every other entry
+ * point here: uncommitted work means the lane is not really empty.
+ */
+export async function fastForwardEmptyLane(
+  worktree: string,
+  baseRef: string,
+): Promise<LaneOpResult> {
+  const baseSha = await resolveBaseSha(worktree, baseRef);
+  if (!baseSha) {
+    return { status: 'error', message: `base ref ${baseRef} does not resolve` };
+  }
+  const head = (await git(worktree, ['rev-parse', 'HEAD']).catch(() => '')).trim();
+  if (!head) {
+    return { status: 'error', message: 'worktree HEAD does not resolve' };
+  }
+  if (head === baseSha) {
+    return { status: 'done' }; // already there
+  }
+  if (
+    !(await gitOk(worktree, ['merge-base', '--is-ancestor', head, baseSha])) ||
+    !(await laneNeverDiverged(worktree, head, baseSha))
+  ) {
+    return {
+      status: 'blocked',
+      message: 'lane has commits of its own — catch up instead',
+    };
+  }
+  const blocker = await startBlocker(worktree);
+  if (blocker) {
+    return { status: 'blocked', message: blocker };
+  }
+  try {
+    await git(worktree, ['merge', '--ff-only', baseSha]);
+    return { status: 'done' };
+  } catch (err) {
+    return { status: 'error', message: gitErrorMessage(err) };
+  }
 }
 
 /**

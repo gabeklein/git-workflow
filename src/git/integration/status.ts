@@ -54,13 +54,66 @@ export async function fetchIntegrationBase(
 }
 
 /**
- * Lanes that LANDED: merging them into the base changes nothing. One
- * predicate for badges and retirement, deliberately content-based:
+ * Never diverged: the lane tip sits on the base's own FIRST-PARENT line,
+ * so the branch carries no commits of its own — a worktree created off the
+ * base that has not committed yet (still true after the base moves on and
+ * leaves it behind). Structurally distinct from a landed lane, whose tip
+ * is the second parent of the merge that brought it in, and from a
+ * squash/rebase landing, whose tip is no ancestor at all.
+ *
+ * Walks first-parent only as far as the lane, so cost tracks the distance
+ * between them, not the size of history. Caller must have established that
+ * `laneSha` is an ancestor of `baseSha`.
+ *
+ * A fast-forward landing reads as empty: its tip IS a base first-parent
+ * commit, indistinguishable from a fresh branch pointing there — and
+ * equally inert, since merging either one changes nothing.
+ */
+export async function laneNeverDiverged(
+  cwd: string,
+  laneSha: string,
+  baseSha: string,
+): Promise<boolean> {
+  try {
+    const skip =
+      Number(
+        (
+          await git(cwd, [
+            'rev-list',
+            '--first-parent',
+            '--count',
+            `${laneSha}..${baseSha}`,
+          ])
+        ).trim(),
+      ) || 0;
+    const at = (
+      await git(cwd, [
+        'rev-list',
+        '--first-parent',
+        `--skip=${skip}`,
+        '--max-count=1',
+        baseSha,
+      ])
+    ).trim();
+    return at === laneSha;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lanes that LANDED: merging them into the base changes nothing AND they
+ * had something to contribute. One predicate for badges and retirement,
+ * deliberately content-based:
  * - ancestry (true-merge landings) — merging an ancestor is a no-op;
  * - content-neutral (squash/rebase landings) — a STRICT off-tree merge
  *   yields the base tree unchanged.
  * Revert-safe by construction: after a squash-merge is reverted, merging
  * the lane again WOULD change the tree, so it is not landed.
+ *
+ * A lane that never diverged is EMPTY, not landed: it is a fresh worktree
+ * awaiting its first commit, so it keeps its row and stays applied instead
+ * of being tagged done and retired out of the preview.
  */
 export async function findLandedLanes(
   cwd: string,
@@ -84,7 +137,9 @@ export async function findLandedLanes(
       continue; // branch gone — not our call to make
     }
     if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
-      landed.push(lane);
+      if (!(await laneNeverDiverged(cwd, laneSha, baseSha))) {
+        landed.push(lane);
+      }
       continue;
     }
     try {

@@ -27,6 +27,7 @@ describe('auto membership', () => {
   });
 
   const candidates = () => api.integration()?.candidates ?? [];
+  const appliedInView = () => api.integration()?.lanes ?? [];
 
   it('auto-enrolls a lane based on the integration base; stacked lanes stay out', async () => {
     // A fresh worktree based on main should enroll with NO add command;
@@ -43,10 +44,59 @@ describe('auto membership', () => {
       !candidates().includes('feat/stack'),
       'stacked lane (based on feat/c) is NOT auto-enrolled',
     );
+  });
+
+  it('applies the empty lane on sight — nothing to hide, and no landed tag', async () => {
+    // feat/c has no commits of its own, so merging it is a no-op: it joins
+    // the preview immediately, so its FIRST commit needs no checkbox. The
+    // one-shot is recorded in focus-candidates.
+    await poll('empty lane auto-applies', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return appliedInView().includes('feat/c');
+    });
     assert.ok(
-      !readLanes('focus-candidates').includes('feat/c'),
-      'auto member is derived, not written to focus-candidates',
+      readLanes('focus-applied').includes('feat/c'),
+      'auto-apply persisted to focus-applied',
     );
+    assert.ok(
+      readLanes('focus-candidates').includes('feat/c'),
+      'the one-shot is recorded, so the auto-apply never fights an uncheck',
+    );
+    assert.ok(
+      !(api.integration()?.landed ?? []).includes('feat/c'),
+      'an empty lane is not "landed" — it has nothing to retire',
+    );
+  });
+
+  it('re-points an empty lane cut from a stale base, then applies it', async () => {
+    // Cut from main's PARENT: empty, but behind — nothing to rebase, so
+    // the lane is moved rather than left reporting a rebase it cannot do.
+    const stale = git(repo, ['rev-parse', 'origin/main~1']);
+    git(repo, ['branch', 'feat/stale', stale]);
+    // Branching at a SHA records that sha in the reflog, so inference would
+    // never land on main. State the base outright — the same override
+    // branchify writes — so the scenario tests the fast-forward, not the
+    // guessing.
+    git(repo, ['config', 'branch.feat/stale.vscode-merge-base', 'main']);
+    git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stale', 'feat/stale']);
+    // Both conditions in ONE poll: the fast-forward moves the ref before
+    // the same refresh pass records the lane, so asserting the applied
+    // state right after the ref moves is a race that only local timing wins.
+    await poll('stale empty lane is fast-forwarded, then applied', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return (
+        git(repo, ['rev-parse', 'feat/stale']) ===
+          git(repo, ['rev-parse', 'origin/main']) &&
+        appliedInView().includes('feat/stale')
+      );
+    });
+    // Leave no lane behind — later scenarios are sequential and stateful
+    git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-stale']);
+    git(repo, ['branch', '-D', 'feat/stale']);
+    await poll('the temporary lane is pruned again', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return !candidates().includes('feat/stale');
+    });
   });
 
   it('Remove is a real exit: the exclusion persists across refreshes', async () => {

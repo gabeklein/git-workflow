@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
-import { baseMergeInProgress } from '../git/laneOps';
+import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
 import {
   clearBasePin,
   readBasePin,
@@ -25,6 +25,7 @@ import {
   integrationFingerprint,
   isIntegrationAutoRebuildEnabled,
   isLaneBranch,
+  laneNeverDiverged,
   listAppliedLanes,
   dropExcludedLane,
   listCandidateLanes,
@@ -283,8 +284,48 @@ export class IntegrationController implements vscode.Disposable {
           continue;
         }
         const base = await this.host.genuineBaseFor(w.path);
-        if (base && base.replace(/^origin\//, '') === integBase) {
-          auto.push(w.branch);
+        if (!base || base.replace(/^origin\//, '') !== integBase) {
+          continue;
+        }
+        auto.push(w.branch);
+        // Empty lane (created off the base, nothing committed yet): apply it
+        // on sight. There is nothing to hide — merging it is a literal no-op
+        // — and it means the first commit flows into the preview instead of
+        // waiting on a checkbox. Recorded as a candidate too, so this happens
+        // exactly ONCE per branch: the explicit guard above skips it forever
+        // after, and an uncheck stays unchecked.
+        const laneSha = await revParseCommit(wt.path, `refs/heads/${w.branch}`);
+        if (
+          effective &&
+          laneSha &&
+          (await gitOk(wt.path, [
+            'merge-base',
+            '--is-ancestor',
+            laneSha,
+            effective,
+          ])) &&
+          (await laneNeverDiverged(wt.path, laneSha, effective))
+        ) {
+          // Cut from a stale base, the lane reads as "behind" while having
+          // nothing to rebase. Re-point it instead — lossless, since it has
+          // no commits — so its first commit starts from the CURRENT base.
+          if (laneSha !== effective) {
+            const ff = await fastForwardEmptyLane(w.path, integrationBaseRef());
+            this.host.output.appendLine(
+              ff.status === 'done'
+                ? `Empty lane ${w.branch} fast-forwarded to ${integBase}`
+                : `Empty lane ${w.branch} left where it is (${ff.status}${
+                    'message' in ff ? `: ${ff.message}` : ''
+                  })`,
+            );
+          }
+          await addCandidateLane(wt.path, w.branch);
+          await addAppliedLane(wt.path, w.branch);
+          explicit.push(w.branch);
+          this.lanes.push(w.branch);
+          this.host.output.appendLine(
+            `Integration lane auto-applied (new worktree off ${integBase}): ${w.branch}`,
+          );
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
