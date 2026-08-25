@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   absorbDirtyEdits,
   absorbStrayCommits,
+  addedPathsInCommits,
   checkoutForBranch,
 } from '../../src/git/integration/absorb';
 import {
@@ -224,6 +225,74 @@ describe('absorb', () => {
       expect(await strayCount()).toBe('1');
       await absorbStrayCommits(integ, 'origin/main', scratch.repo);
       expect(await strayCount()).toBe('0');
+    });
+  });
+
+  /**
+   * What protects the base from lane-dependent work: an edit carries the
+   * surrounding lines as diff context, so a change written against merged
+   * lane content cannot apply to the base. An ADDED file has no context to
+   * check — that asymmetry is why added files are not absorbed unattended.
+   */
+  describe('lane-context safety', () => {
+    it('refuses a stray edit that sits on lane content', async () => {
+      strayCommit('app.txt', 'line1\nAGENT EDITS THE LANE LINE\nline3\n', 'edit');
+      expect(
+        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+      ).toMatchObject({ ok: false, code: 'conflict' });
+    });
+
+    it('refuses a stray edit to a file that exists only on the lane', async () => {
+      // lane.txt exists in the merged tree, never on the base
+      fs.writeFileSync(path.join(integ, 'lane.txt'), 'lane owns this\n');
+      git(integ, ['add', '-A']);
+      git(integ, ['commit', '-qm', 'seed lane-only file']);
+      await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      strayCommit('lane.txt', 'agent rewrites lane-only file\n', 'edit lane-only');
+      expect(
+        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+      ).toMatchObject({ ok: false, code: 'conflict' });
+    });
+
+    // The gap: nothing on the base contradicts a brand-new file, so it
+    // applies whatever its contents depend on. Hence the confirmation gate.
+    it('an ADDED file applies cleanly even when its contents need the lane', async () => {
+      strayCommit(
+        'needs-lane.txt',
+        'this text only makes sense with LANE present\n',
+        'add a lane-dependent file',
+      );
+      expect(
+        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+      ).toMatchObject({ ok: true });
+      expect(read(scratch.repo, 'needs-lane.txt')).toContain('LANE');
+    });
+  });
+
+  describe('addedPathsInCommits', () => {
+    it('reports added paths and ignores modifications', async () => {
+      strayCommit('brand-new.txt', 'new\n', 'add a file');
+      const shas = (await findStrayCommits(integ, 'origin/main')).map(
+        (c) => c.sha,
+      );
+      expect(await addedPathsInCommits(integ, shas)).toEqual(['brand-new.txt']);
+
+      // A modification to an existing file contributes nothing
+      strayCommit('brand-new.txt', 'changed\n', 'modify it');
+      const shas2 = (await findStrayCommits(integ, 'origin/main')).map(
+        (c) => c.sha,
+      );
+      expect(await addedPathsInCommits(integ, shas2)).toEqual([
+        'brand-new.txt',
+      ]);
+    });
+
+    it('is empty for a commit that only edits existing content', async () => {
+      strayCommit('app.txt', 'line1\nLANE\nline3\nappended\n', 'edit only');
+      const shas = (await findStrayCommits(integ, 'origin/main')).map(
+        (c) => c.sha,
+      );
+      expect(await addedPathsInCommits(integ, shas)).toEqual([]);
     });
   });
 

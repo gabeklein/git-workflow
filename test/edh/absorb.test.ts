@@ -18,28 +18,66 @@ describe('absorbing stray integration work', () => {
     api = await getApi();
   });
 
-  it('moves a commit made on the integration checkout onto main by itself', async () => {
-    fs.writeFileSync(path.join(working, 'stray.txt'), 'an agent wrote here\n');
+  it('moves an EDIT made on the integration checkout onto main by itself', async () => {
+    // An edit carries diff context, so a replay onto the base is vetted by
+    // git itself — safe to move unattended. README.md is on the base and
+    // no lane touches it.
+    fs.appendFileSync(path.join(working, 'README.md'), 'an agent wrote here\n');
     git(working, ['add', '-A']);
-    git(working, ['commit', '-qm', 'agent commits on integration']);
+    git(working, ['commit', '-qm', 'agent edits README on integration']);
     const strayTip = git(working, ['rev-parse', 'HEAD']);
 
     // No command: the tick's fingerprint carries a stray component, so the
     // rebuild that trips the guard also runs the rescue.
-    await poll('stray commit lands on main', 40000, () =>
+    await poll('stray edit lands on main', 40000, () =>
       git(repo, ['log', 'main', '-5', '--format=%s']).includes(
-        'agent commits on integration',
+        'agent edits README on integration',
       ),
     );
-    assert.equal(
-      fs.readFileSync(path.join(repo, 'stray.txt'), 'utf8'),
-      'an agent wrote here\n',
-      'the file content came with it',
+    assert.ok(
+      fs.readFileSync(path.join(repo, 'README.md'), 'utf8').includes(
+        'an agent wrote here',
+      ),
+      'the edit came with it',
     );
     assert.notEqual(
       git(working, ['rev-parse', 'HEAD']),
       strayTip,
       'the integration checkout was rewound off the stray commit',
+    );
+  });
+
+  it('holds a commit that ADDS files while lanes are applied', async () => {
+    // An added file has no diff context, so it would apply to the base
+    // cleanly even if its contents depend on merged lane code. That one
+    // shape asks first instead of moving unattended.
+    fs.writeFileSync(path.join(working, 'stray-new.txt'), 'needs the lanes\n');
+    git(working, ['add', '-A']);
+    git(working, ['commit', '-qm', 'agent adds a file on integration']);
+
+    await poll('the rebuild guard trips and the file is NOT moved', 40000, () => {
+      const error = api.integration()?.error as { code?: string } | undefined;
+      return (
+        error?.code === 'unique' &&
+        !fs.existsSync(path.join(repo, 'stray-new.txt'))
+      );
+    });
+    assert.ok(
+      !git(repo, ['log', 'main', '-5', '--format=%s']).includes(
+        'agent adds a file on integration',
+      ),
+      'nothing was absorbed automatically',
+    );
+  });
+
+  it('absorbs the held commit once asked explicitly', async () => {
+    await run('worktreeCompare.absorbIntegrationCommits');
+    await poll('the added file reaches main on command', 30000, () =>
+      fs.existsSync(path.join(repo, 'stray-new.txt')),
+    );
+    assert.equal(
+      fs.readFileSync(path.join(repo, 'stray-new.txt'), 'utf8'),
+      'needs the lanes\n',
     );
   });
 

@@ -7,6 +7,7 @@ import { baseMergeInProgress } from '../git/laneOps';
 import {
   absorbDirtyEdits,
   absorbStrayCommits,
+  addedPathsInCommits,
   checkoutForBranch,
   clearBasePin,
   readBasePin,
@@ -23,6 +24,7 @@ import {
   ensureIntegrationPushBlocked,
   fetchIntegrationBase,
   findLandedLanes,
+  findStrayCommits,
   integrationBaseRef,
   integrationBranch,
   integrationFingerprint,
@@ -727,7 +729,9 @@ export class IntegrationController implements vscode.Disposable {
    * mid-write, and yanking files it is about to read back is worse than
    * the deadlock.
    */
-  async absorbStrays(): Promise<AbsorbResult | undefined> {
+  async absorbStrays(
+    options: { confirmed?: boolean } = {},
+  ): Promise<AbsorbResult | undefined> {
     const workingPath = this.integrationPath;
     if (!workingPath) {
       return undefined;
@@ -736,7 +740,7 @@ export class IntegrationController implements vscode.Disposable {
     // or a conflict needing a human) must not re-arm the rebuild queue on
     // every tick.
     const head = await revParseCommit(workingPath, 'HEAD');
-    if (head && head === this.lastAbsorbHead) {
+    if (!options.confirmed && head && head === this.lastAbsorbHead) {
       return undefined;
     }
     this.lastAbsorbHead = head;
@@ -750,6 +754,49 @@ export class IntegrationController implements vscode.Disposable {
         code: 'no-target',
         message: 'the base branch has no worktree to absorb into',
       };
+    }
+    // Added files are the one shape a replay cannot vet (see
+    // addedPathsInCommits). They only carry that risk while lanes are
+    // merged in — with a base-only chain the integration tree IS the base,
+    // so there is no lane context for anything to depend on. In that case
+    // ask instead of moving work unattended.
+    if (!options.confirmed && this.lanes.length > 0) {
+      const baseSha = await resolveBaseSha(workingPath, integrationBaseRef());
+      const strays = baseSha
+        ? await findStrayCommits(workingPath, baseSha)
+        : [];
+      const added = await addedPathsInCommits(
+        workingPath,
+        strays.map((c) => c.sha),
+      );
+      if (added.length > 0) {
+        this.host.output.appendLine(
+          `Integration strays add ${added.join(', ')} — not absorbed automatically (lanes applied)`,
+        );
+        void vscode.window
+          .showWarningMessage(
+            `Git Workflow: the integration checkout has commits adding ${added.join(', ')}. Merged lanes are in this tree, so those files may depend on code the base does not have — absorbing is not automatic here.`,
+            'Absorb Anyway',
+            'Move to a Branch…',
+          )
+          .then((choice) => {
+            if (choice === 'Absorb Anyway') {
+              void vscode.commands.executeCommand(
+                'worktreeCompare.absorbIntegrationCommits',
+              );
+            } else if (choice === 'Move to a Branch…') {
+              void vscode.commands.executeCommand(
+                'worktreeCompare.branchifyBaseDrift',
+              );
+            }
+          });
+        return {
+          ok: false,
+          code: 'needs-confirmation',
+          message: `stray commits add ${added.join(', ')}`,
+          files: added,
+        };
+      }
     }
     const result = await absorbStrayCommits(
       workingPath,
@@ -779,6 +826,16 @@ export class IntegrationController implements vscode.Disposable {
           result.files?.length ? ` · ${result.files.join(', ')}` : ''
         }`,
       );
+    }
+    return result;
+  }
+
+  /** Absorb stray commits the user explicitly approved, then rebuild. */
+  async absorbStraysConfirmed(): Promise<AbsorbResult | undefined> {
+    const result = await this.absorbStrays({ confirmed: true });
+    if (result?.ok) {
+      await this.runRebuild('absorbed strays (confirmed)');
+      this.host.refresh();
     }
     return result;
   }

@@ -28,7 +28,13 @@ export type AbsorbResult =
   | { ok: true; target: string; commits: number; uncommitted: boolean }
   | {
       ok: false;
-      code: 'no-target' | 'target-dirty' | 'nothing' | 'conflict' | 'error';
+      code:
+        | 'no-target'
+        | 'target-dirty'
+        | 'nothing'
+        | 'conflict'
+        | 'error'
+        | 'needs-confirmation';
       message: string;
       /** Files left conflicted when the replay could not be applied. */
       files?: string[];
@@ -141,6 +147,35 @@ async function restorePaths(cwd: string, paths: string[]): Promise<void> {
       await gitOk(cwd, ['clean', '-qf', '--', file]);
     }
   }
+}
+
+/**
+ * Paths these commits ADD, relative to each commit's parent.
+ *
+ * This is the one shape of stray work a replay cannot vet. Every edit to
+ * existing content carries the surrounding lines as diff context, so a
+ * change written against merged-in lane content fails its 3-way merge
+ * against the base and is refused. An added file has no counterpart to
+ * check — it applies cleanly whether or not its CONTENTS depend on code
+ * that only exists on a lane, and git has no way to tell the difference.
+ */
+export async function addedPathsInCommits(
+  cwd: string,
+  shas: string[],
+): Promise<string[]> {
+  const paths: string[] = [];
+  for (const sha of shas) {
+    const out = await git(cwd, [
+      'show',
+      '--pretty=format:',
+      '--name-only',
+      '--diff-filter=A',
+      '-z',
+      sha,
+    ]).catch(() => '');
+    paths.push(...out.split('\0').filter(Boolean));
+  }
+  return [...new Set(paths)];
 }
 
 /** Files git reports as unmerged in a checkout. */

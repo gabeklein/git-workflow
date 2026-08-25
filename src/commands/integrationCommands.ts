@@ -483,6 +483,29 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
+      'worktreeCompare.absorbIntegrationCommits',
+      async () => {
+        const result = await treeProvider.absorbIntegrationCommits();
+        if (!result) {
+          return;
+        }
+        if (result.ok) {
+          void vscode.window.showInformationMessage(
+            `Git Workflow: moved ${result.commits} commit(s) onto ${path.basename(result.target)} — they show as unpushed base work.`,
+          );
+          return;
+        }
+        log.appendLine(`Absorb integration commits failed: ${result.message}`);
+        void vscode.window.showErrorMessage(
+          result.code === 'conflict'
+            ? `Git Workflow: those commits clash with the base${
+                result.files?.length ? ` in ${result.files.join(', ')}` : ''
+              } — nothing was moved.`
+            : `Git Workflow: could not absorb — ${result.message}`,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
       'worktreeCompare.absorbIntegrationEdits',
       async () => {
         const result = await treeProvider.absorbIntegrationEdits();
