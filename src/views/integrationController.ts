@@ -4,7 +4,7 @@ import type { DiscoveredWorktree } from '../discovery/scanner';
 import { git } from '../git/exec';
 import { gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
-import { baseMergeInProgress } from '../git/laneOps';
+import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
 import {
   clearBasePin,
   readBasePin,
@@ -301,6 +301,19 @@ export class IntegrationController implements vscode.Disposable {
           ])) &&
           (await laneNeverDiverged(wt.path, laneSha, effective))
         ) {
+          // Cut from a stale base, the lane reads as "behind" while having
+          // nothing to rebase. Re-point it instead — lossless, since it has
+          // no commits — so its first commit starts from the CURRENT base.
+          if (laneSha !== effective) {
+            const ff = await fastForwardEmptyLane(w.path, integrationBaseRef());
+            this.host.output.appendLine(
+              ff.status === 'done'
+                ? `Empty lane ${w.branch} fast-forwarded to ${integBase}`
+                : `Empty lane ${w.branch} left where it is (${ff.status}${
+                    'message' in ff ? `: ${ff.message}` : ''
+                  })`,
+            );
+          }
           await addCandidateLane(wt.path, w.branch);
           await addAppliedLane(wt.path, w.branch);
           explicit.push(w.branch);

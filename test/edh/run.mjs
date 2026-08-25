@@ -138,6 +138,11 @@ try {
     extensionTestsPath,
     launchArgs: [
       repo,
+      // Keep the user-data dir SHORT and outside the checkout: it holds the
+      // IPC socket, and macOS caps that path at 103 chars — the default
+      // (<checkout>/.vscode-test/user-data) blows past it from a worktree,
+      // which is exactly where this project gets developed.
+      `--user-data-dir=${path.join(tmpdir(), 'gw-edh-ud')}`,
       '--disable-extensions',
       '--disable-workspace-trust',
       '--skip-welcome',

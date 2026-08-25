@@ -68,6 +68,37 @@ describe('auto membership', () => {
     );
   });
 
+  it('re-points an empty lane cut from a stale base, then applies it', async () => {
+    // Cut from main's PARENT: empty, but behind — nothing to rebase, so
+    // the lane is moved rather than left reporting a rebase it cannot do.
+    const stale = git(repo, ['rev-parse', 'origin/main~1']);
+    git(repo, ['branch', 'feat/stale', stale]);
+    // Branching at a SHA records that sha in the reflog, so inference would
+    // never land on main. State the base outright — the same override
+    // branchify writes — so the scenario tests the fast-forward, not the
+    // guessing.
+    git(repo, ['config', 'branch.feat/stale.vscode-merge-base', 'main']);
+    git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stale', 'feat/stale']);
+    await poll('stale empty lane is fast-forwarded onto the base', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return (
+        git(repo, ['rev-parse', 'feat/stale']) ===
+        git(repo, ['rev-parse', 'origin/main'])
+      );
+    });
+    assert.ok(
+      appliedInView().includes('feat/stale'),
+      'and it is applied like any other empty lane',
+    );
+    // Leave no lane behind — later scenarios are sequential and stateful
+    git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-stale']);
+    git(repo, ['branch', '-D', 'feat/stale']);
+    await poll('the temporary lane is pruned again', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return !candidates().includes('feat/stale');
+    });
+  });
+
   it('Remove is a real exit: the exclusion persists across refreshes', async () => {
     await run('worktreeCompare.removeFromIntegration', { branch: 'feat/c' });
     await poll('removed auto member disappears', 20000, () =>
