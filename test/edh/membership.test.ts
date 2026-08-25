@@ -79,17 +79,17 @@ describe('auto membership', () => {
     // guessing.
     git(repo, ['config', 'branch.feat/stale.vscode-merge-base', 'main']);
     git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stale', 'feat/stale']);
-    await poll('stale empty lane is fast-forwarded onto the base', 30000, async () => {
+    // Both conditions in ONE poll: the fast-forward moves the ref before
+    // the same refresh pass records the lane, so asserting the applied
+    // state right after the ref moves is a race that only local timing wins.
+    await poll('stale empty lane is fast-forwarded, then applied', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (
         git(repo, ['rev-parse', 'feat/stale']) ===
-        git(repo, ['rev-parse', 'origin/main'])
+          git(repo, ['rev-parse', 'origin/main']) &&
+        appliedInView().includes('feat/stale')
       );
     });
-    assert.ok(
-      appliedInView().includes('feat/stale'),
-      'and it is applied like any other empty lane',
-    );
     // Leave no lane behind — later scenarios are sequential and stateful
     git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-stale']);
     git(repo, ['branch', '-D', 'feat/stale']);
