@@ -86,6 +86,20 @@ describe('absorbStrayCommits onto a ref', () => {
     );
   });
 
+  it('records where the commit was absorbed from', async () => {
+    strayCommit('trace.txt', 'x\n', 'work that needs a paper trail');
+    const strayTip = git(scratch.repo, ['rev-parse', 'HEAD']);
+    await absorbStrayCommits(scratch.repo, 'origin/main', target());
+    const body = git(scratch.repo, ['log', '-1', '--format=%B', 'main']);
+    // The source sha stops resolving as soon as integration rebuilds, so
+    // the branch line is the half that still answers the question later.
+    expect(body).toContain(`(cherry picked from commit ${strayTip})`);
+    expect(body).toContain('Absorbed-from: integration/main');
+    expect(git(scratch.repo, ['log', '-1', '--format=%s', 'main'])).toBe(
+      'work that needs a paper trail',
+    );
+  });
+
   it('replays several commits oldest-first', async () => {
     strayCommit('a.txt', 'first\n', 'stray one');
     strayCommit('b.txt', 'second\n', 'stray two');

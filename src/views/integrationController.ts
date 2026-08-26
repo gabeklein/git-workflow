@@ -18,6 +18,9 @@ import {
   addCandidateLane,
   addExcludedLane,
   alignIntegrationBranchName,
+  installCommitGuard,
+  isCommitGuardEnabled,
+  uninstallCommitGuard,
   baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
@@ -51,6 +54,7 @@ import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 export interface IntegrationHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
+  getRepoCwd(): string | undefined;
   getSelectedPath(): string | undefined;
   fireTreeData(): void;
   refresh(): void;
@@ -94,6 +98,8 @@ export interface IntegrationState {
  */
 export class IntegrationController implements vscode.Disposable {
   private integrationPath: string | undefined;
+  /** Path:branch:enabled the pre-commit guard was last reconciled for. */
+  private guardSyncedFor: string | undefined;
   private lanes: string[] = [];
   /** Everything shown under Integration: explicit + applied + auto members. */
   private candidates: string[] = [];
@@ -163,6 +169,10 @@ export class IntegrationController implements vscode.Disposable {
       if (this.integrationPath) {
         this.host.output.appendLine('Integration worktree gone — overlay off');
       }
+      if (this.guardSyncedFor) {
+        this.guardSyncedFor = undefined;
+        void this.syncCommitGuard(undefined, branch);
+      }
       this.integrationPath = undefined;
       this.lanes = [];
       this.candidates = [];
@@ -194,6 +204,11 @@ export class IntegrationController implements vscode.Disposable {
       }
     }
     this.integrationPath = wt.path;
+    const guardKey = `${wt.path}:${branch}:${isCommitGuardEnabled()}`;
+    if (this.guardSyncedFor !== guardKey) {
+      this.guardSyncedFor = guardKey;
+      void this.syncCommitGuard(wt.path, branch);
+    }
     try {
       // Dead lanes: a branch deleted out from under Integration (its
       // worktree died — landed and cleaned up, agent teardown) leaves
@@ -523,6 +538,46 @@ export class IntegrationController implements vscode.Disposable {
     }
     this.fingerprint = fp;
     await this.runRebuild('lane tips moved');
+  }
+
+  /**
+   * Keep the pre-commit guard in step with integration state. Installed
+   * while integration is on, removed when it goes off, and re-pointed when
+   * the branch is renamed — reconciled from refreshState rather than from
+   * the enable/disable commands so it also covers checkouts made by hand
+   * and repos that had integration on before the guard existed.
+   *
+   * Failure is logged, never surfaced: a repo where hooks cannot be written
+   * (read-only .git, an unusual hooksPath) still works exactly as it did
+   * before — it just does not get the extra warning.
+   */
+  private async syncCommitGuard(
+    workingPath: string | undefined,
+    branch: string,
+  ): Promise<void> {
+    const cwd = workingPath ?? this.host.getRepoCwd();
+    if (!cwd) {
+      return;
+    }
+    try {
+      if (!workingPath || !isCommitGuardEnabled()) {
+        await uninstallCommitGuard(cwd);
+        return;
+      }
+      const result = await installCommitGuard(cwd, branch);
+      if (result === 'foreign') {
+        this.host.output.appendLine(
+          `Commit guard not installed: ${cwd} already has a pre-commit hook this extension did not write — leaving it alone`,
+        );
+      } else if (result !== 'unchanged') {
+        this.host.output.appendLine(
+          `Commit guard ${result}: refusing commits on ${branch}`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Commit guard sync failed: ${message}`);
+    }
   }
 
   /**

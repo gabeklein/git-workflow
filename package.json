@@ -1,7 +1,7 @@
 {
   "name": "git-workflow",
   "displayName": "Git Workflow",
-  "description": "Discover git worktrees and compare each Working Tree against its base ref — GitLens-style, editable diffs.",
+  "description": "Discover git worktrees and compare each Working Tree against its base ref \u2014 GitLens-style, editable diffs.",
   "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
@@ -108,7 +108,7 @@
         "worktreeCompare.integrationBaseRef": {
           "type": "string",
           "default": "",
-          "description": "Base ref integration rebuilds start from (origin/… preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
+          "description": "Base ref integration rebuilds start from (origin/\u2026 preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
         },
         "worktreeCompare.integrationAutoResolve": {
           "type": "string",
@@ -121,9 +121,9 @@
           "enumDescriptions": [
             "Strict: any clash fails the rebuild. Non-overlapping edits to the same file still merge (git default).",
             "Also resolve whitespace-only clashes plus everything provably LOSSLESS: union when both lanes only inserted lines (changelog appends, import lists) and linewise 3-way for adjacent-line edits.",
-            "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane — the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
+            "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane \u2014 the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
           ],
-          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work — lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
+          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work \u2014 lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
         },
         "worktreeCompare.catchUpStrategy": {
           "type": "string",
@@ -134,9 +134,9 @@
           ],
           "default": "auto",
           "enumDescriptions": [
-            "Rebase unpushed lanes (history still private); merge the base into pushed lanes (no force-push, review anchors survive — squash landings erase the merge bubbles anyway).",
+            "Rebase unpushed lanes (history still private); merge the base into pushed lanes (no force-push, review anchors survive \u2014 squash landings erase the merge bubbles anyway).",
             "Always rebase; pushed lanes get a Force Push (with lease) offer afterward.",
-            "Always merge the base in — never rewrites history."
+            "Always merge the base in \u2014 never rewrites history."
           ],
           "description": "How Catch Up with Base brings a lane up to date with its base."
         },
@@ -148,8 +148,8 @@
           ],
           "default": "off",
           "enumDescriptions": [
-            "Never catch lanes up automatically — rows show 'N behind' / 'conflicts with <base>' with manual actions.",
-            "Automatically catch up linked worktrees that are clean, behind the base, conflict-free, and NOT pushed (method follows catchUpStrategy). Pushed branches are never rewritten automatically — use Rebase onto Base…, which offers a force-push with lease."
+            "Never catch lanes up automatically \u2014 rows show 'N behind' / 'conflicts with <base>' with manual actions.",
+            "Automatically catch up linked worktrees that are clean, behind the base, conflict-free, and NOT pushed (method follows catchUpStrategy). Pushed branches are never rewritten automatically \u2014 use Rebase onto Base\u2026, which offers a force-push with lease."
           ],
           "description": "Keep feature worktrees caught up with the base automatically when it is safe. A conflicting attempt aborts cleanly and marks the row 'conflicts with <base>'. Off by default: moving your branch is a side effect you opt into."
         },
@@ -162,12 +162,17 @@
         "worktreeCompare.integrationAbsorbStrays": {
           "type": "boolean",
           "default": true,
-          "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first — an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
+          "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first \u2014 an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
+        },
+        "worktreeCompare.integrationCommitGuard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Install a pre-commit hook that refuses commits made while the integration branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. A pre-commit hook this extension did not write is never replaced."
         },
         "worktreeCompare.quickDeleteLandedWorktrees": {
           "type": "boolean",
           "default": true,
-          "description": "Delete a landed worktree without the confirmation modal. Only applies when the branch's commits are already contained in its base AND the checkout is clean, unlocked, attached, and holds no ignored files — `git worktree remove` deletes ignored files (a local .env, build output) without complaint, and the dirty probe cannot see them. Off = every delete is confirmed."
+          "description": "Delete a landed worktree without the confirmation modal. Only applies when the branch's commits are already contained in its base AND the checkout is clean, unlocked, attached, and holds no ignored files \u2014 `git worktree remove` deletes ignored files (a local .env, build output) without complaint, and the dirty probe cannot see them. Off = every delete is confirmed."
         },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
@@ -219,7 +224,7 @@
     "viewsWelcome": [
       {
         "view": "worktreeCompare.integration",
-        "contents": "Integration mode is off.\nCombine feature branches onto a base — without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
+        "contents": "Integration mode is off.\nCombine feature branches onto a base \u2014 without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
       }
     ],
     "commands": [
@@ -231,7 +236,7 @@
       },
       {
         "command": "worktreeCompare.selectWorktree",
-        "title": "Select Worktree…",
+        "title": "Select Worktree\u2026",
         "icon": "$(list-selection)",
         "category": "Git Workflow"
       },
@@ -247,7 +252,7 @@
       },
       {
         "command": "worktreeCompare.deleteWorktree",
-        "title": "Delete Worktree…",
+        "title": "Delete Worktree\u2026",
         "icon": "$(trash)",
         "category": "Git Workflow"
       },
@@ -282,14 +287,14 @@
       },
       {
         "command": "worktreeCompare.commitStaged",
-        "title": "Commit Staged…",
+        "title": "Commit Staged\u2026",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasStaged"
       },
       {
         "command": "worktreeCompare.commitUnstaged",
-        "title": "Commit Unstaged…",
+        "title": "Commit Unstaged\u2026",
         "icon": "$(check)",
         "category": "Git Workflow",
         "enablement": "worktreeCompare.hasUnstaged && !worktreeCompare.hasStaged"
@@ -340,7 +345,7 @@
       },
       {
         "command": "worktreeCompare.createWorktreeFromBranch",
-        "title": "Create Worktree…",
+        "title": "Create Worktree\u2026",
         "icon": "$(repo-clone)",
         "category": "Git Workflow"
       },
@@ -368,17 +373,17 @@
       },
       {
         "command": "worktreeCompare.absorbIntegrationCommits",
-        "title": "Absorb Integration Commits…",
+        "title": "Absorb Integration Commits\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.absorbIntegrationEdits",
-        "title": "Absorb Integration Edits…",
+        "title": "Absorb Integration Edits\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.enableIntegration",
-        "title": "Enable Integration Mode…",
+        "title": "Enable Integration Mode\u2026",
         "icon": "$(combine)",
         "category": "Git Workflow"
       },
@@ -404,28 +409,28 @@
       },
       {
         "command": "worktreeCompare.disableIntegration",
-        "title": "Disable Integration Mode…",
+        "title": "Disable Integration Mode\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.changeIntegrationBase",
-        "title": "Change Integration Base…",
+        "title": "Change Integration Base\u2026",
         "icon": "$(git-compare)",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.catchUpWithBase",
-        "title": "Catch Up with Base…",
+        "title": "Catch Up with Base\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.rebaseOntoBase",
-        "title": "Rebase onto Base…",
+        "title": "Rebase onto Base\u2026",
         "category": "Git Workflow"
       },
       {
         "command": "worktreeCompare.mergeFromBase",
-        "title": "Merge from Base…",
+        "title": "Merge from Base\u2026",
         "category": "Git Workflow"
       },
       {
@@ -450,7 +455,7 @@
       },
       {
         "command": "worktreeCompare.resolveLaneConflict",
-        "title": "Resolve Conflict with Base…",
+        "title": "Resolve Conflict with Base\u2026",
         "category": "Git Workflow"
       },
       {
@@ -473,7 +478,7 @@
       },
       {
         "command": "worktreeCompare.newFileInWorktree",
-        "title": "New File…",
+        "title": "New File\u2026",
         "icon": "$(new-file)",
         "category": "Git Workflow"
       },

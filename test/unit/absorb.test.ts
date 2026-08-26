@@ -90,6 +90,20 @@ describe('absorb', () => {
       expect(await findStrayCommits(integ, 'origin/main')).toEqual([]);
     });
 
+    it('records where the commit was absorbed from', async () => {
+      strayCommit('trace.txt', 'x\n', 'work that needs a paper trail');
+      const strayTip = git(integ, ['rev-parse', 'HEAD']);
+      await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
+      const body = git(scratch.repo, ['log', '-1', '--format=%B']);
+      // Identical provenance to the off-tree path — the two replays must
+      // not be tellable apart from the commit they leave behind.
+      expect(body).toContain(`(cherry picked from commit ${strayTip})`);
+      expect(body).toContain('Absorbed-from: integration/main');
+      expect(git(scratch.repo, ['log', '-1', '--format=%s'])).toBe(
+        'work that needs a paper trail',
+      );
+    });
+
     it('replays several commits oldest-first', async () => {
       strayCommit('a.txt', 'first\n', 'stray one');
       strayCommit('b.txt', 'second\n', 'stray two');
