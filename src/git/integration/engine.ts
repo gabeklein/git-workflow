@@ -104,10 +104,29 @@ export type RebuildResult =
     }
   | {
       ok: false;
-      code: 'busy' | 'dirty' | 'unique' | 'conflict' | 'error';
+      code: 'busy' | 'dirty' | 'unique' | 'conflict' | 'moved' | 'error';
       message: string;
       lane?: string;
     };
+
+/**
+ * The branch a checkout currently has, or '' when detached.
+ *
+ * A rebuild ends by resetting `workingPath` HARD, which is only ever safe
+ * while that checkout still holds the integration branch. Enabling
+ * integration by switching the ROOT checkout in place makes this a live
+ * hazard: pop out to the base to commit something, and a rebuild triggered
+ * by that very commit would reset the BASE branch onto the integration
+ * chain. The controller's cached integrationPath outlives the switch by
+ * however long it takes the next refresh to notice.
+ */
+async function checkedOutBranch(workingPath: string): Promise<string> {
+  return (
+    await git(workingPath, ['symbolic-ref', '-q', '--short', 'HEAD']).catch(
+      () => '',
+    )
+  ).trim();
+}
 
 export async function rebuildIntegration(
   workingPath: string,
@@ -332,6 +351,21 @@ export async function rebuildIntegration(
       );
     }
 
+    // Re-read the branch immediately before the reset, inside the lock:
+    // everything above is off-tree and harmless, this line is not. Checking
+    // here rather than on entry is deliberate — the checkout can be switched
+    // away at any point while the chain is being computed.
+    const branchNow = await checkedOutBranch(workingPath);
+    if (branchNow !== integrationBranch()) {
+      return {
+        ok: false,
+        code: 'moved',
+        message: `${workingPath} is on ${
+          branchNow || 'a detached HEAD'
+        }, not ${integrationBranch()} — refusing to reset it`,
+      };
+    }
+
     // Single working-tree update; git rewrites only files whose content changed
     await git(workingPath, ['reset', '--hard', current]);
     return { ok: true, lanes: merged, skipped, landed, resolved };
@@ -351,6 +385,17 @@ async function rebuildInWorktree(
   lanes: string[],
   landedSet: Set<string>,
 ): Promise<RebuildResult> {
+  // Same hazard, and this path resets before doing anything else
+  const branchNow = await checkedOutBranch(workingPath);
+  if (branchNow !== integrationBranch()) {
+    return {
+      ok: false,
+      code: 'moved',
+      message: `${workingPath} is on ${
+        branchNow || 'a detached HEAD'
+      }, not ${integrationBranch()} — refusing to reset it`,
+    };
+  }
   await git(workingPath, ['reset', '--hard', baseSha]);
   const skipped: string[] = [];
   const merged: string[] = [];
