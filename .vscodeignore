@@ -16,4 +16,5 @@ esbuild.js
 artifacts/**
 **/*.vsix
 .git/**
+.worktrees/**
 .vsix-unpack-tmp/**
