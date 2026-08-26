@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { git } from '../exec';
 import { commonDir } from './lanes';
 
 /**
@@ -14,26 +15,47 @@ import { commonDir } from './lanes';
  * The hook is the one place that can intervene while the intent still
  * exists — at `git commit`, in front of whoever (or whatever) typed it.
  *
+ * The refusal itself lives in its own script (GUARD_SCRIPT) so it can be
+ * CHAINED: a repo that already has a pre-commit hook keeps it, and gets a
+ * two-line call to ours at the top. Only one pre-commit hook can exist, so
+ * refusing to install alongside one would mean the guard is off exactly in
+ * the repos most likely to have agents committing in them.
+ *
  * Hooks are shared across every worktree of a repo (they live in the git
- * COMMON dir), so the script self-checks HEAD and exits 0 instantly
- * anywhere else. The guarded branch name is read from a state file rather
- * than baked into the script, so renaming the integration branch cannot
- * leave a hook guarding a name that no longer exists.
+ * COMMON dir, or wherever core.hooksPath points), so the script self-checks
+ * HEAD and exits 0 instantly anywhere else. The guarded branch name is read
+ * from a state file rather than baked into the script, so renaming the
+ * integration branch cannot leave a hook guarding a name that no longer
+ * exists.
  */
 
 export const GUARD_FILE = 'focus-guard';
 
-/** Line 2 of the script. Marks the hook as ours — and ONLY ours may be overwritten. */
+/** Standalone refusal, invoked by whatever pre-commit hook is in place. */
+const GUARD_SCRIPT = 'git-workflow-integration-guard';
+
+/** Marks a hook — or an injected block — as ours. Only ours may be rewritten. */
 const SENTINEL = '# git-workflow: integration commit guard';
 
-export type GuardState = 'ours' | 'foreign' | 'none';
-export type GuardInstall = 'installed' | 'updated' | 'unchanged' | 'foreign';
+/**
+ * The two lines chained into someone else's hook. Deliberately inert when
+ * anything is missing: a repo where the guard script was deleted by hand
+ * must still be able to commit, not fail every commit on a dangling call.
+ */
+const CHAIN = `${SENTINEL} (remove these 2 lines to stop guarding)
+gw_guard="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/${GUARD_SCRIPT}"; [ -x "$gw_guard" ] && { "$gw_guard" || exit $?; }`;
 
-function hookPath(dir: string): string {
-  return path.join(dir, 'hooks', 'pre-commit');
-}
+export type GuardState = 'ours' | 'chained' | 'foreign' | 'none';
+export type GuardInstall =
+  | 'installed'
+  | 'chained'
+  | 'updated'
+  | 'unchanged'
+  | 'foreign';
 
-const SCRIPT = `#!/bin/sh
+const SHELL_SHEBANG = /^#!\s*\/(usr\/bin\/env\s+)?\S*\b(sh|bash|dash|zsh|ksh)\b/;
+
+const REFUSAL = `#!/bin/sh
 ${SENTINEL}
 #
 # Refuses commits made while the derived integration branch is checked out.
@@ -68,6 +90,11 @@ echo
 exit 1
 `;
 
+/** A pre-commit hook of our own: nothing but the chain into the refusal. */
+const OWN_HOOK = `#!/bin/sh
+${CHAIN}
+`;
+
 async function read(file: string): Promise<string | undefined> {
   try {
     return await fs.readFile(file, 'utf8');
@@ -76,70 +103,143 @@ async function read(file: string): Promise<string | undefined> {
   }
 }
 
+/**
+ * Where git will actually look for hooks. core.hooksPath (husky and friends)
+ * wins over the common dir — writing to `.git/hooks` in a repo that sets it
+ * would install a guard git never runs, which is worse than not installing
+ * one at all, because it looks installed.
+ */
+async function hooksDir(cwd: string): Promise<string> {
+  const configured = await git(cwd, ['config', '--get', 'core.hooksPath'])
+    .then((v) => v.trim())
+    .catch(() => '');
+  if (!configured) {
+    return path.join(await commonDir(cwd), 'hooks');
+  }
+  if (path.isAbsolute(configured)) {
+    return configured;
+  }
+  // Relative hooksPath resolves against the top level of the WORKING TREE
+  const top = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim();
+  return path.resolve(top, configured);
+}
+
 function classify(existing: string | undefined): GuardState {
   if (existing === undefined) {
     return 'none';
   }
-  return existing.includes(SENTINEL) ? 'ours' : 'foreign';
-}
-
-/** Whether a pre-commit hook exists, and whether it is one we may replace. */
-export async function commitGuardState(cwd: string): Promise<GuardState> {
-  const dir = await commonDir(cwd);
-  return classify(await read(hookPath(dir)));
+  if (existing === OWN_HOOK) {
+    return 'ours';
+  }
+  return existing.includes(SENTINEL) ? 'chained' : 'foreign';
 }
 
 /**
- * Install (or refresh) the hook and point it at `branch`. A pre-commit hook
- * we did not write is never touched — losing someone's lint-staged setup to
- * a safety feature would be its own footgun.
+ * Put the chain immediately after the shebang, so the refusal happens before
+ * the other hook spends time on a commit that is about to be rejected.
+ */
+function inject(hook: string): string {
+  const lines = hook.split('\n');
+  const at = lines[0]?.startsWith('#!') ? 1 : 0;
+  lines.splice(at, 0, CHAIN);
+  return lines.join('\n');
+}
+
+function strip(hook: string): string {
+  const [marker] = CHAIN.split('\n');
+  const lines = hook.split('\n');
+  const at = lines.findIndex((l) => l === marker);
+  if (at < 0) {
+    return hook;
+  }
+  lines.splice(at, CHAIN.split('\n').length);
+  return lines.join('\n');
+}
+
+/** What is at pre-commit now, and whether we may write to it. */
+export async function commitGuardState(cwd: string): Promise<GuardState> {
+  const dir = await hooksDir(cwd);
+  return classify(await read(path.join(dir, 'pre-commit')));
+}
+
+/**
+ * Install (or refresh) the guard and point it at `branch`.
+ *
+ * A foreign pre-commit hook is CHAINED rather than replaced — but only when
+ * it is a shell script. Splicing `sh` into someone's Python or Node hook
+ * would break every commit in the repo, so those are left strictly alone
+ * and reported as 'foreign'.
  */
 export async function installCommitGuard(
   cwd: string,
   branch: string,
 ): Promise<GuardInstall> {
-  const dir = await commonDir(cwd);
-  const hook = hookPath(dir);
+  const dir = await hooksDir(cwd);
+  const marker = path.join(await commonDir(cwd), GUARD_FILE);
+  const guard = path.join(dir, GUARD_SCRIPT);
+  const hook = path.join(dir, 'pre-commit');
   const existing = await read(hook);
   const state = classify(existing);
-  if (state === 'foreign') {
+
+  if (state === 'foreign' && !SHELL_SHEBANG.test(existing ?? '')) {
     return 'foreign';
   }
-  const marker = path.join(dir, GUARD_FILE);
-  // 'unchanged' has to mean BOTH halves already agree: the script rarely
-  // changes, but the branch it points at does (rename, base change), and a
+
+  await fs.mkdir(dir, { recursive: true });
+  // 'unchanged' has to mean every part already agrees: the scripts rarely
+  // change, but the branch they point at does (rename, base change), and a
   // caller logging only real changes needs that to show up.
-  const settled = existing === SCRIPT && (await read(marker))?.trim() === branch;
+  const settled =
+    state !== 'none' &&
+    state !== 'foreign' &&
+    (await read(guard)) === REFUSAL &&
+    (await read(marker))?.trim() === branch;
   if (settled) {
     return 'unchanged';
   }
-  await fs.mkdir(path.dirname(hook), { recursive: true });
+
   await fs.writeFile(marker, `${branch}\n`);
-  if (existing !== SCRIPT) {
-    await fs.writeFile(hook, SCRIPT, { mode: 0o755 });
-    // writeFile does not chmod a file that already existed
-    await fs.chmod(hook, 0o755);
+  await fs.writeFile(guard, REFUSAL, { mode: 0o755 });
+  // writeFile does not chmod a file that already existed
+  await fs.chmod(guard, 0o755);
+
+  if (state === 'chained') {
+    return 'updated';
   }
-  return state === 'ours' ? 'updated' : 'installed';
+  if (state === 'foreign') {
+    await fs.writeFile(hook, inject(existing ?? ''));
+    await fs.chmod(hook, 0o755);
+    return 'chained';
+  }
+  if (state === 'ours') {
+    return 'updated';
+  }
+  await fs.writeFile(hook, OWN_HOOK, { mode: 0o755 });
+  await fs.chmod(hook, 0o755);
+  return 'installed';
 }
 
 /**
- * Stop guarding. The state file goes first so the hook is inert the instant
- * this starts, even if removing the script fails; a hook we did not write
- * stays where it is.
+ * Stop guarding. The state file goes first so the guard is inert the instant
+ * this starts, even if the rest fails. A hook we merely chained into keeps
+ * everything that was already there — only our two lines come out.
  */
 export async function uninstallCommitGuard(cwd: string): Promise<void> {
-  const dir = await commonDir(cwd);
-  await fs.rm(path.join(dir, GUARD_FILE), { force: true });
-  const hook = hookPath(dir);
-  if (classify(await read(hook)) === 'ours') {
+  await fs.rm(path.join(await commonDir(cwd), GUARD_FILE), { force: true });
+  const dir = await hooksDir(cwd);
+  const hook = path.join(dir, 'pre-commit');
+  const existing = await read(hook);
+  const state = classify(existing);
+  if (state === 'ours') {
     await fs.rm(hook, { force: true });
+  } else if (state === 'chained') {
+    await fs.writeFile(hook, strip(existing ?? ''));
   }
+  await fs.rm(path.join(dir, GUARD_SCRIPT), { force: true });
 }
 
-/** The branch the installed hook is currently refusing commits on, if any. */
+/** The branch the installed guard is currently refusing commits on, if any. */
 export async function guardedBranch(cwd: string): Promise<string | undefined> {
-  const dir = await commonDir(cwd);
-  const raw = await read(path.join(dir, GUARD_FILE));
+  const raw = await read(path.join(await commonDir(cwd), GUARD_FILE));
   return raw?.trim() || undefined;
 }

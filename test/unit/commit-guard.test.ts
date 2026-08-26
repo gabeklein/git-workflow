@@ -12,7 +12,8 @@ import { git, makeRepo, type ScratchRepo } from './helpers';
 /**
  * The guard has to be right about three things: it refuses commits on the
  * guarded branch, it is invisible everywhere else (hooks are shared by every
- * worktree of the repo), and it never touches a hook someone else wrote.
+ * worktree of the repo), and it never costs anyone the hook they already
+ * had — a repo may only have one pre-commit, so ours chains into theirs.
  */
 describe('integration commit guard', () => {
   let scratch: ScratchRepo;
@@ -51,6 +52,12 @@ describe('integration commit guard', () => {
     expect(await guardedBranch(scratch.repo)).toBe('integration/main');
     // eslint-disable-next-line no-bitwise
     expect(fs.statSync(hook).mode & 0o111).toBeTruthy();
+    // eslint-disable-next-line no-bitwise
+    expect(
+      fs.statSync(
+        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-integration-guard'),
+      ).mode & 0o111,
+    ).toBeTruthy();
   });
 
   it('refuses a commit on the guarded branch', async () => {
@@ -101,18 +108,116 @@ describe('integration commit guard', () => {
     );
   });
 
-  it('never replaces a hook it did not write', async () => {
-    fs.mkdirSync(path.dirname(hook), { recursive: true });
-    const theirs = '#!/bin/sh\nexit 0\n';
-    fs.writeFileSync(hook, theirs, { mode: 0o755 });
-    expect(await commitGuardState(scratch.repo)).toBe('foreign');
+  describe('an existing pre-commit hook', () => {
+    /** Someone else's hook: side effect proves it still runs, exit 1 on veto. */
+    const theirs = (extra = '') =>
+      `#!/bin/sh\n${extra}echo theirs >> "$(git rev-parse --show-toplevel)/ran.log"\n`;
+
+    function writeHook(body: string) {
+      fs.mkdirSync(path.dirname(hook), { recursive: true });
+      fs.writeFileSync(hook, body, { mode: 0o755 });
+    }
+
+    const ranLog = () => {
+      try {
+        return fs.readFileSync(path.join(scratch.repo, 'ran.log'), 'utf8');
+      } catch {
+        return '';
+      }
+    };
+
+    it('is chained into, not replaced — and still runs', async () => {
+      writeHook(theirs());
+      expect(await commitGuardState(scratch.repo)).toBe('foreign');
+      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+        'chained',
+      );
+      expect(await commitGuardState(scratch.repo)).toBe('chained');
+      // Their body survived verbatim
+      expect(fs.readFileSync(hook, 'utf8')).toContain('echo theirs >>');
+      expect(tryCommit(scratch.repo, 'ordinary')).toBe(true);
+      expect(ranLog()).toContain('theirs');
+    });
+
+    it('refuses on the guarded branch, before their hook does any work', async () => {
+      writeHook(theirs());
+      await installCommitGuard(scratch.repo, 'integration/main');
+      git(scratch.repo, ['checkout', '-q', 'integration/main']);
+      expect(tryCommit(scratch.repo, 'stray')).toBe(false);
+      // The chain sits above their body — no point running it for a commit
+      // that is already rejected.
+      expect(ranLog()).toBe('');
+    });
+
+    it('keeps their veto working', async () => {
+      writeHook(theirs('exit 1\n'));
+      await installCommitGuard(scratch.repo, 'integration/main');
+      expect(tryCommit(scratch.repo, 'they-say-no')).toBe(false);
+    });
+
+    it('goes in below the shebang, so it is still a valid script', async () => {
+      writeHook(theirs());
+      await installCommitGuard(scratch.repo, 'integration/main');
+      const lines = fs.readFileSync(hook, 'utf8').split('\n');
+      expect(lines[0]).toBe('#!/bin/sh');
+      expect(lines[1]).toContain('git-workflow');
+    });
+
+    it('uninstall removes our two lines and nothing else', async () => {
+      const body = theirs();
+      writeHook(body);
+      await installCommitGuard(scratch.repo, 'integration/main');
+      await uninstallCommitGuard(scratch.repo);
+      expect(fs.readFileSync(hook, 'utf8')).toBe(body);
+      expect(await commitGuardState(scratch.repo)).toBe('foreign');
+    });
+
+    it('does not chain twice', async () => {
+      writeHook(theirs());
+      await installCommitGuard(scratch.repo, 'integration/main');
+      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+        'unchanged',
+      );
+      const body = fs.readFileSync(hook, 'utf8');
+      expect(body.split('git-workflow: integration commit guard').length - 1).toBe(1);
+    });
+
+    it('is left strictly alone when it is NOT a shell script', async () => {
+      // Splicing sh into a python hook would break every commit in the repo
+      const python = '#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n';
+      writeHook(python);
+      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+        'foreign',
+      );
+      expect(fs.readFileSync(hook, 'utf8')).toBe(python);
+      await uninstallCommitGuard(scratch.repo);
+      expect(fs.readFileSync(hook, 'utf8')).toBe(python);
+    });
+
+    it('survives a dangling guard script instead of failing every commit', async () => {
+      writeHook(theirs());
+      await installCommitGuard(scratch.repo, 'integration/main');
+      fs.rmSync(
+        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-integration-guard'),
+      );
+      git(scratch.repo, ['checkout', '-q', 'integration/main']);
+      expect(tryCommit(scratch.repo, 'guard-gone')).toBe(true);
+    });
+  });
+
+  it('follows core.hooksPath instead of installing where git will not look', async () => {
+    // husky and friends. Writing to .git/hooks here would LOOK installed
+    // while never running — worse than not installing at all.
+    const custom = path.join(scratch.repo, '.husky');
+    fs.mkdirSync(custom, { recursive: true });
+    git(scratch.repo, ['config', 'core.hooksPath', '.husky']);
     expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
-      'foreign',
+      'installed',
     );
-    expect(fs.readFileSync(hook, 'utf8')).toBe(theirs);
-    // ...and leaves it alone on the way out, too
-    await uninstallCommitGuard(scratch.repo);
-    expect(fs.readFileSync(hook, 'utf8')).toBe(theirs);
+    expect(fs.existsSync(path.join(custom, 'pre-commit'))).toBe(true);
+    expect(fs.existsSync(hook)).toBe(false);
+    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    expect(tryCommit(scratch.repo, 'stray')).toBe(false);
   });
 
   it('uninstall removes our hook and stops refusing', async () => {

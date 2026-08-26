@@ -167,7 +167,7 @@
         "worktreeCompare.integrationCommitGuard": {
           "type": "boolean",
           "default": true,
-          "description": "Install a pre-commit hook that refuses commits made while the integration branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. A pre-commit hook this extension did not write is never replaced."
+          "description": "Install a pre-commit hook that refuses commits made while the integration branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
         },
         "worktreeCompare.quickDeleteLandedWorktrees": {
           "type": "boolean",

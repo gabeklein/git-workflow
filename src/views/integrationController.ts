@@ -567,11 +567,13 @@ export class IntegrationController implements vscode.Disposable {
       const result = await installCommitGuard(cwd, branch);
       if (result === 'foreign') {
         this.host.output.appendLine(
-          `Commit guard not installed: ${cwd} already has a pre-commit hook this extension did not write — leaving it alone`,
+          `Commit guard not installed: ${cwd} has a pre-commit hook that is not a shell script — chaining into it could break every commit, so it was left alone`,
         );
       } else if (result !== 'unchanged') {
         this.host.output.appendLine(
-          `Commit guard ${result}: refusing commits on ${branch}`,
+          result === 'chained'
+            ? `Commit guard chained into the existing pre-commit hook: refusing commits on ${branch}`
+            : `Commit guard ${result}: refusing commits on ${branch}`,
         );
       }
     } catch (err) {
