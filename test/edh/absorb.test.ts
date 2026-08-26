@@ -29,7 +29,15 @@ describe('absorbing stray integration work', () => {
 
     // No command: the tick's fingerprint carries a stray component, so the
     // rebuild that trips the guard also runs the rescue.
-    await poll('stray edit lands on main', 40000, () =>
+    //
+    // 60s, deliberately: the tick is watcher-driven, and when a .git event
+    // is missed or coalesced the next one comes from GitActivityHub's
+    // POLL_FALLBACK_MS fallback — 30s. Latency here is bimodal, sub-second
+    // or a random slice of that window, so the bound has to clear 30s plus
+    // a rebuild or this flakes on a loaded runner. Nudging with a manual
+    // rebuild would be faster but would stop testing the tick path, which
+    // is the whole point of this scenario.
+    await poll('stray edit lands on main', 60000, () =>
       git(repo, ['log', 'main', '-5', '--format=%s']).includes(
         'agent edits README on integration',
       ),
