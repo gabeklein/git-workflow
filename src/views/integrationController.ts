@@ -41,6 +41,7 @@ import {
   rebuildIntegration,
   setWipLane,
   type AbsorbResult,
+  type AbsorbTarget,
   type RebuildResult,
   type ResolvedLane,
 } from '../git/integration';
@@ -754,12 +755,27 @@ export class IntegrationController implements vscode.Disposable {
    * already a first-class lane with Catch Up and Move-to-Branch exits —
    * so the rescue needs no escape hatches of its own.
    */
-  private async absorbTarget(): Promise<string | undefined> {
+  private async absorbTarget(): Promise<AbsorbTarget | undefined> {
     if (!this.integrationPath) {
       return undefined;
     }
     const baseName = integrationBaseRef().replace(/^origin\//, '');
-    return checkoutForBranch(this.integrationPath, baseName);
+    if (!(await gitOk(this.integrationPath, [
+      'rev-parse',
+      '-q',
+      '--verify',
+      `refs/heads/${baseName}`,
+    ]))) {
+      return undefined; // no base branch at all — nothing to absorb into
+    }
+    const path = await checkoutForBranch(this.integrationPath, baseName);
+    // Prefer a checkout so the replay leaves its working tree consistent;
+    // fall back to the ref, which is the ONLY option when integration was
+    // enabled by switching a checkout in place — the base then has no
+    // worktree of its own.
+    return path
+      ? { kind: 'checkout', path, branch: baseName }
+      : { kind: 'ref', branch: baseName };
   }
 
   /**
@@ -788,12 +804,12 @@ export class IntegrationController implements vscode.Disposable {
     const target = await this.absorbTarget();
     if (!target) {
       this.host.output.appendLine(
-        'Integration strays: no checkout for the base branch — cannot absorb',
+        'Integration strays: the base branch does not exist — cannot absorb',
       );
       return {
         ok: false,
         code: 'no-target',
-        message: 'the base branch has no worktree to absorb into',
+        message: 'the base branch does not exist locally',
       };
     }
     // Added files are the one shape a replay cannot vet (see
@@ -891,17 +907,22 @@ export class IntegrationController implements vscode.Disposable {
       return { ok: false, code: 'error', message: 'no integration worktree' };
     }
     const target = await this.absorbTarget();
-    if (!target) {
+    // Uncommitted work has to land in a working tree, so unlike stray
+    // COMMITS this one cannot fall back to the ref. Committing it on the
+    // user's behalf would be deciding the work is finished.
+    if (target?.kind !== 'checkout') {
       return {
         ok: false,
         code: 'no-target',
-        message: 'the base branch has no worktree to absorb into',
+        message: target
+          ? `${target.branch} has no worktree — check it out somewhere, or commit these edits and let them absorb`
+          : 'the base branch does not exist locally',
       };
     }
-    const result = await absorbDirtyEdits(workingPath, target);
+    const result = await absorbDirtyEdits(workingPath, target.path);
     if (result.ok) {
       this.host.output.appendLine(
-        `Absorbed uncommitted integration edits into ${target}`,
+        `Absorbed uncommitted integration edits into ${target.path}`,
       );
       // The checkout is clean again — the dirty guard no longer blocks
       await this.runRebuild('absorbed edits');

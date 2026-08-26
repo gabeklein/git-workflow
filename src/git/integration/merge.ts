@@ -8,7 +8,12 @@ export async function mergeOffTree(
   cwd: string,
   ours: string,
   theirs: string,
-  opts?: { strict?: boolean },
+  opts?: {
+    strict?: boolean;
+    /** Explicit merge base — gives cherry-pick semantics (replay THEIRS
+     *  relative to this) instead of the common ancestor of ours/theirs. */
+    mergeBase?: string;
+  },
 ): Promise<
   | { kind: 'tree'; tree: string }
   | { kind: 'conflict'; files: string[]; tree: string }
@@ -22,6 +27,7 @@ export async function mergeOffTree(
       // strict: decisions (like landed detection) must not vary with the
       // user's auto-resolve preference
       ...(opts?.strict ? [] : autoResolveArgs()),
+      ...(opts?.mergeBase ? [`--merge-base=${opts.mergeBase}`] : []),
       ours,
       theirs,
     ]);
