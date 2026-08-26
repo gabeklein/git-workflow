@@ -42,3 +42,27 @@ export function gitErrorMessage(err: unknown): string {
   }
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Files a checkout holds that git ignores — invisible to isWorktreeDirty,
+ * and deleted without complaint by `git worktree remove`. Untracked files
+ * make remove refuse on their own; ignored ones do not, so this is the
+ * only warning a caller can give before they go.
+ */
+export async function ignoredFiles(dir: string): Promise<string[]> {
+  try {
+    const out = await git(dir, [
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--ignored=matching',
+      '-unormal',
+    ]);
+    return out
+      .split('\0')
+      .filter((entry) => entry.startsWith('!! '))
+      .map((entry) => entry.slice(3));
+  } catch {
+    return [];
+  }
+}
