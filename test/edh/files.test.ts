@@ -1,6 +1,8 @@
 /**
- * The Files panel: an explorer for the FOCUSED worktree — git-driven
- * listing (ignores respected), files open as real editable buffers.
+ * The Directory SECTION of the Changes panel: an explorer for the FOCUSED
+ * worktree — git-driven listing (ignores respected), files open as real
+ * editable buffers. Read through the Changes provider, so a section that
+ * stopped rendering fails here rather than passing on the sub-provider.
  * Runs early: it only reads lane state and adds/removes its own files.
  */
 import * as assert from 'node:assert/strict';
@@ -9,7 +11,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { getApi, laneA, laneB, poll, run, type TestApi } from './helpers';
 
-describe('files panel', () => {
+describe('directory section', () => {
   let api: TestApi;
   before(async () => {
     api = await getApi();
@@ -26,6 +28,20 @@ describe('files panel', () => {
 
   const rootLabels = async () =>
     (await api.explorerChildren()).map((n) => n.label);
+
+  it('renders below the diff sections, not as its own panel', async () => {
+    await run('worktreeCompare.focusWorktree', laneA);
+    await poll('Changes shows the Directory group', 30000, async () =>
+      (await api.changesRows()).some((r) => r.label === 'Directory'),
+    );
+    const labels = (await api.changesRows()).map((r) => r.label);
+    // Directory last: the diffs are what the panel is opened for
+    assert.equal(labels[labels.length - 1], 'Directory');
+    assert.ok(
+      labels.some((l) => l.startsWith('Commits')),
+      'the diff half is still there',
+    );
+  });
 
   it('lists the focused worktree and follows selection', async () => {
     await poll('explorer lists the focused lane', 30000, async () => {

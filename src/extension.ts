@@ -63,21 +63,15 @@ export function activate(context: vscode.ExtensionContext): unknown {
   });
   context.subscriptions.push(treeView);
 
-  const changesProvider = new ChangesTreeProvider(treeProvider);
+  const filesProvider = new FilesTreeProvider(treeProvider);
+  context.subscriptions.push(filesProvider);
+  const changesProvider = new ChangesTreeProvider(treeProvider, filesProvider);
   context.subscriptions.push(changesProvider);
   const changesView = vscode.window.createTreeView('worktreeCompare.changes', {
     treeDataProvider: changesProvider,
     showCollapseAll: true,
   });
   context.subscriptions.push(changesView);
-
-  const filesProvider = new FilesTreeProvider(treeProvider);
-  context.subscriptions.push(filesProvider);
-  const filesView = vscode.window.createTreeView('worktreeCompare.files', {
-    treeDataProvider: filesProvider,
-    showCollapseAll: true,
-  });
-  context.subscriptions.push(filesView);
 
   // Panel descriptions: worktree count / which worktree the Changes show
   const updateSplitViewDescriptions = () => {
@@ -90,7 +84,6 @@ export function activate(context: vscode.ExtensionContext): unknown {
     changesView.description = selected
       ? selected.branch + (selected.detached ? ' (detached)' : '')
       : undefined;
-    filesView.description = changesView.description;
   };
   updateSplitViewDescriptions();
   context.subscriptions.push(
@@ -200,20 +193,28 @@ export function activate(context: vscode.ExtensionContext): unknown {
           treeProvider.setBaseDriftIncluded(included),
         // RENDERED Integration rows — the exact TreeItems VS Code paints
         // (state hooks alone let "state right, row missing" bugs pass)
-        explorerChildren: async (folderRelPath?: string) =>
-          (
-            await filesProvider.getChildren(
-              folderRelPath
-                ? ({
-                    kind: 'explorerFolder',
-                    relPath: folderRelPath,
-                  } as Parameters<FilesTreeProvider['getChildren']>[0])
-                : undefined,
-            )
-          ).map((n) => ({
+        // Through the CHANGES provider, not the files one: routing around
+        // the panel would let "section missing from Changes" pass green.
+        explorerChildren: async (folderRelPath?: string) => {
+          const parent = folderRelPath
+            ? ({ kind: 'explorerFolder', relPath: folderRelPath } as never)
+            : (await changesProvider.getChildren()).find(
+                (n) => n.kind === 'group' && n.group === 'directory',
+              );
+          const rows = parent
+            ? await changesProvider.getChildren(parent)
+            : [];
+          return rows.map((n) => ({
             kind: n.kind,
             label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
             path: n.resourceUri?.fsPath,
+          }));
+        },
+        /** Top-level Changes rows, in render order. */
+        changesRows: async () =>
+          (await changesProvider.getChildren()).map((n) => ({
+            kind: n.kind,
+            label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
           })),
         focusRows: async (group?: 'worktrees' | 'branches' | 'remote') => {
           const parent = group

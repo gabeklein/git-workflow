@@ -209,10 +209,6 @@
           "name": "Changes"
         },
         {
-          "id": "worktreeCompare.files",
-          "name": "Files"
-        },
-        {
           "id": "worktreeCompare.integration",
           "name": "Integration"
         }
@@ -520,16 +516,6 @@
           "group": "navigation@4"
         },
         {
-          "command": "worktreeCompare.newFileInWorktree",
-          "when": "view == worktreeCompare.files",
-          "group": "navigation@1"
-        },
-        {
-          "command": "worktreeCompare.refreshFiles",
-          "when": "view == worktreeCompare.files",
-          "group": "navigation@2"
-        },
-        {
           "command": "worktreeCompare.rebuildIntegration",
           "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
           "group": "navigation@1"
@@ -578,12 +564,12 @@
         },
         {
           "command": "worktreeCompare.newFileInWorktree",
-          "when": "view == worktreeCompare.files && viewItem == explorerFolder",
+          "when": "view == worktreeCompare.changes && viewItem == explorerFolder",
           "group": "1_files@1"
         },
         {
           "command": "worktreeCompare.deleteWorktreeEntry",
-          "when": "view == worktreeCompare.files && viewItem =~ /^explorer(File|Folder)$/",
+          "when": "view == worktreeCompare.changes && viewItem =~ /^explorer(File|Folder)$/",
           "group": "9_danger@1"
         },
         {
@@ -765,6 +751,16 @@
           "command": "worktreeCompare.syncWithRemote",
           "when": "view == worktreeCompare.focus && viewItem =~ /^branch/",
           "group": "0_github@9"
+        },
+        {
+          "command": "worktreeCompare.newFileInWorktree",
+          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "group": "inline@1"
+        },
+        {
+          "command": "worktreeCompare.refreshFiles",
+          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "group": "inline@2"
         }
       ]
     }

@@ -31,13 +31,16 @@ export interface TestApi {
     error?: unknown;
   } | undefined;
   setBaseDriftIncluded(included: boolean): Promise<unknown>;
-  /** Files-panel rows for the focused worktree (pass a folder's relative
-   *  path to descend). Rows: kind, label, absolute path. */
+  /** Directory-section rows for the focused worktree, read through the
+   *  Changes panel (pass a folder's relative path to descend). Rows: kind,
+   *  label, absolute path. */
   explorerChildren(folderRelPath?: string): Promise<{
     kind: string;
     label: string;
     path?: string;
   }[]>;
+  /** Top-level Changes rows, in render order. */
+  changesRows(): Promise<{ kind: string; label: string }[]>;
   /** The RENDERED Focus panel rows; pass a group to list its children. */
   focusRows(group?: 'worktrees' | 'branches' | 'remote'): Promise<
     {

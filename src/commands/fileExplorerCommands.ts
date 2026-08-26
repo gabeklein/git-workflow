@@ -7,7 +7,7 @@ import type {
 } from '../views/filesTree';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
-/** Commands for the focused-worktree Files panel. */
+/** Commands for the Directory section of the Changes panel. */
 export function registerFileExplorerCommands(
   treeProvider: WorktreeTreeProvider,
   filesProvider: FilesTreeProvider,
@@ -19,8 +19,9 @@ export function registerFileExplorerCommands(
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.newFileInWorktree',
-      // Folder context menus pass the item; the title button passes
-      // nothing; tests/automation may pass the relative path directly.
+      // Folder context menus pass the folder; the Directory group row passes a
+      // GroupItem, which is not a folder and correctly means "at the root";
+      // tests/automation may pass the relative path directly.
       async (item?: ExplorerFolderItem, nameArg?: unknown) => {
         const selected = treeProvider.getSelectedPath();
         if (!selected) {
