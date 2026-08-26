@@ -11,6 +11,7 @@ import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { integrationBaseRef } from './git/integration';
 import { createFileBackedLogger } from './log';
 import { BranchesTreeProvider } from './views/branchesTree';
+import { FocusTreeProvider } from './views/focusTree';
 import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
 import { IntegrationTreeProvider } from './views/integrationTree';
@@ -47,8 +48,14 @@ export function activate(context: vscode.ExtensionContext): unknown {
   );
   syncBranchWorktrees();
 
-  const treeView = vscode.window.createTreeView('worktreeCompare.worktrees', {
-    treeDataProvider: treeProvider,
+  // One panel for checkouts AND branches: a worktree is an activity status
+  // of a branch, so they belong in one ordered list rather than two views
+  // that show the same branch twice.
+  const focusProvider = new FocusTreeProvider(treeProvider, branchesProvider);
+  context.subscriptions.push(focusProvider);
+  const treeView = vscode.window.createTreeView('worktreeCompare.focus', {
+    treeDataProvider: focusProvider,
+    showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
 
@@ -165,14 +172,6 @@ export function activate(context: vscode.ExtensionContext): unknown {
     }),
   );
 
-  const branchesView = vscode.window.createTreeView(
-    'worktreeCompare.branches',
-    {
-      treeDataProvider: branchesProvider,
-      showCollapseAll: true,
-    },
-  );
-  context.subscriptions.push(branchesView);
   context.subscriptions.push(
     ...registerWorktreeCommands(treeProvider, log),
     ...registerIntegrationCommands(context, treeProvider, log),
@@ -212,6 +211,24 @@ export function activate(context: vscode.ExtensionContext): unknown {
             label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
             path: n.resourceUri?.fsPath,
           })),
+        focusRows: async (group?: 'branches' | 'remote') => {
+          const parent = group
+            ? (await focusProvider.getChildren()).find(
+                (n) => n.kind === 'group' && n.group === group,
+              )
+            : undefined;
+          return (await focusProvider.getChildren(parent)).map((item) => ({
+            kind: (item as { kind?: string }).kind,
+            group: (item as { group?: string }).group,
+            label:
+              typeof item.label === 'string'
+                ? item.label
+                : (item.label?.label ?? ''),
+            description:
+              typeof item.description === 'string' ? item.description : '',
+            contextValue: item.contextValue,
+          }));
+        },
         integrationRows: () =>
           integrationProvider.getChildren().map((item) => ({
             kind: (item as { kind?: string }).kind,

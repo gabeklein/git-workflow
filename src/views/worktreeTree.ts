@@ -940,10 +940,19 @@ export class WorktreeTreeProvider
   }
 
   private getWorktreeListChildren(): TreeNode[] {
+    return this.listedWorktrees().map((wt) => this.buildCheckoutRow(wt));
+  }
+
+  /**
+   * One checkout row, with its PR, lane role and base status attached.
+   * Public so the Focus panel can order the checkouts itself and still get
+   * rows built the one way.
+   */
+  buildCheckoutRow(wt: DiscoveredWorktree): TreeNode {
     const selected = this.getSelectedPath();
     const baseRef = integrationBaseRef();
     const state = this.integration.getState();
-    return this.listedWorktrees().map((wt) => {
+    return ((): TreeNode => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);
       let integration: IntegrationRowInfo | undefined;
@@ -968,7 +977,7 @@ export class WorktreeTreeProvider
           ? baseStatus
           : undefined,
       );
-    });
+    })();
   }
 
   /** Commits ahead of compare point (merge-base of integration tip by default). */
