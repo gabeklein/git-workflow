@@ -10,6 +10,21 @@ export const WORKTREE_URI_SCHEME = 'git-workflow-wt';
  */
 export const WORKTREE_FILE_URI_SCHEME = 'git-workflow-file';
 
+/**
+ * Branch rows. A lane is a branch REF — a worktree is not required to merge
+ * one — so a branch with no checkout can still be in the preview and needs
+ * somewhere to hang its badge.
+ */
+export const BRANCH_URI_SCHEME = 'git-workflow-branch';
+
+export function branchResourceUri(branch: string): vscode.Uri {
+  return vscode.Uri.from({ scheme: BRANCH_URI_SCHEME, path: `/${branch}` });
+}
+
+export function branchFromUri(uri: vscode.Uri): string {
+  return uri.path.replace(/^\//, '');
+}
+
 export function worktreeResourceUri(fsPath: string): vscode.Uri {
   // Normalize to a stable path form for Uri equality
   const asFile = vscode.Uri.file(fsPath);
@@ -44,6 +59,7 @@ export class WorktreeRowDecorationProvider
 {
   private selectedPath: string | undefined;
   private appliedPaths = new Set<string>();
+  private appliedBranches = new Set<string>();
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
     vscode.Uri | vscode.Uri[] | undefined
   >();
@@ -71,25 +87,43 @@ export class WorktreeRowDecorationProvider
     this._onDidChangeFileDecorations.fire(uris.length > 0 ? uris : undefined);
   }
 
-  /** Checkouts whose branch is currently merged into the preview. */
-  setAppliedPaths(paths: Iterable<string>): void {
-    const next = new Set(paths);
-    if (
-      next.size === this.appliedPaths.size &&
-      [...next].every((p) => this.appliedPaths.has(p))
-    ) {
+  /**
+   * What is currently merged into the preview: checkout paths for rows that
+   * have one, branch names for rows that do not. Both kinds of row wear the
+   * same badge, because membership is a property of the branch either way.
+   */
+  setApplied(applied: {
+    paths: Iterable<string>;
+    branches: Iterable<string>;
+  }): void {
+    const paths = new Set(applied.paths);
+    const branches = new Set(applied.branches);
+    const same = (a: Set<string>, b: Set<string>) =>
+      a.size === b.size && [...a].every((x) => b.has(x));
+    if (same(paths, this.appliedPaths) && same(branches, this.appliedBranches)) {
       return;
     }
-    const changed = [...new Set([...next, ...this.appliedPaths])];
-    this.appliedPaths = next;
-    this._onDidChangeFileDecorations.fire(
-      changed.map((p) => worktreeResourceUri(p)),
-    );
+    const changed = [
+      ...[...new Set([...paths, ...this.appliedPaths])].map((p) =>
+        worktreeResourceUri(p),
+      ),
+      ...[...new Set([...branches, ...this.appliedBranches])].map((b) =>
+        branchResourceUri(b),
+      ),
+    ];
+    this.appliedPaths = paths;
+    this.appliedBranches = branches;
+    this._onDidChangeFileDecorations.fire(changed);
   }
 
   provideFileDecoration(
     uri: vscode.Uri,
   ): vscode.ProviderResult<vscode.FileDecoration> {
+    if (uri.scheme === BRANCH_URI_SCHEME) {
+      return this.appliedBranches.has(branchFromUri(uri))
+        ? { badge: '●', tooltip: 'In the integration preview' }
+        : undefined;
+    }
     if (uri.scheme !== WORKTREE_URI_SCHEME) {
       return undefined;
     }

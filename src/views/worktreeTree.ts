@@ -940,17 +940,21 @@ export class WorktreeTreeProvider
   /** Worktrees shown in the list — the integration checkout lives under
    *  the Integration row instead. */
   /**
-   * Tell the decoration provider which checkouts are in the preview. Keyed
-   * by path because that is what a row's resourceUri carries; a lane with no
-   * checkout has no row to decorate.
+   * Tell the decoration provider what is in the preview — checkout paths
+   * for rows that have one, branch names for the rest, since a row keys its
+   * decoration on whichever it carries.
    */
   private syncAppliedDecorations(): void {
     const applied = new Set(this.integration.getState()?.lanes ?? []);
-    this.selectionDecorations.setAppliedPaths(
-      this.worktrees
-        .filter((w) => !w.detached && applied.has(w.branch))
-        .map((w) => w.path),
+    const withCheckout = this.worktrees.filter(
+      (w) => !w.detached && applied.has(w.branch),
     );
+    this.selectionDecorations.setApplied({
+      paths: withCheckout.map((w) => w.path),
+      // A lane needs no worktree — it is merged from its ref — so applied
+      // branches without a checkout are badged on their branch row instead.
+      branches: applied,
+    });
   }
 
   private listedWorktrees(): DiscoveredWorktree[] {

@@ -9,7 +9,11 @@ import {
   type PullRequestInfo,
 } from '../github/pr';
 import type { RemotePullRequest } from '../github/remotePrs';
-import { worktreeFileUri, worktreeResourceUri } from './worktreeDecorations';
+import {
+  branchResourceUri,
+  worktreeFileUri,
+  worktreeResourceUri,
+} from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
@@ -85,6 +89,9 @@ export class BranchItem extends vscode.TreeItem {
       pr ? 'WithPr' : '',
     ].join('');
     this.contextValue = `branch${flags}`;
+    // Lets the row carry the preview-membership badge; the icon is set
+    // explicitly below, so this never drives file-icon theming.
+    this.resourceUri = branchResourceUri(branch);
 
     const tags: string[] = [];
     if (worktreePath) {
