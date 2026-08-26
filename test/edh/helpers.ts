@@ -38,11 +38,11 @@ export interface TestApi {
     label: string;
     path?: string;
   }[]>;
-  /** The RENDERED Focus panel rows; pass a group to expand it. */
-  focusRows(group?: 'branches' | 'remote'): Promise<
+  /** The RENDERED Focus panel rows — one flat list, separators included. */
+  focusRows(): Promise<
     {
       kind?: string;
-      group?: string;
+      section?: string;
       label: string;
       description: string;
       contextValue?: string;

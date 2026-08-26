@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { integrationBranch } from '../git/integration';
-import { BranchItem, GroupItem, MessageItem, type TreeNode } from './nodes';
+import {
+  BranchItem,
+  MessageItem,
+  SectionSeparatorItem,
+  type TreeNode,
+} from './nodes';
 import { planFocusRows } from './focusPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
@@ -18,6 +23,11 @@ import type { WorktreeTreeProvider } from './worktreeTree';
  * selection and integration; BranchesTreeProvider owns the branch list and
  * PR association. This provider only decides what the rows are.
  */
+const SECTION_KEY = {
+  branches: 'worktreeCompare.focus.branchesVisible',
+  remote: 'worktreeCompare.focus.remoteVisible',
+} as const;
+
 export class FocusTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
 {
@@ -27,10 +37,23 @@ export class FocusTreeProvider
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly disposables: vscode.Disposable[] = [];
 
+  /** Which sections are unfolded; remembered per workspace. */
+  private visible: { branches: boolean; remote: boolean };
+
   constructor(
     private readonly worktrees: WorktreeTreeProvider,
     private readonly branches: BranchesTreeProvider,
+    private readonly memento?: {
+      get(key: string): boolean | undefined;
+      update(key: string, value: boolean): Thenable<void>;
+    },
   ) {
+    // Branches open, Remote closed: expanding Remote is what pays for PR
+    // association, so it stays opt-in.
+    this.visible = {
+      branches: memento?.get(SECTION_KEY.branches) ?? true,
+      remote: memento?.get(SECTION_KEY.remote) ?? false,
+    };
     this.disposables.push(
       worktrees.onDidChangeTreeData(() => this._onDidChangeTreeData.fire()),
       worktrees.onDidChangeWorktrees(() => this._onDidChangeTreeData.fire()),
@@ -42,23 +65,22 @@ export class FocusTreeProvider
     this._onDidChangeTreeData.fire();
   }
 
+  /** Fold a section away, or bring it back. */
+  toggleSection(section: 'branches' | 'remote'): void {
+    this.visible[section] = !this.visible[section];
+    void this.memento?.update(SECTION_KEY[section], this.visible[section]);
+    this._onDidChangeTreeData.fire();
+  }
+
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
   }
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     const cwd = this.branches.getRepoCwd();
+    // PR rows still nest — their files ARE children of the PR.
     if (element?.kind === 'branch' && element.pr) {
       return this.branches.getPrFileRows(element.repoCwd, element.pr);
-    }
-    if (element?.kind === 'group') {
-      if (!cwd) {
-        return [];
-      }
-      const plan = this.plan();
-      return element.group === 'branches'
-        ? this.branchRows(cwd, plan.branches, plan.hiddenBranches)
-        : this.branchRows(cwd, plan.remote, plan.hiddenRemote);
     }
     if (element) {
       return [];
@@ -84,6 +106,7 @@ export class FocusTreeProvider
   }
 
   private rootRows(): TreeNode[] {
+    const cwd = this.branches.getRepoCwd();
     const plan = this.plan();
     const rows: TreeNode[] = plan.checkouts.map((wt) =>
       this.worktrees.buildCheckoutRow(wt),
@@ -91,22 +114,31 @@ export class FocusTreeProvider
     if (rows.length === 0 && this.branches.isLoading()) {
       rows.push(new MessageItem('Loading…', undefined, 'loading~spin'));
     }
-    // Groups stay collapsed: the live checkouts above are what the panel is
-    // for, and expanding Remote is what pays for PR association.
+    // Flat, with separators rather than groups: a branch with a checkout
+    // and a branch without one are peers, and nesting would indent the
+    // second kind as though it belonged to the first.
     rows.push(
-      new GroupItem(
-        'Branches',
+      new SectionSeparatorItem(
         'branches',
-        vscode.TreeItemCollapsibleState.Collapsed,
-        plan.branches.length > 0 ? String(plan.branches.length) : 'none',
-      ),
-      new GroupItem(
-        'Remote',
-        'remote',
-        vscode.TreeItemCollapsibleState.Collapsed,
-        plan.remote.length > 0 ? String(plan.remote.length) : 'none',
+        'Branches',
+        plan.branches.length,
+        this.visible.branches,
       ),
     );
+    if (this.visible.branches && cwd) {
+      rows.push(...this.branchRows(cwd, plan.branches, plan.hiddenBranches));
+    }
+    rows.push(
+      new SectionSeparatorItem(
+        'remote',
+        'Remote',
+        plan.remote.length,
+        this.visible.remote,
+      ),
+    );
+    if (this.visible.remote && cwd) {
+      rows.push(...this.branchRows(cwd, plan.remote, plan.hiddenRemote));
+    }
     return rows;
   }
 

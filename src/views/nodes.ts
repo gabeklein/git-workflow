@@ -9,7 +9,11 @@ import {
   type PullRequestInfo,
 } from '../github/pr';
 import type { RemotePullRequest } from '../github/remotePrs';
-import { worktreeFileUri, worktreeResourceUri } from './worktreeDecorations';
+import {
+  separatorResourceUri,
+  worktreeFileUri,
+  worktreeResourceUri,
+} from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
@@ -25,7 +29,42 @@ export type TreeNode =
   | FileItem
   | BranchItem
   | RemotePrFileItem
+  | SectionSeparatorItem
   | MessageItem;
+
+/**
+ * A section break in a FLAT list. The tree API has no separator, so this is
+ * a row that behaves like one: dimmed to read as chrome, matching no
+ * context menu, and clickable to fold its section away.
+ *
+ * A collapsible group would indent everything beneath it, which misstates
+ * the model — a branch with a checkout and a branch without one are peers,
+ * not parent and child.
+ */
+export class SectionSeparatorItem extends vscode.TreeItem {
+  readonly kind = 'separator' as const;
+
+  constructor(
+    readonly section: 'branches' | 'remote',
+    label: string,
+    count: number,
+    expanded: boolean,
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'focusSeparator';
+    this.description = count > 0 ? String(count) : 'none';
+    this.resourceUri = separatorResourceUri(section);
+    this.iconPath = new vscode.ThemeIcon(
+      expanded ? 'chevron-down' : 'chevron-right',
+    );
+    this.tooltip = expanded ? `Hide ${label}` : `Show ${label}`;
+    this.command = {
+      command: 'worktreeCompare.toggleFocusSection',
+      title: this.tooltip,
+      arguments: [section],
+    };
+  }
+}
 
 /** Top-level collapsible group (Worktrees list / Commits ahead). */
 export class GroupItem extends vscode.TreeItem {

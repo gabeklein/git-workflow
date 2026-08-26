@@ -10,6 +10,17 @@ export const WORKTREE_URI_SCHEME = 'git-workflow-wt';
  */
 export const WORKTREE_FILE_URI_SCHEME = 'git-workflow-file';
 
+/**
+ * Section separators in the Focus panel. They are ordinary rows — the tree
+ * API has no separator — so they are tinted down to read as chrome rather
+ * than as one more branch in the list.
+ */
+export const SEPARATOR_URI_SCHEME = 'git-workflow-sep';
+
+export function separatorResourceUri(id: string): vscode.Uri {
+  return vscode.Uri.from({ scheme: SEPARATOR_URI_SCHEME, path: `/${id}` });
+}
+
 export function worktreeResourceUri(fsPath: string): vscode.Uri {
   // Normalize to a stable path form for Uri equality
   const asFile = vscode.Uri.file(fsPath);
@@ -69,6 +80,9 @@ export class WorktreeSelectionDecorationProvider
   provideFileDecoration(
     uri: vscode.Uri,
   ): vscode.ProviderResult<vscode.FileDecoration> {
+    if (uri.scheme === SEPARATOR_URI_SCHEME) {
+      return { color: new vscode.ThemeColor('descriptionForeground') };
+    }
     if (uri.scheme !== WORKTREE_URI_SCHEME || !this.selectedPath) {
       return undefined;
     }
