@@ -71,21 +71,21 @@ describe('absorbing stray integration work', () => {
     // a rebuild or this flakes on a loaded runner. Nudging with a manual
     // rebuild would be faster but would stop testing the tick path, which
     // is the whole point of this scenario.
-    await poll('stray edit lands on main', 60000, () =>
-      git(repo, ['log', 'main', '-5', '--format=%s']).includes(
+    //
+    // BOTH halves in the one poll: absorb replays onto main and THEN
+    // rewinds the checkout, so waiting only on main and asserting the
+    // rewind straight after is a race that loses about one run in five.
+    await poll('stray edit lands on main and the checkout rewinds', 60000, () => {
+      const landed = git(repo, ['log', 'main', '-5', '--format=%s']).includes(
         'agent edits README on integration',
-      ),
-    );
+      );
+      return landed && git(working, ['rev-parse', 'HEAD']) !== strayTip;
+    });
     assert.ok(
       fs.readFileSync(path.join(repo, 'README.md'), 'utf8').includes(
         'an agent wrote here',
       ),
       'the edit came with it',
-    );
-    assert.notEqual(
-      git(working, ['rev-parse', 'HEAD']),
-      strayTip,
-      'the integration checkout was rewound off the stray commit',
     );
   });
 
