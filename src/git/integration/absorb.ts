@@ -2,6 +2,8 @@ import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
 import { integrationBranch } from './config';
+import { revParseCommit } from '../plumbing';
+import { mergeOffTree } from './merge';
 import { findStrayCommits, resolveBaseSha } from './status';
 import { snapshotWorktreeCommit } from './engine';
 
@@ -23,6 +25,22 @@ import { snapshotWorktreeCommit } from './engine';
  * the target has the work. A conflict aborts, reports, and leaves both
  * sides exactly as they were.
  */
+
+/**
+ * Where absorbed work goes. A checkout is preferred when the base has one:
+ * the replay is a cherry-pick, so its working tree and index end up
+ * consistent with the moved branch. With integration enabled by switching
+ * a checkout IN PLACE the base has no worktree at all, and the replay has
+ * to happen against the ref itself.
+ */
+export type AbsorbTarget =
+  | { kind: 'checkout'; path: string; branch: string }
+  | { kind: 'ref'; branch: string };
+
+/** Human-facing name for a target. */
+export function absorbTargetLabel(target: AbsorbTarget): string {
+  return target.kind === 'checkout' ? target.path : target.branch;
+}
 
 export type AbsorbResult =
   | { ok: true; target: string; commits: number; uncommitted: boolean }
@@ -178,6 +196,81 @@ export async function addedPathsInCommits(
   return [...new Set(paths)];
 }
 
+/**
+ * Replay commits onto a branch REF, with no working tree involved.
+ *
+ * Each commit is re-merged with its own parent as the merge base — that is
+ * cherry-pick semantics, so what lands is the stray delta and nothing of
+ * the merged lane content it was written on top of. Strict: absorbing user
+ * work must never silently drop a hunk to the auto-resolver.
+ *
+ * The whole run lands as one guarded update-ref, so a branch that moved
+ * underneath is a refusal rather than a clobber.
+ */
+async function replayOntoRef(
+  cwd: string,
+  branch: string,
+  shas: string[],
+): Promise<
+  { ok: true; tip: string } | { ok: false; message: string; files: string[] }
+> {
+  const startTip = await revParseCommit(cwd, `refs/heads/${branch}`);
+  if (!startTip) {
+    return { ok: false, message: `${branch} does not resolve`, files: [] };
+  }
+  let current = startTip;
+  for (const sha of shas) {
+    const parent = (await git(cwd, ['rev-parse', `${sha}^`]).catch(() => ''))
+      .trim();
+    if (!parent) {
+      return {
+        ok: false,
+        message: `${sha.slice(0, 10)} has no parent to diff against`,
+        files: [],
+      };
+    }
+    const merged = await mergeOffTree(cwd, current, sha, {
+      strict: true,
+      mergeBase: parent,
+    });
+    if (merged.kind === 'unsupported') {
+      return {
+        ok: false,
+        message: 'git is too old for an off-tree replay (needs 2.38)',
+        files: [],
+      };
+    }
+    if (merged.kind === 'conflict') {
+      return {
+        ok: false,
+        message: `replaying ${sha.slice(0, 10)} onto ${branch} conflicts`,
+        files: merged.files,
+      };
+    }
+    const message = await git(cwd, ['log', '-1', '--format=%B', sha]);
+    const [name = '', email = '', when = ''] = (
+      await git(cwd, ['log', '-1', '--format=%an%x00%ae%x00%aI', sha])
+    )
+      .trim()
+      .split('\0');
+    current = (
+      await git(
+        cwd,
+        ['commit-tree', merged.tree, '-p', current, '-m', message.trimEnd()],
+        // Keep authorship with whoever wrote it; the committer becomes
+        // whoever ran the absorb, which is what a cherry-pick does too.
+        { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: when },
+      )
+    ).trim();
+  }
+  try {
+    await git(cwd, ['update-ref', `refs/heads/${branch}`, current, startTip]);
+  } catch (err) {
+    return { ok: false, message: gitErrorMessage(err), files: [] };
+  }
+  return { ok: true, tip: current };
+}
+
 /** Files git reports as unmerged in a checkout. */
 async function conflictedFiles(cwd: string): Promise<string[]> {
   const out = await git(cwd, ['diff', '--name-only', '--diff-filter=U']).catch(
@@ -223,7 +316,7 @@ async function replay(
 export async function absorbStrayCommits(
   integrationPath: string,
   baseRef: string,
-  targetPath: string,
+  target: AbsorbTarget,
 ): Promise<AbsorbResult> {
   const baseSha = await resolveBaseSha(integrationPath, baseRef);
   if (!baseSha) {
@@ -241,24 +334,29 @@ export async function absorbStrayCommits(
       message: 'no commits to absorb',
     };
   }
-  const incoming = (
-    await Promise.all(
-      strays.map((c) => pathsInCommit(integrationPath, c.sha)),
-    )
-  ).flat();
-  const clash = await clashingPaths(targetPath, incoming);
-  if (clash.length > 0) {
-    return {
-      ok: false,
-      code: 'target-dirty',
-      message: `the target is already editing ${clash.join(', ')} — commit or stash there first`,
-      files: clash,
-    };
+  const shas = strays.map((c) => c.sha);
+  if (target.kind === 'checkout') {
+    const incoming = (
+      await Promise.all(
+        strays.map((c) => pathsInCommit(integrationPath, c.sha)),
+      )
+    ).flat();
+    const clash = await clashingPaths(target.path, incoming);
+    if (clash.length > 0) {
+      return {
+        ok: false,
+        code: 'target-dirty',
+        message: `the target is already editing ${clash.join(', ')} — commit or stash there first`,
+        files: clash,
+      };
+    }
   }
-  const replayed = await replay(
-    targetPath,
-    strays.map((c) => c.sha),
-  );
+  // No checkout to clash with in ref mode, and nothing to leave half-done:
+  // the replay lands as a single guarded update-ref.
+  const replayed =
+    target.kind === 'checkout'
+      ? await replay(target.path, shas)
+      : await replayOntoRef(integrationPath, target.branch, shas);
   if (!replayed.ok) {
     return {
       ok: false,
@@ -274,7 +372,7 @@ export async function absorbStrayCommits(
   }
   return {
     ok: true,
-    target: targetPath,
+    target: absorbTargetLabel(target),
     commits: strays.length,
     uncommitted: false,
   };

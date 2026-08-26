@@ -47,6 +47,10 @@ describe('absorb', () => {
   });
 
   /** Commit stray work directly on the integration checkout. */
+  /** The base has a checkout in this fixture — the cherry-pick path. */
+  const checkoutTarget = () =>
+    ({ kind: 'checkout', path: scratch.repo, branch: 'main' }) as const;
+
   const strayCommit = (file: string, content: string, subject: string) => {
     fs.writeFileSync(path.join(integ, file), content);
     git(integ, ['add', '-A']);
@@ -70,7 +74,7 @@ describe('absorb', () => {
   describe('absorbStrayCommits', () => {
     it('replays stray commits onto the target and rewinds integration', async () => {
       strayCommit('stray.txt', 'agent work\n', 'agent commits on integration');
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({ ok: true, commits: 1 });
       // The work is on main...
       expect(read(scratch.repo, 'stray.txt')).toBe('agent work\n');
@@ -89,7 +93,7 @@ describe('absorb', () => {
     it('replays several commits oldest-first', async () => {
       strayCommit('a.txt', 'first\n', 'stray one');
       strayCommit('b.txt', 'second\n', 'stray two');
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({ ok: true, commits: 2 });
       expect(
         git(scratch.repo, ['log', '-2', '--format=%s', '--reverse']).split('\n'),
@@ -99,7 +103,7 @@ describe('absorb', () => {
     it('a stray edit to a file the lane also touched still leaves lane content behind', async () => {
       // Append below the lane's line: same file, no overlap
       strayCommit('app.txt', 'line1\nLANE\nline3\nagent appended\n', 'agent appends');
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({ ok: true });
       expect(read(scratch.repo, 'app.txt')).toBe(
         'line1\nline2\nline3\nagent appended\n',
@@ -111,7 +115,7 @@ describe('absorb', () => {
       strayCommit('app.txt', 'line1\nAGENT REWRITES THE LANE LINE\nline3\n', 'agent rewrites');
       const integHead = git(integ, ['rev-parse', 'HEAD']);
       const mainHead = git(scratch.repo, ['rev-parse', 'HEAD']);
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({ ok: false, code: 'conflict' });
       expect(git(scratch.repo, ['rev-parse', 'HEAD'])).toBe(mainHead);
       expect(git(scratch.repo, ['status', '--porcelain'])).toBe('');
@@ -123,7 +127,7 @@ describe('absorb', () => {
     it('tolerates unrelated work in progress on the target', async () => {
       strayCommit('stray.txt', 'agent work\n', 'agent commits');
       fs.writeFileSync(path.join(scratch.repo, 'app.txt'), 'user is mid-edit\n');
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({ ok: true, commits: 1 });
       expect(read(scratch.repo, 'app.txt')).toBe('user is mid-edit\n');
       // helpers.git() trims, so the leading unstaged-marker space is gone
@@ -133,7 +137,7 @@ describe('absorb', () => {
     it('refuses when the target is editing a file the absorb would write', async () => {
       strayCommit('stray.txt', 'agent work\n', 'agent commits');
       fs.writeFileSync(path.join(scratch.repo, 'stray.txt'), 'user got there first\n');
-      const result = await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      const result = await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(result).toMatchObject({
         ok: false,
         code: 'target-dirty',
@@ -145,7 +149,7 @@ describe('absorb', () => {
 
     it('reports nothing to do on a clean integration checkout', async () => {
       expect(
-        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+        await absorbStrayCommits(integ, 'origin/main', checkoutTarget()),
       ).toMatchObject({ ok: false, code: 'nothing' });
     });
   });
@@ -223,7 +227,7 @@ describe('absorb', () => {
     it('counts a stray commit, and returns to 0 once absorbed', async () => {
       strayCommit('stray.txt', 'agent work\n', 'agent commits');
       expect(await strayCount()).toBe('1');
-      await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       expect(await strayCount()).toBe('0');
     });
   });
@@ -238,7 +242,7 @@ describe('absorb', () => {
     it('refuses a stray edit that sits on lane content', async () => {
       strayCommit('app.txt', 'line1\nAGENT EDITS THE LANE LINE\nline3\n', 'edit');
       expect(
-        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+        await absorbStrayCommits(integ, 'origin/main', checkoutTarget()),
       ).toMatchObject({ ok: false, code: 'conflict' });
     });
 
@@ -247,10 +251,10 @@ describe('absorb', () => {
       fs.writeFileSync(path.join(integ, 'lane.txt'), 'lane owns this\n');
       git(integ, ['add', '-A']);
       git(integ, ['commit', '-qm', 'seed lane-only file']);
-      await absorbStrayCommits(integ, 'origin/main', scratch.repo);
+      await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
       strayCommit('lane.txt', 'agent rewrites lane-only file\n', 'edit lane-only');
       expect(
-        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+        await absorbStrayCommits(integ, 'origin/main', checkoutTarget()),
       ).toMatchObject({ ok: false, code: 'conflict' });
     });
 
@@ -263,7 +267,7 @@ describe('absorb', () => {
         'add a lane-dependent file',
       );
       expect(
-        await absorbStrayCommits(integ, 'origin/main', scratch.repo),
+        await absorbStrayCommits(integ, 'origin/main', checkoutTarget()),
       ).toMatchObject({ ok: true });
       expect(read(scratch.repo, 'needs-lane.txt')).toContain('LANE');
     });
