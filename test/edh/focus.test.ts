@@ -129,6 +129,23 @@ describe('focus panel', () => {
     });
   });
 
+  // Membership is carried by the row decoration badge, so spending a word
+  // of description on it too would be saying the same thing twice.
+  it('leaves preview membership and local-only to the badge', async () => {
+    const rows = await api.focusRows('worktrees');
+    assert.ok(rows.length > 0, 'there are checkouts to inspect');
+    for (const row of rows) {
+      assert.ok(
+        !row.description.includes('applied'),
+        `${row.label} should not spell out 'applied': ${row.description}`,
+      );
+      assert.ok(
+        !/(^|· )local( |$)/.test(row.description),
+        `${row.label} should not spell out 'local': ${row.description}`,
+      );
+    }
+  });
+
   it('keeps the integration branch out of every group', async () => {
     const everything = [
       ...(await labels('worktrees')),

@@ -32,17 +32,18 @@ export function fsPathFromWorktreeUri(uri: vscode.Uri): string {
 }
 
 /**
- * Emphasize the selected worktree row (TreeItems cannot be bold).
+ * Row decorations for checkouts: a blue tint on the selected one, and a
+ * badge on those merged into the integration preview.
  *
- * Badge AND tint, deliberately: the tint alone is fragile — VS Code gates
- * decoration colours behind explorer.decorations.colors, and the list paints
- * its own selection foreground over the focused row, which is exactly the
- * row this is trying to mark. The badge survives both.
+ * The badge is spent on lane membership rather than selection because
+ * selection is already obvious — the list paints it — while "is this in the
+ * preview?" otherwise costs a word of description on every row.
  */
-export class WorktreeSelectionDecorationProvider
+export class WorktreeRowDecorationProvider
   implements vscode.FileDecorationProvider, vscode.Disposable
 {
   private selectedPath: string | undefined;
+  private appliedPaths = new Set<string>();
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
     vscode.Uri | vscode.Uri[] | undefined
   >();
@@ -70,20 +71,43 @@ export class WorktreeSelectionDecorationProvider
     this._onDidChangeFileDecorations.fire(uris.length > 0 ? uris : undefined);
   }
 
+  /** Checkouts whose branch is currently merged into the preview. */
+  setAppliedPaths(paths: Iterable<string>): void {
+    const next = new Set(paths);
+    if (
+      next.size === this.appliedPaths.size &&
+      [...next].every((p) => this.appliedPaths.has(p))
+    ) {
+      return;
+    }
+    const changed = [...new Set([...next, ...this.appliedPaths])];
+    this.appliedPaths = next;
+    this._onDidChangeFileDecorations.fire(
+      changed.map((p) => worktreeResourceUri(p)),
+    );
+  }
+
   provideFileDecoration(
     uri: vscode.Uri,
   ): vscode.ProviderResult<vscode.FileDecoration> {
-    if (uri.scheme !== WORKTREE_URI_SCHEME || !this.selectedPath) {
+    if (uri.scheme !== WORKTREE_URI_SCHEME) {
       return undefined;
     }
     const rowPath = fsPathFromWorktreeUri(uri);
-    if (rowPath !== this.selectedPath) {
+    const selected = rowPath === this.selectedPath;
+    const applied = this.appliedPaths.has(rowPath);
+    if (!selected && !applied) {
       return undefined;
     }
     return {
-      badge: '●',
-      tooltip: 'Selected worktree',
-      color: new vscode.ThemeColor('charts.blue'),
+      badge: applied ? '●' : undefined,
+      tooltip: [
+        applied ? 'In the integration preview' : undefined,
+        selected ? 'Selected worktree' : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      color: selected ? new vscode.ThemeColor('charts.blue') : undefined,
     };
   }
 

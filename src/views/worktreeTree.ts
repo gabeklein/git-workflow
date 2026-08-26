@@ -47,7 +47,7 @@ import {
   WorktreeListItem,
 } from './nodes';
 import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
-import { WorktreeSelectionDecorationProvider } from './worktreeDecorations';
+import { WorktreeRowDecorationProvider } from './worktreeDecorations';
 
 export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
@@ -101,7 +101,7 @@ export class WorktreeTreeProvider
 
   private selectedPath: string | undefined;
   private readonly selectionDecorations =
-    new WorktreeSelectionDecorationProvider();
+    new WorktreeRowDecorationProvider();
 
   private readonly integration: IntegrationController;
   private readonly baseStatus: BaseStatusTracker;
@@ -115,7 +115,10 @@ export class WorktreeTreeProvider
       output,
       getWorktrees: () => this.worktrees,
       getSelectedPath: () => this.selectedPath,
-      fireTreeData: () => this._onDidChangeTreeData.fire(),
+      fireTreeData: () => {
+        this.syncAppliedDecorations();
+        this._onDidChangeTreeData.fire();
+      },
       refresh: () => this.refresh(),
       refreshCompare: (p) => this.refreshCompare(p),
       moveSelectionOff: (p) => this.moveSelectionOff(p),
@@ -355,6 +358,9 @@ export class WorktreeTreeProvider
       this.prCache.clear();
     } finally {
       this.loading = false;
+      // Paths changed, so the applied-lane badges have to be recomputed even
+      // when integration state itself did not move.
+      this.syncAppliedDecorations();
       this._onDidChangeTreeData.fire();
       this._onDidChangeWorktrees.fire();
       // Background: associate open PRs with worktree branches
@@ -933,6 +939,20 @@ export class WorktreeTreeProvider
 
   /** Worktrees shown in the list — the integration checkout lives under
    *  the Integration row instead. */
+  /**
+   * Tell the decoration provider which checkouts are in the preview. Keyed
+   * by path because that is what a row's resourceUri carries; a lane with no
+   * checkout has no row to decorate.
+   */
+  private syncAppliedDecorations(): void {
+    const applied = new Set(this.integration.getState()?.lanes ?? []);
+    this.selectionDecorations.setAppliedPaths(
+      this.worktrees
+        .filter((w) => !w.detached && applied.has(w.branch))
+        .map((w) => w.path),
+    );
+  }
+
   private listedWorktrees(): DiscoveredWorktree[] {
     return this.worktrees.filter(
       (wt) => wt.path !== this.integration.getPath(),

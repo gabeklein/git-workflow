@@ -87,9 +87,6 @@ export class BranchItem extends vscode.TreeItem {
     this.contextValue = `branch${flags}`;
 
     const tags: string[] = [];
-    if (relativeDate) {
-      tags.push(relativeDate);
-    }
     if (worktreePath) {
       tags.push('worktree');
     }
@@ -101,8 +98,13 @@ export class BranchItem extends vscode.TreeItem {
     }
     if (!hasLocalRef && (hasRemote || pr)) {
       tags.push('remote');
-    } else if (hasLocalRef && !hasRemote && !pr) {
-      tags.push('local only');
+    }
+    // 'local only' says nothing: under Branches it is the default state.
+    // The date goes LAST so it trails the row — the tree has no
+    // right-aligned field, and the one right-edge slot (the decoration
+    // badge) is spent marking preview membership.
+    if (relativeDate) {
+      tags.push(relativeDate);
     }
     this.description = tags.join(' · ');
 
@@ -450,9 +452,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     } else if (baseStatus && baseStatus.behind > 0) {
       bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
     }
-    if (integration?.role === 'lane' && integration.applied) {
-      bits.push('applied');
-    }
+
     if (worktree.isRootCheckout) {
       bits.push(worktree.isDirty ? 'root · dirty' : 'root');
     }
@@ -461,8 +461,9 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
     if (pullRequest) {
       bits.push(formatPrDescription(pullRequest));
-    } else if (worktree.publishState) {
-      // No PR: show whether branch exists on a remote
+    } else if (worktree.publishState && worktree.publishState !== 'local') {
+      // No PR: worth saying only when the branch got somewhere — 'local' is
+      // the default state of a checkout and reads as noise on every row.
       bits.push(worktree.publishState);
     }
     this.description = bits.length > 0 ? bits.join(' · ') : undefined;
