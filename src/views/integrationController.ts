@@ -934,6 +934,14 @@ export class IntegrationController implements vscode.Disposable {
             );
           }
         });
+    } else if (result.code === 'busy') {
+      // One attempt per tip is what keeps a genuinely unabsorbable commit
+      // from retrying forever — but a held index.lock is not that. Clearing
+      // the guard lets the next tick try again, which is all this needs.
+      this.lastAbsorbHead = undefined;
+      this.host.output.appendLine(
+        `Absorbing integration strays deferred: ${result.message}`,
+      );
     } else if (result.code !== 'nothing') {
       this.host.output.appendLine(
         `Absorbing integration strays failed (${result.code}): ${result.message}${

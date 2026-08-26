@@ -51,6 +51,7 @@ export type AbsorbResult =
         | 'target-dirty'
         | 'nothing'
         | 'conflict'
+        | 'busy'
         | 'error'
         | 'needs-confirmation';
       message: string;
@@ -287,6 +288,39 @@ function provenance(sha: string, from: string): string {
   return `(cherry picked from commit ${sha})\nAbsorbed-from: ${from}`;
 }
 
+/**
+ * git takes `index.lock` for the length of any operation that writes an
+ * index, and absorb writes through the TARGET checkout's index — which the
+ * extension itself is touching constantly (rebuilds, status probes), as is
+ * VS Code's own git extension and whatever the user has open in a terminal.
+ * The loser gets a raw `Unable to create ... index.lock` fatal.
+ *
+ * The lock is held for milliseconds, so the honest response is to wait for
+ * it rather than to report a failure the user can do nothing about. Only a
+ * lock that outlives every attempt is surfaced — as its own code, because
+ * "someone else is mid-operation" is not a conflict and must not read like
+ * one.
+ */
+function isIndexLocked(err: unknown): boolean {
+  return /index\.lock/.test(gitErrorMessage(err));
+}
+
+const LOCK_WAITS_MS = [50, 100, 200, 400, 800];
+
+async function withIndexLock<T>(run: () => Promise<T>): Promise<T> {
+  for (const wait of LOCK_WAITS_MS) {
+    try {
+      return await run();
+    } catch (err) {
+      if (!isIndexLocked(err)) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+  return run();
+}
+
 async function conflictedFiles(cwd: string): Promise<string[]> {
   const out = await git(cwd, ['diff', '--name-only', '--diff-filter=U']).catch(
     () => '',
@@ -305,7 +339,10 @@ async function replay(
   targetPath: string,
   shas: string[],
   from: string,
-): Promise<{ ok: true } | { ok: false; message: string; files: string[] }> {
+): Promise<
+  | { ok: true }
+  | { ok: false; message: string; files: string[]; locked?: boolean }
+> {
   for (const sha of shas) {
     try {
       // -x writes the `cherry picked from` line for us; the branch trailer
@@ -313,24 +350,35 @@ async function replay(
       // provenance. --no-verify on the amend only: the cherry-pick already
       // ran the target's own hooks, and running someone's pre-commit twice
       // for one absorbed commit is its own surprise.
-      await git(targetPath, ['cherry-pick', '-x', '--allow-empty', sha]);
+      await withIndexLock(() =>
+        git(targetPath, ['cherry-pick', '-x', '--allow-empty', sha]),
+      );
       const written = (
         await git(targetPath, ['log', '-1', '--format=%B'])
       ).trimEnd();
-      await git(targetPath, [
-        'commit',
-        '--amend',
-        '--no-verify',
-        '--allow-empty',
-        '-m',
-        `${written}\nAbsorbed-from: ${from}`,
-      ]);
+      await withIndexLock(() =>
+        git(targetPath, [
+          'commit',
+          '--amend',
+          '--no-verify',
+          '--allow-empty',
+          '-m',
+          `${written}\nAbsorbed-from: ${from}`,
+        ]),
+      );
     } catch (err) {
       const files = await conflictedFiles(targetPath);
       // --quit would keep the commits already replayed; --abort rewinds the
       // whole sequence, which is what "nothing half-absorbed" requires.
       await gitOk(targetPath, ['cherry-pick', '--abort']);
-      return { ok: false, message: gitErrorMessage(err), files };
+      return {
+        ok: false,
+        message: isIndexLocked(err)
+          ? `${targetPath} is mid-operation (index.lock held) — try again in a moment`
+          : gitErrorMessage(err),
+        files,
+        locked: isIndexLocked(err),
+      };
     }
   }
   return { ok: true };
@@ -399,7 +447,7 @@ export async function absorbStrayCommits(
   if (!replayed.ok) {
     return {
       ok: false,
-      code: 'conflict',
+      code: 'locked' in replayed && replayed.locked ? 'busy' : 'conflict',
       message: replayed.message,
       files: replayed.files,
     };
@@ -454,8 +502,17 @@ export async function absorbDirtyEdits(
   }
   try {
     // -n: land the delta in the target's tree and index without committing
-    await git(targetPath, ['cherry-pick', '-n', '--allow-empty', snapshot]);
+    await withIndexLock(() =>
+      git(targetPath, ['cherry-pick', '-n', '--allow-empty', snapshot]),
+    );
   } catch (err) {
+    if (isIndexLocked(err)) {
+      return {
+        ok: false,
+        code: 'busy',
+        message: `${targetPath} is mid-operation (index.lock held) — try again in a moment`,
+      };
+    }
     const files = await conflictedFiles(targetPath);
     // `-n` records NO sequencer state and no CHERRY_PICK_HEAD, so
     // `cherry-pick --abort` refuses ("no cherry-pick in progress") and the
