@@ -50,6 +50,12 @@ There are two layers — pick by what the code needs, not by convenience:
   has no headless mode) and steals focus from the user. Run it sparingly:
   once as a final verification before handing work back, not in an edit
   loop. CI runs it headlessly under `xvfb-run` on every PR.
+- **Run only what you are working on:** `GW_EDH_ONLY=focus npm run
+  test:edh` runs the ORDER *prefix* up to and including that scenario and
+  skips the tail — often seconds instead of a minute. A prefix rather than
+  the file alone, because scenarios inherit each other's state and one run
+  in isolation fails for reasons unrelated to the code under test.
+  Regressions in the skipped tail are CI's job, not the edit loop's.
 - `npm test` = test typechecks + unit + EDH.
 
 ## Git & PRs
