@@ -503,11 +503,6 @@
           "group": "navigation@4"
         },
         {
-          "command": "worktreeCompare.refreshBranches",
-          "when": "view == worktreeCompare.focus",
-          "group": "navigation@1"
-        },
-        {
           "command": "worktreeCompare.newFileInWorktree",
           "when": "view == worktreeCompare.files",
           "group": "navigation@1"

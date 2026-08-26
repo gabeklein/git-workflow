@@ -108,12 +108,18 @@ export class FocusTreeProvider
           : vscode.TreeItemCollapsibleState.Collapsed,
         count > 0 ? String(count) : 'none',
       );
-    // Remote starts closed: expanding it is what pays for PR association.
-    return [
+    const rows = [
       group('Worktrees', 'worktrees', plan.checkouts.length, true),
       group('Branches', 'branches', plan.branches.length, true),
-      group('Remote', 'remote', plan.remote.length, false),
     ];
+    // Remote only earns a row when something lives ONLY on the remote — a
+    // branch you already have locally is represented by its local row, so
+    // an empty Remote group is a heading over nothing. It starts closed
+    // because expanding it is what pays for PR association.
+    if (plan.remote.length > 0) {
+      rows.push(group('Remote', 'remote', plan.remote.length, false));
+    }
+    return rows;
   }
 
   private branchRows(

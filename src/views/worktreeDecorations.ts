@@ -33,7 +33,11 @@ export function fsPathFromWorktreeUri(uri: vscode.Uri): string {
 
 /**
  * Emphasize the selected worktree row (TreeItems cannot be bold).
- * Applies a blue label tint via FileDecoration (no badge).
+ *
+ * Badge AND tint, deliberately: the tint alone is fragile — VS Code gates
+ * decoration colours behind explorer.decorations.colors, and the list paints
+ * its own selection foreground over the focused row, which is exactly the
+ * row this is trying to mark. The badge survives both.
  */
 export class WorktreeSelectionDecorationProvider
   implements vscode.FileDecorationProvider, vscode.Disposable
@@ -77,6 +81,7 @@ export class WorktreeSelectionDecorationProvider
       return undefined;
     }
     return {
+      badge: '●',
       tooltip: 'Selected worktree',
       color: new vscode.ThemeColor('charts.blue'),
     };

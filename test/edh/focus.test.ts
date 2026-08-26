@@ -16,19 +16,29 @@ describe('focus panel', () => {
   const labels = async (group?: 'worktrees' | 'branches' | 'remote') =>
     (await api.focusRows(group)).map((r) => r.label);
 
-  it('offers exactly the three groups, in order', async () => {
+  it('offers Worktrees and Branches, in order, and nothing loose', async () => {
     await poll('focus panel renders its groups', 30000, async () => {
       await run('worktreeCompare.refresh');
-      return (await api.focusRows()).length >= 3;
+      return (await api.focusRows()).length >= 2;
     });
     const rows = await api.focusRows();
-    assert.deepEqual(
-      rows.filter((r) => r.kind === 'group').map((r) => r.group),
-      ['worktrees', 'branches', 'remote'],
-    );
+    const groups = rows.filter((r) => r.kind === 'group').map((r) => r.group);
+    assert.deepEqual(groups.slice(0, 2), ['worktrees', 'branches']);
     assert.ok(
       rows.every((r) => r.kind === 'group'),
       'the root is groups only — every row lives in a section',
+    );
+  });
+
+  // Every branch in the fixture has a local ref, so nothing lives only on
+  // the remote and the group would be a heading over nothing.
+  it('hides Remote when nothing lives only on the remote', async () => {
+    const groups = (await api.focusRows())
+      .filter((r) => r.kind === 'group')
+      .map((r) => r.group);
+    assert.ok(
+      !groups.includes('remote'),
+      'no remote-only branches, so no Remote group',
     );
   });
 
@@ -46,6 +56,31 @@ describe('focus panel', () => {
         `${label} under Worktrees is a discovered checkout`,
       );
     }
+  });
+
+  // Selection is drawn from contextValue (…Active) plus a FileDecoration
+  // tint, so if this passes and the row still looks unselected, the flag is
+  // fine and the tint is being lost at paint time.
+  it('marks the focused checkout as active', async () => {
+    const target = api.worktrees().find((w) => w.path.includes('feat-a'));
+    assert.ok(target, 'fixture has a feat/a checkout');
+    await run('worktreeCompare.focusWorktree', target.path);
+    await poll('the focused row reports itself active', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      const row = (await api.focusRows('worktrees')).find(
+        (r) => r.label === target.branch,
+      );
+      return Boolean(row?.contextValue?.startsWith('worktreeListItemActive'));
+    });
+    const others = (await api.focusRows('worktrees')).filter(
+      (r) => r.kind === 'worktreeList' && r.label !== target.branch,
+    );
+    assert.ok(
+      others.every(
+        (r) => !r.contextValue?.startsWith('worktreeListItemActive'),
+      ),
+      'exactly one row is active at a time',
+    );
   });
 
   it('a branch with a checkout is not repeated under Branches', async () => {

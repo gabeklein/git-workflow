@@ -38,9 +38,13 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
   const branchesProvider = new BranchesTreeProvider(log);
   context.subscriptions.push(branchesProvider);
-  // Keep branch rows in sync with discovered worktrees and git activity
+  // Keep branch rows in sync with discovered worktrees and git activity.
+  // One panel means one Refresh: rediscovering worktrees reloads the branch
+  // list too, so the Focus title bar needs a single button rather than one
+  // per half.
   const syncBranchWorktrees = () => {
     branchesProvider.setWorktrees(treeProvider.getWorktrees());
+    branchesProvider.refreshLocal();
   };
   context.subscriptions.push(
     treeProvider.onDidChangeWorktrees(syncBranchWorktrees),
