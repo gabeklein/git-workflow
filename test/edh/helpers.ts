@@ -31,6 +31,13 @@ export interface TestApi {
     error?: unknown;
   } | undefined;
   setBaseDriftIncluded(included: boolean): Promise<unknown>;
+  /** Files-panel rows for the focused worktree (pass a folder's relative
+   *  path to descend). Rows: kind, label, absolute path. */
+  explorerChildren(folderRelPath?: string): Promise<{
+    kind: string;
+    label: string;
+    path?: string;
+  }[]>;
   /** The RENDERED Integration panel rows (what VS Code actually paints). */
   integrationRows(): {
     kind?: string;
@@ -122,6 +129,9 @@ export function fire(command: string, arg?: unknown): void {
   void vscode.commands.executeCommand(command, arg);
 }
 
-export async function run(command: string, arg?: unknown): Promise<void> {
-  await vscode.commands.executeCommand(command, arg);
+export async function run(
+  command: string,
+  ...args: unknown[]
+): Promise<void> {
+  await vscode.commands.executeCommand(command, ...args);
 }

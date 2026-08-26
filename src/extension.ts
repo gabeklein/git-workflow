@@ -4,6 +4,7 @@ import {
   registerIntegrationCommands,
   reportIntegrationResult,
 } from './commands/integrationCommands';
+import { registerFileExplorerCommands } from './commands/fileExplorerCommands';
 import { registerLaneOpsCommands } from './commands/laneOpsCommands';
 import { registerWorktreeCommands } from './commands/worktreeCommands';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
@@ -11,6 +12,7 @@ import { integrationBaseRef } from './git/integration';
 import { createFileBackedLogger } from './log';
 import { BranchesTreeProvider } from './views/branchesTree';
 import { ChangesTreeProvider } from './views/changesTree';
+import { FilesTreeProvider } from './views/filesTree';
 import { IntegrationTreeProvider } from './views/integrationTree';
 import { WorktreeTreeProvider } from './views/worktreeTree';
 
@@ -58,6 +60,14 @@ export function activate(context: vscode.ExtensionContext): unknown {
   });
   context.subscriptions.push(changesView);
 
+  const filesProvider = new FilesTreeProvider(treeProvider);
+  context.subscriptions.push(filesProvider);
+  const filesView = vscode.window.createTreeView('worktreeCompare.files', {
+    treeDataProvider: filesProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(filesView);
+
   // Panel descriptions: worktree count / which worktree the Changes show
   const updateSplitViewDescriptions = () => {
     const worktrees = treeProvider.getWorktrees();
@@ -69,6 +79,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
     changesView.description = selected
       ? selected.branch + (selected.detached ? ' (detached)' : '')
       : undefined;
+    filesView.description = changesView.description;
   };
   updateSplitViewDescriptions();
   context.subscriptions.push(
@@ -167,6 +178,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
     ...registerIntegrationCommands(context, treeProvider, log),
     ...registerBranchCommands(treeProvider, branchesProvider, log),
     ...registerLaneOpsCommands(treeProvider, log),
+    ...registerFileExplorerCommands(treeProvider, filesProvider, log),
   );
 
   // Read-only view-state hooks for the EDH test suite: assertions on what
@@ -185,6 +197,21 @@ export function activate(context: vscode.ExtensionContext): unknown {
           treeProvider.setBaseDriftIncluded(included),
         // RENDERED Integration rows — the exact TreeItems VS Code paints
         // (state hooks alone let "state right, row missing" bugs pass)
+        explorerChildren: async (folderRelPath?: string) =>
+          (
+            await filesProvider.getChildren(
+              folderRelPath
+                ? ({
+                    kind: 'explorerFolder',
+                    relPath: folderRelPath,
+                  } as Parameters<FilesTreeProvider['getChildren']>[0])
+                : undefined,
+            )
+          ).map((n) => ({
+            kind: n.kind,
+            label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
+            path: n.resourceUri?.fsPath,
+          })),
         integrationRows: () =>
           integrationProvider.getChildren().map((item) => ({
             kind: (item as { kind?: string }).kind,

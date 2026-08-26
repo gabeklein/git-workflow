@@ -13,6 +13,7 @@ import { getApi } from './helpers';
 
 const ORDER = [
   'overlay.test.cjs', //     activation, enroll/apply, selection, wip overlay
+  'files.test.cjs', //       focused-worktree explorer (cleans up after itself)
   'landing.test.cjs', //     landed lifecycle, base badges
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase

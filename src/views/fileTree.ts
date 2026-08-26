@@ -1,20 +1,19 @@
-import type { FileChange } from '../git/compare';
-
-export interface FolderLevel {
+export interface FolderLevel<T extends { path: string }> {
   dirs: string[];
-  files: FileChange[];
+  files: T[];
 }
 
 /**
  * One level of a path tree under `prefix` (posix, no trailing slash).
- * `prefix === ''` is the repo root.
+ * `prefix === ''` is the repo root. Works over anything path-shaped
+ * (diff FileChange entries, plain explorer listings, …).
  */
-export function childrenAtPrefix(
-  files: FileChange[],
+export function childrenAtPrefix<T extends { path: string }>(
+  files: T[],
   prefix: string,
-): FolderLevel {
+): FolderLevel<T> {
   const dirSet = new Set<string>();
-  const direct: FileChange[] = [];
+  const direct: T[] = [];
   const prefixWithSlash = prefix ? `${prefix}/` : '';
 
   for (const f of files) {
@@ -45,7 +44,10 @@ export function joinPrefix(prefix: string, name: string): string {
   return prefix ? `${prefix}/${name}` : name;
 }
 
-export function countFilesUnder(files: FileChange[], folderPath: string): number {
+export function countFilesUnder(
+  files: { path: string }[],
+  folderPath: string,
+): number {
   const p = `${folderPath}/`;
   return files.filter((f) => f.path === folderPath || f.path.startsWith(p)).length;
 }
