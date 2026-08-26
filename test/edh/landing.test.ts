@@ -115,3 +115,75 @@ describe('base badges', () => {
     });
   });
 });
+
+/**
+ * Deleting a landed worktree skips the confirmation modal. Testable end to
+ * end precisely because the quick path never reaches a dialog — the
+ * fallback flow (dirty, locked, ignored files) does, and stays out of the
+ * EDH by design.
+ */
+describe('quick delete of a landed worktree', () => {
+  const quickPath = path.join(repo, '.worktrees', 'feat-quick');
+  let api: TestApi;
+  before(async () => {
+    api = await getApi();
+  });
+
+  const makeLandedWorktree = (branch: string, dir: string) => {
+    // Landed by CONTENT: an empty commit leaves the base tree unchanged, so
+    // merging the branch into the base would do nothing. Keeps origin/main
+    // exactly where it is — later scenarios in this suite are sequential.
+    git(repo, ['worktree', 'add', '-q', dir, '-b', branch, 'origin/main']);
+    git(dir, ['commit', '-q', '--allow-empty', '-m', `${branch}: no-op work`]);
+  };
+
+  after(() => {
+    // The branch ref outlives the checkout by design — clear it either way
+    for (const d of [quickPath, path.join(repo, '.worktrees', 'feat-quick2')]) {
+      if (fs.existsSync(d)) {
+        git(repo, ['worktree', 'remove', '--force', d]);
+      }
+    }
+    for (const b of ['feat/quick', 'feat/quick2']) {
+      try {
+        git(repo, ['branch', '-D', b]);
+      } catch {
+        // already gone
+      }
+    }
+  });
+
+  it('removes it on sight, with no confirmation', async () => {
+    makeLandedWorktree('feat/quick', quickPath);
+    await poll('the new worktree is discovered', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return api.worktrees().some((w) => w.branch === 'feat/quick');
+    });
+    // No dialog is dismissed anywhere in this test — if the modal opened,
+    // this would hang until the poll gives up.
+    await run('worktreeCompare.deleteWorktree', { worktreePath: quickPath });
+    await poll('landed worktree is gone', 30000, () => !fs.existsSync(quickPath));
+    assert.ok(
+      git(repo, ['rev-parse', '-q', '--verify', 'refs/heads/feat/quick']),
+      'the branch ref is kept — only the checkout goes',
+    );
+  });
+
+  it('keeps the confirmed flow when the checkout holds ignored files', async () => {
+    makeLandedWorktree('feat/quick2', path.join(repo, '.worktrees', 'feat-quick2'));
+    const dir = path.join(repo, '.worktrees', 'feat-quick2');
+    fs.writeFileSync(path.join(dir, '.env'), 'SECRET=hunter2\n');
+    await poll('the second worktree is discovered', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return api.worktrees().some((w) => w.branch === 'feat/quick2');
+    });
+    // Fire WITHOUT awaiting: this one does open a modal, which nothing
+    // dismisses headlessly. The checkout must survive it.
+    void run('worktreeCompare.deleteWorktree', { worktreePath: dir });
+    await new Promise((r) => setTimeout(r, 3000));
+    assert.ok(
+      fs.existsSync(path.join(dir, '.env')),
+      'ignored files are never taken without a confirmation',
+    );
+  });
+});

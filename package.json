@@ -164,6 +164,11 @@
           "default": true,
           "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first — an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
         },
+        "worktreeCompare.quickDeleteLandedWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "description": "Delete a landed worktree without the confirmation modal. Only applies when the branch's commits are already contained in its base AND the checkout is clean, unlocked, attached, and holds no ignored files — `git worktree remove` deletes ignored files (a local .env, build output) without complaint, and the dirty probe cannot see them. Off = every delete is confirmed."
+        },
         "worktreeCompare.integrationAutoRebuild": {
           "type": "boolean",
           "default": true,

@@ -31,6 +31,17 @@ export function isIntegrationAbsorbEnabled(): boolean {
     .get<boolean>('integrationAbsorbStrays', true);
 }
 
+/**
+ * Whether a landed, clean, unlocked worktree is removed on Delete Worktree
+ * without the confirmation modal. Its COMMITS are provably safe; ignored
+ * files in the checkout are not, which is why this can be turned off.
+ */
+export function isQuickDeleteLandedEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<boolean>('quickDeleteLandedWorktrees', true);
+}
+
 export function isIntegrationAutoRebuildEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')

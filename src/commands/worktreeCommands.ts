@@ -10,8 +10,8 @@ import {
 import { pickBaseRef } from '../compare/pickBaseRef';
 import { pickWorktree } from '../compare/pickWorktree';
 import { commitStaged, commitUnstagedPaths } from '../git/commit';
-import { findLandedLanes } from '../git/integration';
-import { isWorktreeDirty } from '../git/plumbing';
+import { findLandedLanes, isQuickDeleteLandedEnabled } from '../git/integration';
+import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
 import { removeWorktree, unlockWorktree } from '../git/worktreeAdmin';
@@ -165,6 +165,40 @@ export function registerWorktreeCommands(
           }
         }
 
+        // Ignored files are the one thing a delete can still destroy: the
+        // dirty probe cannot see them and `git worktree remove` takes them
+        // without complaint (untracked files make it refuse on their own).
+        const ignored = await ignoredFiles(target);
+
+        // Landed + clean + unlocked: every commit is already contained in
+        // the base, so the confirmation has nothing to protect and the
+        // removal happens on sight. Anything else — dirty, locked,
+        // detached, or a checkout still holding ignored files — keeps the
+        // full confirmed flow. A failed quick attempt falls through to it
+        // too, so this can only ever save a click, never lose one.
+        if (
+          landedIn &&
+          !wt.locked &&
+          ignored.length === 0 &&
+          isQuickDeleteLandedEnabled()
+        ) {
+          const quick = await removeWorktree(target, {});
+          if (quick.ok) {
+            log.appendLine(
+              `Removed landed worktree ${target} (${wt.branch} landed in ${landedIn})`,
+            );
+            treeProvider.refresh();
+            void vscode.window.setStatusBarMessage(
+              `Git Workflow: deleted ${name} — ${wt.branch} already landed in ${landedIn}`,
+              4000,
+            );
+            return;
+          }
+          log.appendLine(
+            `Quick delete of landed worktree failed (${quick.code}) — falling back to confirm`,
+          );
+        }
+
         const warnings: string[] = [
           `Delete linked worktree “${name}”?`,
           '',
@@ -184,6 +218,16 @@ export function registerWorktreeCommands(
           warnings.push(
             '',
             '⚠ Working tree has uncommitted changes — remove will need --force.',
+          );
+        }
+        if (ignored.length > 0) {
+          // Named explicitly: these are exactly the files the "✓ Landed"
+          // line above does NOT cover.
+          warnings.push(
+            '',
+            `⚠ ${ignored.length} ignored file(s) will be deleted with the folder (${ignored
+              .slice(0, 3)
+              .join(', ')}${ignored.length > 3 ? ', …' : ''}).`,
           );
         }
         if (wt.locked) {
