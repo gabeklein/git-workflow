@@ -51,10 +51,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
   // One panel for checkouts AND branches: a worktree is an activity status
   // of a branch, so they belong in one ordered list rather than two views
   // that show the same branch twice.
-  const focusProvider = new FocusTreeProvider(treeProvider, branchesProvider, {
-    get: (key) => context.workspaceState.get<boolean>(key),
-    update: (key, value) => context.workspaceState.update(key, value),
-  });
+  const focusProvider = new FocusTreeProvider(treeProvider, branchesProvider);
   context.subscriptions.push(focusProvider);
   const treeView = vscode.window.createTreeView('worktreeCompare.focus', {
     treeDataProvider: focusProvider,
@@ -176,16 +173,6 @@ export function activate(context: vscode.ExtensionContext): unknown {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(
-      'worktreeCompare.toggleFocusSection',
-      (section?: 'branches' | 'remote') => {
-        if (section === 'branches' || section === 'remote') {
-          focusProvider.toggleSection(section);
-        }
-      },
-    ),
-  );
-  context.subscriptions.push(
     ...registerWorktreeCommands(treeProvider, log),
     ...registerIntegrationCommands(context, treeProvider, log),
     ...registerBranchCommands(treeProvider, branchesProvider, log),
@@ -224,10 +211,15 @@ export function activate(context: vscode.ExtensionContext): unknown {
             label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
             path: n.resourceUri?.fsPath,
           })),
-        focusRows: async () => {
-          return (await focusProvider.getChildren()).map((item) => ({
+        focusRows: async (group?: 'worktrees' | 'branches' | 'remote') => {
+          const parent = group
+            ? (await focusProvider.getChildren()).find(
+                (n) => n.kind === 'group' && n.group === group,
+              )
+            : undefined;
+          return (await focusProvider.getChildren(parent)).map((item) => ({
             kind: (item as { kind?: string }).kind,
-            section: (item as { section?: string }).section,
+            group: (item as { group?: string }).group,
             label:
               typeof item.label === 'string'
                 ? item.label

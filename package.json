@@ -221,11 +221,6 @@
     ],
     "commands": [
       {
-        "command": "worktreeCompare.toggleFocusSection",
-        "title": "Toggle Focus Section",
-        "category": "Git Workflow"
-      },
-      {
         "command": "worktreeCompare.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
@@ -743,12 +738,6 @@
           "command": "worktreeCompare.commitUnstaged",
           "when": "view == worktreeCompare.changes && viewItem == section:unstaged",
           "group": "1_scm@1"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "worktreeCompare.toggleFocusSection",
-          "when": "false"
         }
       ]
     }

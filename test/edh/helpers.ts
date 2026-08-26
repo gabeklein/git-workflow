@@ -38,11 +38,11 @@ export interface TestApi {
     label: string;
     path?: string;
   }[]>;
-  /** The RENDERED Focus panel rows — one flat list, separators included. */
-  focusRows(): Promise<
+  /** The RENDERED Focus panel rows; pass a group to list its children. */
+  focusRows(group?: 'worktrees' | 'branches' | 'remote'): Promise<
     {
       kind?: string;
-      section?: string;
+      group?: string;
       label: string;
       description: string;
       contextValue?: string;
