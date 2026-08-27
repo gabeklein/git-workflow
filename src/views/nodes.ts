@@ -91,6 +91,8 @@ export class BranchItem extends vscode.TreeItem {
     relativeDate: string,
     readonly worktreePath?: string,
     readonly pr?: RemotePullRequest,
+    /** Divergence from its upstream, when it has one. */
+    sync?: { ahead?: number; behind?: number },
   ) {
     super(
       branch,
@@ -118,6 +120,19 @@ export class BranchItem extends vscode.TreeItem {
     }
     if (worktreePath) {
       tags.push('worktree');
+    }
+    // Sync state as a badge, which is why a branch that exists both here
+    // and on the remote is ONE row rather than two: ↑ is yours to push, ↓
+    // is theirs to pull. Absent when there is no upstream to compare with —
+    // an unpublished branch is not "ahead" of anything.
+    const arrows = [
+      sync?.ahead ? `↑${sync.ahead}` : '',
+      sync?.behind ? `↓${sync.behind}` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (arrows) {
+      tags.push(arrows);
     }
     if (!hasLocalRef && (hasRemote || pr)) {
       tags.push('remote');

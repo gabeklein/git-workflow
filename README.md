@@ -210,14 +210,14 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 ```
 ▼ Preview        the derived preview, expanding to its lanes
 ▼ Working        has a checkout, root first then tip recency  ← click to focus
-▼ Local          has a local ref, no checkout
+▼ Local          has a local ref, no checkout — ↑ahead ↓behind vs origin
 ▶ Remote         no local ref (hidden when there are none)
 ▶ Landed         merged into the base (hidden when empty) — Prune lives here
 ```
 
 **Preview** leads: it is what the lanes below are combined *into*. It holds one row per integration — base drift first, then the applied and candidate lanes with their checkboxes — and everything the Integration panel's title menu used to carry (Rebuild, Change Base…, Absorb, Disable) is now that row's context menu. The group stays visible when integration is off, offering to enable it; a group that vanishes is a feature nobody finds. A **landed** lane drops out of Preview rather than lingering with a tag, since Landed is a group in the same panel and one branch belongs in one place.
 
-The groups are a **ladder**, not four categories: each rung is what falls through the one above it, so a branch appears in exactly one. A branch that exists both locally and on the remote stays in **Local** — its sync state is a badge, not a second row. **Landed is decided first and shown last**, so a landed branch that still has a checkout reaches the group whose purpose is clearing it, rather than hiding in Working forever.
+The groups are a **ladder**, not four categories: each rung is what falls through the one above it, so a branch appears in exactly one. A branch that exists both locally and on the remote stays in **Local** — its sync state is a badge (`↑2 ↓1`), not a second row. Those counts come from `%(upstream:track)` in the ref listing the panel already runs, so every branch's divergence costs no extra git call. A branch with no upstream shows nothing: it is not *ahead* of anything, it is unpublished, and the row says that by other means. An upstream that was deleted (`[gone]`) shows nothing either, since a count against a missing ref would be meaningless. **Landed is decided first and shown last**, so a landed branch that still has a checkout reaches the group whose purpose is clearing it, rather than hiding in Working forever.
 
 Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the integration preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
 

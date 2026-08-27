@@ -13,17 +13,45 @@ export interface BranchInfo {
   /** Unix seconds of the newest tip (local or remote) */
   committerDate: number;
   relativeDate: string;
+  /** Commits this branch has that its upstream does not. */
+  ahead?: number;
+  /** Commits its upstream has that it does not. */
+  behind?: number;
 }
 
 /**
  * All branches of the repo — refs/heads merged with refs/remotes/origin by
  * short name — newest committer date first. One git call.
  */
+
+/**
+ * Parse `%(upstream:track)` — git writes `[ahead 2, behind 1]`, `[ahead 3]`,
+ * `[behind 4]`, `[gone]`, or nothing at all.
+ *
+ * Nothing means one of two very different things: in sync, or no upstream
+ * configured. Both come back as undefined, and that is the honest answer —
+ * a branch with no upstream is not "ahead" of anything, it is unpublished,
+ * which the row already says by other means.
+ */
+function parseTrack(track?: string): { ahead?: number; behind?: number } {
+  if (!track || track.includes('gone')) {
+    return {};
+  }
+  const ahead = /ahead (\d+)/.exec(track)?.[1];
+  const behind = /behind (\d+)/.exec(track)?.[1];
+  return {
+    ahead: ahead ? Number(ahead) : undefined,
+    behind: behind ? Number(behind) : undefined,
+  };
+}
+
 export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
   const out = await git(repoCwd, [
     'for-each-ref',
     '--sort=-committerdate',
-    '--format=%(refname)%00%(committerdate:unix)%00%(committerdate:relative)',
+    // upstream:track comes free in this same call — one git invocation for
+    // every branch's sync state, rather than a rev-list per row.
+    '--format=%(refname)%00%(committerdate:unix)%00%(committerdate:relative)%00%(upstream:track)',
     'refs/heads',
     'refs/remotes/origin',
   ]);
@@ -32,7 +60,7 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
     if (!line.trim()) {
       continue;
     }
-    const [refname, dateRaw, relative] = line.split('\0');
+    const [refname, dateRaw, relative, track] = line.split('\0');
     if (!refname) {
       continue;
     }
@@ -55,6 +83,13 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
     if (existing) {
       existing.hasLocalRef ||= isLocal;
       existing.hasRemote ||= !isLocal;
+      // Only the LOCAL ref has an upstream to track; the remote row for the
+      // same name carries none and must not blank what the local one said.
+      if (isLocal) {
+        const t = parseTrack(track);
+        existing.ahead = t.ahead;
+        existing.behind = t.behind;
+      }
       if (date > existing.committerDate) {
         existing.committerDate = date;
         existing.relativeDate = relative ?? existing.relativeDate;
@@ -66,6 +101,7 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
         hasRemote: !isLocal,
         committerDate: date,
         relativeDate: relative ?? '',
+        ...parseTrack(track),
       });
     }
   }
