@@ -5,7 +5,10 @@ import {
   forgetChainCache,
   rebuildIntegration,
 } from '../../src/git/integration/engine';
-import { addAppliedLane } from '../../src/git/integration/lanes';
+import {
+  addAppliedLane,
+  reorderAppliedLane,
+} from '../../src/git/integration/lanes';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
@@ -77,13 +80,7 @@ describe('chain memoization', () => {
     // merge order is a different chain.
     await rebuildIntegration(working, 'origin/main');
     const first = tip();
-    // Written directly rather than via reorderAppliedLane, which lands in
-    // the drag-and-drop change — the property under test is the KEY, not
-    // how the file came to be in that order.
-    fs.writeFileSync(
-      path.join(working, '.git', 'focus-applied'),
-      'feat/b\nfeat/a\n',
-    );
+    expect(await reorderAppliedLane(working, 'feat/b', 'feat/a')).toBe(true);
     await rebuildIntegration(working, 'origin/main');
     expect(tip()).not.toBe(first);
   });
