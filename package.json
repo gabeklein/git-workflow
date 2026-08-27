@@ -489,6 +489,12 @@
         "title": "Prune Landed Branches",
         "category": "Git Workflow",
         "icon": "$(trash)"
+      },
+      {
+        "command": "worktreeCompare.syncWithRemote",
+        "title": "Sync with Remote",
+        "category": "Git Workflow",
+        "icon": "$(sync)"
       }
     ],
     "menus": {
@@ -749,6 +755,16 @@
           "command": "worktreeCompare.commitUnstaged",
           "when": "view == worktreeCompare.changes && viewItem == section:unstaged",
           "group": "1_scm@1"
+        },
+        {
+          "command": "worktreeCompare.syncWithRemote",
+          "when": "view == worktreeCompare.focus && viewItem =~ /^worktreeListItem/",
+          "group": "0_github@9"
+        },
+        {
+          "command": "worktreeCompare.syncWithRemote",
+          "when": "view == worktreeCompare.focus && viewItem =~ /^branch/",
+          "group": "0_github@9"
         }
       ]
     }

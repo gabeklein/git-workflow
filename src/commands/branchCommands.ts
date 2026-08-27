@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 /** Command registrations — split by domain; wired from extension.ts. */
 import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
+import { syncBranchWithRemote } from '../git/syncRemote';
 import { integrationBaseRef, integrationBranch } from '../git/integration';
 import {
   findLandedBranches,
@@ -144,6 +145,82 @@ export function registerBranchCommands(
           `Git Workflow: deleted ${outcome.deleted.length} branch(es)` +
             (kept > 0 ? ` — ${kept} kept, see the log for why` : ''),
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.syncWithRemote',
+      async (item?: { branch?: string; worktreePath?: string }) => {
+        const repoCwd = treeProvider.getRepoCwd();
+        const branch =
+          item?.branch ??
+          (item?.worktreePath
+            ? treeProvider.getWorktree(item.worktreePath)?.branch
+            : undefined) ??
+          treeProvider.getSelected()?.branch;
+        if (!repoCwd || !branch) {
+          return;
+        }
+        // A branch may be checked out somewhere other than the row clicked
+        const worktree = treeProvider
+          .getWorktrees()
+          .find((w) => !w.detached && w.branch === branch)?.path;
+        const result = await syncBranchWithRemote(repoCwd, branch, worktree);
+        log.appendLine(`Sync ${branch}: ${result.status}`);
+        switch (result.status) {
+          case 'up-to-date':
+            void vscode.window.setStatusBarMessage(
+              `Git Workflow: ${branch} is up to date with origin`,
+              2500,
+            );
+            break;
+          case 'published':
+            void vscode.window.showInformationMessage(
+              `Git Workflow: published ${branch} to origin`,
+            );
+            break;
+          case 'fast-forwarded':
+            void vscode.window.showInformationMessage(
+              `Git Workflow: ${branch} fast-forwarded ${result.behind} commit(s) from origin`,
+            );
+            break;
+          case 'pushed':
+            void vscode.window.showInformationMessage(
+              `Git Workflow: pushed ${result.ahead} commit(s) of ${branch}`,
+            );
+            break;
+          case 'diverged':
+            // Deliberately not decided here: choosing merge puts a merge
+            // commit in the PR, choosing rebase force-pushes over whatever
+            // is already on origin. Catch Up exists for exactly this.
+            void vscode.window
+              .showWarningMessage(
+                `Git Workflow: ${branch} and origin/${branch} have both moved (${result.ahead} local, ${result.behind} remote). Sync will not choose for you — someone else's commits are on origin.`,
+                'Catch Up with Base…',
+              )
+              .then((choice) => {
+                if (choice) {
+                  void vscode.commands.executeCommand(
+                    'worktreeCompare.catchUpWithBase',
+                    item,
+                  );
+                }
+              });
+            break;
+          case 'no-remote':
+            void vscode.window.showInformationMessage(
+              'Git Workflow: this repository has no origin remote',
+            );
+            break;
+          default:
+            void vscode.window.showErrorMessage(
+              `Git Workflow: sync failed — ${result.message}`,
+            );
+        }
+        if (result.status !== 'up-to-date' && result.status !== 'diverged') {
+          treeProvider.refresh();
+          branchesProvider.setWorktrees(treeProvider.getWorktrees());
+          branchesProvider.refresh();
+        }
       },
     ),
     vscode.commands.registerCommand(
