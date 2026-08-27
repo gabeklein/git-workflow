@@ -46,9 +46,10 @@ export function shouldIgnoreHotFollowPath(
  * A worktree is usually a sibling of the folder you have open, sometimes
  * nested inside it, and occasionally somewhere else entirely. An absolute
  * path answers all three but buries the part that distinguishes them, so
- * this offers every true form — `.` for the workspace root, `./x` inside
- * it, `../x` beside it, `~/x` under home, absolute otherwise — and picks
- * the shortest.
+ * this offers every true form — `.` for the workspace root, `x` inside it,
+ * `../x` beside it, `~/x` under home, absolute otherwise — and picks the
+ * shortest. A bare relative path needs no `./`: nothing else in the list
+ * looks like one, so the prefix only costs width.
  *
  * Shortest rather than a fixed preference order, because a preference gets
  * it wrong in both directions: two levels up followed by a deep descent
@@ -71,7 +72,7 @@ export function describeLocation(
     }
     const rel = path.relative(root, target);
     if (rel && !path.isAbsolute(rel)) {
-      candidates.push(rel.startsWith('..') ? rel : `./${rel}`);
+      candidates.push(rel);
     }
   }
   const home = os.homedir();

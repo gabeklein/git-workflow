@@ -15,9 +15,11 @@ describe('describeLocation', () => {
     expect(describeLocation(root, root)).toBe('.');
   });
 
-  it('is ./x for something nested inside', () => {
+  it('is a bare relative path for something nested inside', () => {
+    // No `./` — nothing else in the vocabulary looks like a bare relative
+    // path, so the prefix only costs width.
     expect(describeLocation(path.join(root, '.worktrees', 'feat-a'), root)).toBe(
-      `./${path.join('.worktrees', 'feat-a')}`,
+      path.join('.worktrees', 'feat-a'),
     );
   });
 
