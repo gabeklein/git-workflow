@@ -1,5 +1,5 @@
 import { git, gitOk } from '../exec';
-import { landedVia } from '../landedProbe';
+import { LANDED_SCAN_HOT, landedVia } from '../landedProbe';
 import { revParseCommit } from '../plumbing';
 import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
@@ -136,7 +136,13 @@ export async function findLandedLanes(
     if (!laneSha) {
       continue; // branch gone — not our call to make
     }
-    const via = await landedVia(cwd, laneSha, baseSha).catch(() => undefined);
+    // Shallow scan: this runs on every rebuild, once per lane.
+    const via = await landedVia(
+      cwd,
+      laneSha,
+      baseSha,
+      LANDED_SCAN_HOT,
+    ).catch(() => undefined);
     if (!via) {
       continue;
     }
