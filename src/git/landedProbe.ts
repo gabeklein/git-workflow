@@ -1,5 +1,7 @@
 import { git, gitOk } from './exec';
-import { mergeOffTree } from './integration';
+// Imported from the module, not the barrel: status.ts uses this, and
+// the barrel re-exports status.ts — going through it would be a cycle.
+import { mergeOffTree } from './integration/merge';
 
 /**
  * Deciding whether a branch's work is already in the base.
@@ -28,8 +30,24 @@ import { mergeOffTree } from './integration';
  * deleted. Every probe below therefore ends by checking the CURRENT tree.
  */
 
-/** Commits of base history to scan. Beyond this, a branch is not "recent". */
-const MAX_SCAN = 200;
+/**
+ * Commits of base history to scan for the landing. Beyond this, a branch
+ * is not "recent".
+ *
+ * Callers choose. Prune is user-initiated and rare, so it can afford to
+ * look a long way back. RETIREMENT runs on every rebuild, once per lane,
+ * and the scan is the expensive part — two git calls per commit — so it
+ * looks only a little way back. The memo does not rescue it either: a base
+ * that moves invalidates every key, and a moving base is exactly when
+ * rebuilds are firing.
+ *
+ * A short bound is honest for retirement: it costs a landed lane its
+ * automatic retirement only if it landed more than SCAN_HOT commits ago
+ * and nobody rebuilt in between, and the lane still reports landed in the
+ * panel via the prune-side scan.
+ */
+const SCAN_DEEP = 200;
+const SCAN_HOT = 25;
 
 export type LandedVia = 'ancestor' | 'content' | 'squash';
 
@@ -39,10 +57,52 @@ export type LandedVia = 'ancestor' | 'content' | 'squash';
  * Ordered cheapest-first, and every probe is skipped the moment an earlier
  * one answers.
  */
+/**
+ * Answers are memoized by (repo, branch sha, base sha).
+ *
+ * Those three fully determine the result — a sha's content never changes —
+ * so an entry can never go stale; a revert or a new base commit is a
+ * different base sha and therefore a different key.
+ *
+ * Worth having because retirement calls this on EVERY rebuild, once per
+ * lane, and the rebuild loop can run several times a second while someone
+ * is typing. Prune calls it once per click and does not care; the tick
+ * very much does. Without this, sharing the probe with retirement turned
+ * one merge-base check per lane into a scan of base history per lane per
+ * refresh — enough to push a rebuild past a 30s CI poll.
+ */
+const memo = new Map<string, LandedVia | undefined>();
+/** Bounded so a long session cannot grow it without limit. */
+const MEMO_MAX = 500;
+
+export function forgetLandedProbe(): void {
+  memo.clear();
+}
+
 export async function landedVia(
   cwd: string,
   branchSha: string,
   baseSha: string,
+  /** How far back to look for the landing — see SCAN_DEEP / SCAN_HOT. */
+  scan: number = SCAN_DEEP,
+): Promise<LandedVia | undefined> {
+  const key = `${cwd}\u0000${branchSha}\u0000${baseSha}\u0000${scan}`;
+  if (memo.has(key)) {
+    return memo.get(key);
+  }
+  const answer = await probe(cwd, branchSha, baseSha, scan);
+  if (memo.size >= MEMO_MAX) {
+    memo.clear();
+  }
+  memo.set(key, answer);
+  return answer;
+}
+
+async function probe(
+  cwd: string,
+  branchSha: string,
+  baseSha: string,
+  scan: number,
 ): Promise<LandedVia | undefined> {
   // 1. True merge, or the branch simply never diverged.
   if (await gitOk(cwd, ['merge-base', '--is-ancestor', branchSha, baseSha])) {
@@ -78,7 +138,7 @@ export async function landedVia(
   const history = (
     await git(cwd, [
       'rev-list',
-      `--max-count=${MAX_SCAN}`,
+      `--max-count=${scan}`,
       `${fork}..${baseSha}`,
     ]).catch(() => '')
   )
@@ -149,3 +209,6 @@ export async function landedVia(
 
   return undefined;
 }
+
+/** Bound for callers on the rebuild path. */
+export const LANDED_SCAN_HOT = SCAN_HOT;

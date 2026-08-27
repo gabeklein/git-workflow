@@ -1,4 +1,5 @@
 import { git, gitOk } from '../exec';
+import { landedVia } from '../landedProbe';
 import { revParseCommit } from '../plumbing';
 import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
@@ -102,12 +103,17 @@ export async function laneNeverDiverged(
 }
 
 /**
- * Lanes that LANDED: merging them into the base changes nothing AND they
- * had something to contribute. One predicate for badges and retirement,
- * deliberately content-based:
- * - ancestry (true-merge landings) — merging an ancestor is a no-op;
- * - content-neutral (squash/rebase landings) — a STRICT off-tree merge
- *   yields the base tree unchanged.
+ * Lanes that LANDED: their work is in the base AND they had something to
+ * contribute. One predicate for badges and retirement.
+ *
+ * Delegates to landedVia — the same stack of probes the branch prune uses.
+ * This used to run its own weaker check (ancestry, else a strict merge
+ * yielding the base tree unchanged), which is correct for a lane that
+ * landed while the base sat still and silently wrong afterwards: once the
+ * base moves on, that merge CONFLICTS, the lane never reads as landed,
+ * never retires, and sits in the preview reporting a conflict forever.
+ * Seen in real use — a merged PR's lane stuck as `conflict` — and the fix
+ * was already written for prune, just not shared.
  * Revert-safe by construction: after a squash-merge is reverted, merging
  * the lane again WOULD change the tree, so it is not landed.
  *
@@ -152,6 +158,47 @@ export async function findLandedLanes(
     } catch {
       // probe failure ⇒ not landed
     }
+  }
+  return landed;
+}
+
+/**
+ * Lanes whose landing the cheap check above cannot see.
+ *
+ * Kept SEPARATE from findLandedLanes on purpose. That one runs inside every
+ * rebuild, once per lane, and must stay cheap; this one walks base history
+ * and belongs on a slow cadence. Splitting them is what lets retirement be
+ * correct for a stale landing without putting a history scan in the tick —
+ * an earlier attempt merged the two and made loads take eighteen seconds
+ * on CI.
+ *
+ * Same probe the branch prune uses, so panel, retirement and prune agree.
+ */
+export async function findStaleLandedLanes(
+  cwd: string,
+  baseRef: string,
+  lanes: string[],
+): Promise<string[]> {
+  const baseSha = await resolveBaseSha(cwd, baseRef);
+  if (!baseSha) {
+    return [];
+  }
+  const landed: string[] = [];
+  for (const lane of lanes) {
+    const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
+    if (!laneSha) {
+      continue;
+    }
+    const via = await landedVia(cwd, laneSha, baseSha).catch(() => undefined);
+    if (!via) {
+      continue;
+    }
+    // Empty is not landed: a fresh worktree keeps its place in the preview
+    // until its first commit.
+    if (via === 'ancestor' && (await laneNeverDiverged(cwd, laneSha, baseSha))) {
+      continue;
+    }
+    landed.push(lane);
   }
   return landed;
 }

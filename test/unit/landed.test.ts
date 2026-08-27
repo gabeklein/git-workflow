@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findLandedLanes,
+  findStaleLandedLanes,
   laneNeverDiverged,
 } from '../../src/git/integration/status';
 import { addBranch, git, makeRepo, type ScratchRepo } from './helpers';
@@ -89,7 +90,7 @@ describe('findLandedLanes', () => {
   it('a fresh branch at the base tip is EMPTY, not landed', async () => {
     git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
   });
 
@@ -97,7 +98,7 @@ describe('findLandedLanes', () => {
     git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
     land(['commit', '-q', '--allow-empty', '-m', 'base moves on']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
   });
 
@@ -110,7 +111,7 @@ describe('findLandedLanes', () => {
     git(scratch.repo, ['checkout', '-q', 'main']);
     git(scratch.repo, ['push', '-q', 'origin', 'feat/fresh']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
     // ...and landing it now reads as landed, not empty
     land([
@@ -122,7 +123,7 @@ describe('findLandedLanes', () => {
       'origin/feat/fresh',
     ]);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual(['feat/fresh']);
   });
 });
@@ -157,5 +158,71 @@ describe('laneNeverDiverged', () => {
     expect(await laneNeverDiverged(scratch.repo, sha('side'), sha('main'))).toBe(
       false,
     );
+  });
+});
+
+/**
+ * The landings the rebuild's cheap check cannot see. A lane that landed
+ * and then watched other PRs merge on top conflicts against the base, so
+ * the fast predicate reads it as unlanded: it never retires and sits in
+ * the preview reporting a conflict forever.
+ *
+ * This probe walks base history to find it, which is why it is a separate
+ * function on a slow cadence rather than part of findLandedLanes — putting
+ * it in the rebuild made CI loads take eighteen seconds.
+ */
+describe('findStaleLandedLanes', () => {
+  let scratch: ScratchRepo;
+
+  const write = (f: string, body: string) => {
+    fs.writeFileSync(path.join(scratch.repo, f), body);
+    git(scratch.repo, ['add', '-A']);
+  };
+
+  beforeEach(() => {
+    scratch = makeRepo({ withOrigin: true });
+    write('app.txt', 'one\ntwo\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'app']);
+    git(scratch.repo, ['push', '-q', 'origin', 'main']);
+  });
+  afterEach(() => {
+    scratch.cleanup();
+  });
+
+  it('retires a lane the base has since moved past', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/old', 'main']);
+    write('app.txt', 'one\nLANE\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'lane work']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    git(scratch.repo, ['merge', '-q', '--squash', 'feat/old']);
+    git(scratch.repo, ['commit', '-qm', 'lane work (#1)']);
+    // ...then other PRs land on the same lines
+    write('app.txt', 'one\nLANE\nthree\nlater\n');
+    git(scratch.repo, ['commit', '-qm', 'later (#2)']);
+    write('app.txt', 'one\nLANE AGAIN\nthree\nlater\n');
+    git(scratch.repo, ['commit', '-qm', 'later still (#3)']);
+    git(scratch.repo, ['push', '-q', 'origin', 'main']);
+
+    expect(
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/old']),
+    ).toEqual(['feat/old']);
+  });
+
+  it('still keeps a lane whose work never landed', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/live', 'main']);
+    write('app.txt', 'one\nLIVE\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'live work']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+
+    expect(
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/live']),
+    ).toEqual([]);
+  });
+
+  it('does not retire an EMPTY lane — it has nothing to retire', async () => {
+    git(scratch.repo, ['branch', 'feat/fresh', 'main']);
+    expect(
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+    ).toEqual([]);
   });
 });

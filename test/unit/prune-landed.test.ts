@@ -5,6 +5,7 @@ import {
   findLandedBranches,
   pruneLandedBranches,
 } from '../../src/git/pruneLanded';
+import { forgetLandedProbe, landedVia } from '../../src/git/landedProbe';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
@@ -204,5 +205,45 @@ describe('prune landed branches — stale landings', () => {
 
     const scan = await findLandedBranches(scratch.repo, 'main');
     expect(scan.landed).toEqual([]);
+  });
+});
+
+/**
+ * The probe is memoized because retirement calls it on every rebuild, once
+ * per lane — enough repeated work to push a rebuild past a CI poll. The
+ * key is (repo, branch sha, base sha), which fully determines the answer,
+ * so an entry cannot go stale: a revert or a new base commit is a
+ * different base sha and therefore a different key.
+ */
+describe('landed probe memo', () => {
+  let scratch: ScratchRepo;
+
+  beforeEach(() => {
+    forgetLandedProbe();
+    scratch = makeRepo();
+  });
+  afterEach(() => {
+    forgetLandedProbe();
+    scratch.cleanup();
+  });
+
+  it('gives the same answer twice, and notices a new base', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/x', 'main']);
+    fs.writeFileSync(path.join(scratch.repo, 'x.txt'), 'work\n');
+    git(scratch.repo, ['add', '-A']);
+    git(scratch.repo, ['commit', '-qm', 'x work']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    const lane = git(scratch.repo, ['rev-parse', 'feat/x']);
+
+    const before = git(scratch.repo, ['rev-parse', 'main']);
+    expect(await landedVia(scratch.repo, lane, before)).toBeUndefined();
+    expect(await landedVia(scratch.repo, lane, before)).toBeUndefined();
+
+    // Land it: a NEW base sha, so a new key — the cached "not landed"
+    // answer for the old base cannot mask it.
+    git(scratch.repo, ['merge', '-q', '--squash', 'feat/x']);
+    git(scratch.repo, ['commit', '-qm', 'x work (#1)']);
+    const after = git(scratch.repo, ['rev-parse', 'main']);
+    expect(await landedVia(scratch.repo, lane, after)).toBeTruthy();
   });
 });
