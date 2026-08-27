@@ -32,7 +32,7 @@ export interface LandedBranch {
   hasRemote: boolean;
 }
 
-export interface LandedScan {
+interface LandedScan {
   landed: LandedBranch[];
   /** Branches with real unlanded work — never offered, counted for honesty. */
   keptCount: number;
@@ -106,7 +106,7 @@ export async function findLandedBranches(
   return { landed, keptCount };
 }
 
-export interface PruneOutcome {
+interface PruneOutcome {
   deleted: string[];
   /** Name → why it survived. */
   failed: Map<string, string>;

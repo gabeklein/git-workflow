@@ -19,7 +19,7 @@ import {
   resolveBaseRef,
 } from '../git/worktree';
 
-export interface BaseStatusHost {
+interface BaseStatusHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
   /** Rows the Worktree panel shows (integration checkout excluded). */
@@ -30,7 +30,7 @@ export interface BaseStatusHost {
 }
 
 /** Row badge: how a worktree relates to its base, plus paused git state. */
-export interface WorktreeBaseState {
+interface WorktreeBaseState {
   behind: number;
   ahead: number;
   conflicts: boolean;

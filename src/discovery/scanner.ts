@@ -28,7 +28,7 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   publishState?: 'pushed' | 'local';
 }
 
-export type RootCheckoutMode = 'always' | 'dirty' | 'never';
+type RootCheckoutMode = 'always' | 'dirty' | 'never';
 
 function getWatchFolders(): string[] {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
@@ -236,7 +236,7 @@ export async function discoverWorktrees(
 
 /** Absolute watch-folder dirs — still used as the default creation location
  *  for new (PR) worktrees and as an event fast-path hint. */
-export function resolveWatchRoots(): string[] {
+function resolveWatchRoots(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
   const roots: string[] = [];

@@ -105,7 +105,7 @@ function normalizeRemote(row: GhRemotePrRow): RemotePullRequest | undefined {
   };
 }
 
-export function remotePrLimit(): number {
+function remotePrLimit(): number {
   const n = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<number>('remotePrLimit', 30);
@@ -134,7 +134,7 @@ export async function listOpenRemotePullRequests(
 }
 
 /** Tracking ref for a fetched PR head: refs/remotes/pr/<n> */
-export function prRemoteRef(prNumber: number): string {
+function prRemoteRef(prNumber: number): string {
   return `refs/remotes/pr/${prNumber}`;
 }
 
@@ -142,7 +142,7 @@ export function prRemoteRef(prNumber: number): string {
  * Fetch PR head into refs/remotes/pr/<n> (object download only — no worktree).
  * Returns the ref name on success.
  */
-export async function ensurePrHeadFetched(
+async function ensurePrHeadFetched(
   repoCwd: string,
   prNumber: number,
 ): Promise<string> {
@@ -158,7 +158,7 @@ export async function ensurePrHeadFetched(
 }
 
 /** Prefer origin/<base> when present. */
-export async function resolvePrBaseRef(
+async function resolvePrBaseRef(
   repoCwd: string,
   baseRefName: string | undefined,
 ): Promise<string> {

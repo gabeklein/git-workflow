@@ -89,7 +89,7 @@ export async function openStagedDiff(
 }
 
 /** Open the real file only (fallback for awkward statuses). */
-export async function openWorkingTreeFile(
+async function openWorkingTreeFile(
   worktreePath: string,
   file: FileChange,
 ): Promise<void> {

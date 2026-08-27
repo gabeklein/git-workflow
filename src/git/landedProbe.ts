@@ -49,7 +49,7 @@ import { mergeOffTree } from './integration/merge';
 const SCAN_DEEP = 200;
 const SCAN_HOT = 25;
 
-export type LandedVia = 'ancestor' | 'content' | 'squash';
+type LandedVia = 'ancestor' | 'content' | 'squash';
 
 /**
  * Has `branchSha`'s work landed in `baseSha`, and how?

@@ -114,7 +114,7 @@ export function suggestWorktreePath(workspaceRoot: string, name: string): string
   );
 }
 
-export function sanitizeWorktreeDirName(name: string): string {
+function sanitizeWorktreeDirName(name: string): string {
   return (
     name
       .replace(/[/\\:]+/g, '-')

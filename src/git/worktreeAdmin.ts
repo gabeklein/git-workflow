@@ -88,7 +88,7 @@ export async function listWorktreeAdmin(
   return map;
 }
 
-export type RemoveWorktreeResult =
+type RemoveWorktreeResult =
   | { ok: true }
   | { ok: false; code: 'main' | 'locked' | 'dirty' | 'error'; message: string };
 

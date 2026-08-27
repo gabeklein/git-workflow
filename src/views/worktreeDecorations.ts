@@ -1,27 +1,27 @@
 import * as vscode from 'vscode';
 
 /** Custom scheme so FileDecoration can tint / badge worktree rows. */
-export const WORKTREE_URI_SCHEME = 'git-workflow-wt';
+const WORKTREE_URI_SCHEME = 'git-workflow-wt';
 
 /**
  * File/folder rows in the tree. Same path as the checkout so the icon theme
  * still keys off the extension, but not `file:` — git / GitLens must not
  * open a repository (and a recursive watcher) for every listed path.
  */
-export const WORKTREE_FILE_URI_SCHEME = 'git-workflow-file';
+const WORKTREE_FILE_URI_SCHEME = 'git-workflow-file';
 
 /**
  * Branch rows. A lane is a branch REF — a worktree is not required to merge
  * one — so a branch with no checkout can still be in the preview and needs
  * somewhere to hang its badge.
  */
-export const BRANCH_URI_SCHEME = 'git-workflow-branch';
+const BRANCH_URI_SCHEME = 'git-workflow-branch';
 
 export function branchResourceUri(branch: string): vscode.Uri {
   return vscode.Uri.from({ scheme: BRANCH_URI_SCHEME, path: `/${branch}` });
 }
 
-export function branchFromUri(uri: vscode.Uri): string {
+function branchFromUri(uri: vscode.Uri): string {
   return uri.path.replace(/^\//, '');
 }
 
@@ -42,7 +42,7 @@ export function worktreeFileUri(fsPath: string): vscode.Uri {
   });
 }
 
-export function fsPathFromWorktreeUri(uri: vscode.Uri): string {
+function fsPathFromWorktreeUri(uri: vscode.Uri): string {
   return vscode.Uri.file(uri.path).fsPath;
 }
 

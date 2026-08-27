@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
-import { git } from '../git/exec';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,7 +21,7 @@ export interface PullRequestInfo {
   baseRefName?: string;
 }
 
-export type GithubPrMode = 'off' | 'auto';
+type GithubPrMode = 'off' | 'auto';
 
 const PR_JSON_FIELDS =
   'number,title,state,url,isDraft,headRefName,mergeable,mergeStateStatus,baseRefName';
@@ -271,27 +270,6 @@ export function prThemeIcon(pr: PullRequestInfo): vscode.ThemeIcon {
     'git-pull-request',
     new vscode.ThemeColor('charts.green'),
   );
-}
-
-/**
- * Best-effort github.com owner/repo from origin URL (for tooltips / future API use).
- */
-export async function resolveGithubRepoSlug(
-  worktreePath: string,
-): Promise<string | undefined> {
-  try {
-    const url = (await git(worktreePath, ['remote', 'get-url', 'origin'])).trim();
-    return parseGithubSlug(url);
-  } catch {
-    return undefined;
-  }
-}
-
-export function parseGithubSlug(remoteUrl: string): string | undefined {
-  // git@github.com:owner/repo.git  |  https://github.com/owner/repo.git
-  const ssh = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/i);
-  if (ssh) return `${ssh[1]}/${ssh[2]}`;
-  return undefined;
 }
 
 /** Map key for PR cache (path + branch). */

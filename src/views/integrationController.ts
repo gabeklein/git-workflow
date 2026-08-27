@@ -57,7 +57,7 @@ import {
 import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 
 /** What the controller needs from its host (the tree provider). */
-export interface IntegrationHost {
+interface IntegrationHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
   getRepoCwd(): string | undefined;

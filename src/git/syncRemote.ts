@@ -24,7 +24,7 @@ import { gitErrorMessage } from './plumbing';
  * built for it. A context menu is not the place to guess.
  */
 
-export type SyncResult =
+type SyncResult =
   | { status: 'up-to-date' }
   | { status: 'published'; branch: string }
   | { status: 'fast-forwarded'; behind: number }

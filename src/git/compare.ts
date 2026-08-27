@@ -97,35 +97,6 @@ function parseNameStatus(stdout: string): FileChange[] {
   return files;
 }
 
-export interface FileChangeBreakdown {
-  added: number;
-  modified: number;
-  deleted: number;
-}
-
-/** Count A / M(etc) / D for section descriptions. Renames & copies count as modified. */
-export function breakdownFileChanges(files: FileChange[]): FileChangeBreakdown {
-  let added = 0;
-  let modified = 0;
-  let deleted = 0;
-  for (const f of files) {
-    switch (f.status) {
-      case 'A':
-      case '?':
-        added += 1;
-        break;
-      case 'D':
-        deleted += 1;
-        break;
-      default:
-        // M, T, R, C, U, etc.
-        modified += 1;
-        break;
-    }
-  }
-  return { added, modified, deleted };
-}
-
 /** e.g. `2 new · 1 untracked · 5 modified · 1 deleted` (omits zero buckets). */
 export function formatFileChangeBreakdown(files: FileChange[]): string | undefined {
   if (files.length === 0) return undefined;

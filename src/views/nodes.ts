@@ -15,7 +15,7 @@ import {
   worktreeResourceUri,
 } from './worktreeDecorations';
 
-export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
+type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
 export type TreeNode =
   | GroupItem

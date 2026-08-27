@@ -1,4 +1,4 @@
-export interface FolderLevel<T extends { path: string }> {
+interface FolderLevel<T extends { path: string }> {
   dirs: string[];
   files: T[];
 }
@@ -40,10 +40,3 @@ export function joinPrefix(prefix: string, name: string): string {
   return prefix ? `${prefix}/${name}` : name;
 }
 
-export function countFilesUnder(
-  files: { path: string }[],
-  folderPath: string,
-): number {
-  const p = `${folderPath}/`;
-  return files.filter((f) => f.path === folderPath || f.path.startsWith(p)).length;
-}

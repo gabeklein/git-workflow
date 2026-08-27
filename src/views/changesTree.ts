@@ -24,7 +24,7 @@ import type { WorktreeTreeProvider } from './worktreeTree';
  * this delegates to.
  */
 
-export type ChangesNode = TreeNode | ExplorerNode;
+type ChangesNode = TreeNode | ExplorerNode;
 
 function isExplorerNode(node: ChangesNode): node is ExplorerNode {
   return node.kind.startsWith('explorer');

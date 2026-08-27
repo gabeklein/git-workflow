@@ -27,7 +27,7 @@ export interface LandedLane {
   worktree?: DiscoveredWorktree;
 }
 
-export interface LanesPlan {
+interface LanesPlan {
   /** Checkouts, root first, then most recently committed. */
   working: DiscoveredWorktree[];
   /** Local branches with no checkout of their own. */
