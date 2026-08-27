@@ -169,16 +169,31 @@ describe('checkoutLabel', () => {
  * rebuild does not use — on precisely the question where order matters.
  */
 describe('orderLaneRows', () => {
-  it('keeps applied lanes in merge order, not alphabetical', () => {
-    expect(orderLaneRows(['zebra', 'alpha'], [])).toEqual(['zebra', 'alpha']);
+  it('keeps the stored order, not alphabetical', () => {
+    expect(orderLaneRows(['zebra', 'alpha'], ['zebra', 'alpha'])).toEqual([
+      'zebra',
+      'alpha',
+    ]);
   });
 
-  it('sorts the unapplied remainder — those have no position in the chain', () => {
-    expect(orderLaneRows(['zebra'], ['delta', 'beta'])).toEqual([
+  it('sorts anything the order has not placed yet', () => {
+    expect(orderLaneRows(['zebra'], ['zebra', 'delta', 'beta'])).toEqual([
       'zebra',
       'beta',
       'delta',
     ]);
+  });
+
+  it('drops an ordered lane that no longer exists', () => {
+    // A lane deleted out from under the order must not resurrect as a row
+    expect(orderLaneRows(['gone', 'a'], ['a', 'b'])).toEqual(['a', 'b']);
+  });
+
+  it('holds an unchecked lane in place — the point of the split', () => {
+    // Checking or unchecking touches membership, never this list, so the
+    // row does not move under the cursor.
+    const order = ['a', 'b', 'c'];
+    expect(orderLaneRows(order, ['a', 'b', 'c'])).toEqual(['a', 'b', 'c']);
   });
 
   it('never lists an applied lane twice', () => {

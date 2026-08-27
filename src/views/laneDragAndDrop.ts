@@ -15,8 +15,14 @@ import { IntegrationLaneItem, type TreeNode } from './nodes';
  * chain, so a position for it would be a position in nothing.
  */
 
-/** Within-tree drags carry the view id, lowercased, by VS Code convention. */
-const MIME = 'application/vnd.code.tree.worktreecompareintegration';
+/**
+ * Within-tree drags carry the VIEW ID, lowercased, by VS Code convention —
+ * so this has to track the view the lanes are actually rendered in. It said
+ * `...integration` until that panel became the Preview group of Lanes; a
+ * stale value here does not fail loudly, it just means nothing can be
+ * dropped.
+ */
+const MIME = 'application/vnd.code.tree.worktreecomparelanes';
 
 export class LaneDragAndDropController
   implements vscode.TreeDragAndDropController<TreeNode>

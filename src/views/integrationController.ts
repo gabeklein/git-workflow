@@ -40,7 +40,7 @@ import {
   isLaneBranch,
   laneNeverDiverged,
   listAppliedLanes,
-  reorderAppliedLane,
+  reorderLane as reorderLaneFile,
   dropExcludedLane,
   listCandidateLanes,
   listExcludedLanes,
@@ -351,8 +351,12 @@ export class IntegrationController implements vscode.Disposable {
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
-      // Applied lanes render in MERGE order, not sorted — see orderLaneRows.
-      this.candidates = orderLaneRows(this.lanes, [...explicit, ...auto]);
+      // One ordered list, checked or not: the candidate file IS the order,
+      // so a toggle changes a checkbox and never moves a row.
+      this.candidates = orderLaneRows(
+        await listCandidateLanes(wt.path),
+        [...explicit, ...auto, ...this.lanes],
+      );
       this.wip = await listWipLanes(wt.path);
       this.landed = await findLandedLanes(
         wt.path,
@@ -969,7 +973,7 @@ export class IntegrationController implements vscode.Disposable {
     if (!this.integrationPath) {
       return;
     }
-    const moved = await reorderAppliedLane(
+    const moved = await reorderLaneFile(
       this.integrationPath,
       lane,
       before,

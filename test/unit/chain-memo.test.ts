@@ -7,7 +7,8 @@ import {
 } from '../../src/git/integration/engine';
 import {
   addAppliedLane,
-  reorderAppliedLane,
+  addCandidateLane,
+  reorderLane,
 } from '../../src/git/integration/lanes';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
@@ -42,8 +43,11 @@ describe('chain memoization', () => {
     }
     working = scratch.repo;
     git(working, ['checkout', '-q', '-b', 'integration/main', 'main']);
-    await addAppliedLane(working, 'feat/a');
-    await addAppliedLane(working, 'feat/b');
+    // Candidates carry the ORDER, applied carries membership.
+    for (const lane of ['feat/a', 'feat/b']) {
+      await addCandidateLane(working, lane);
+      await addAppliedLane(working, lane);
+    }
     laneA = path.join(scratch.root, 'lane-a');
     git(scratch.repo, ['worktree', 'add', '-q', laneA, 'feat/a']);
   });
@@ -80,7 +84,7 @@ describe('chain memoization', () => {
     // merge order is a different chain.
     await rebuildIntegration(working, 'origin/main');
     const first = tip();
-    expect(await reorderAppliedLane(working, 'feat/b', 'feat/a')).toBe(true);
+    expect(await reorderLane(working, 'feat/b', 'feat/a')).toBe(true);
     await rebuildIntegration(working, 'origin/main');
     expect(tip()).not.toBe(first);
   });
@@ -88,10 +92,7 @@ describe('chain memoization', () => {
   it('recomputes when a lane is removed', async () => {
     await rebuildIntegration(working, 'origin/main');
     const first = tip();
-    fs.writeFileSync(
-      path.join(working, '.git', 'focus-applied'),
-      'feat/a\n',
-    );
+    fs.writeFileSync(path.join(working, '.git', 'focus-applied'), 'feat/a\n');
     await rebuildIntegration(working, 'origin/main');
     expect(tip()).not.toBe(first);
     expect(fs.existsSync(path.join(working, 'b.txt'))).toBe(false);

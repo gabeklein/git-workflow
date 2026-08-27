@@ -78,7 +78,30 @@ export async function addAppliedLane(cwd: string, lane: string): Promise<void> {
  * and wrote unlocked could silently drop a lane that was retired in
  * between. Re-read inside the lock for the same reason.
  */
-export async function reorderAppliedLane(
+/**
+ * Move `lane` before `before` in the merge order — or last when `before` is
+ * undefined.
+ *
+ * Order lives in the CANDIDATE list, not the applied one. That split is the
+ * point: `focus-applied` used to carry both membership and order, so
+ * checking a lane appended it and the row jumped to the end of the list
+ * under the user's cursor. Truthful — inclusion order really was merge
+ * order — but it made a toggle silently restate where a lane merges, and
+ * left dragging fighting the checkbox for the same file.
+ *
+ * Now the candidate list is the order (every lane, applied or not),
+ * membership is a set, and merge order is "the candidates, filtered to
+ * applied". Toggling moves nothing; dragging is the only thing that
+ * reorders.
+ *
+ * Still compatible with the shell script: a lane it appends to
+ * `focus-applied` without a candidate entry sorts to the end, which is what
+ * appending meant anyway.
+ *
+ * Taken under the rebuild lock, and re-read inside it — the files are
+ * shared with the script and rewritten by rebuilds retiring landed lanes.
+ */
+export async function reorderLane(
   cwd: string,
   lane: string,
   before?: string,
@@ -87,14 +110,14 @@ export async function reorderAppliedLane(
   try {
     await fs.mkdir(lock);
   } catch {
-    return false; // a rebuild owns the file right now
+    return false; // a rebuild owns the files right now
   }
   try {
-    const lanes = await readLaneFile(cwd, APPLIED_FILE);
-    if (!lanes.includes(lane) || lane === before) {
+    const order = await readLaneFile(cwd, CANDIDATES_FILE);
+    if (!order.includes(lane) || lane === before) {
       return false;
     }
-    const without = lanes.filter((l) => l !== lane);
+    const without = order.filter((l) => l !== lane);
     const at = before ? without.indexOf(before) : -1;
     // A target that vanished (retired while the drag was in flight) means
     // "put it last" rather than an error nobody can act on.
@@ -102,10 +125,10 @@ export async function reorderAppliedLane(
       at < 0
         ? [...without, lane]
         : [...without.slice(0, at), lane, ...without.slice(at)];
-    if (next.length === lanes.length && next.every((l, i) => l === lanes[i])) {
+    if (next.length === order.length && next.every((l, i) => l === order[i])) {
       return false; // no move
     }
-    await writeLaneFile(cwd, APPLIED_FILE, next, { ordered: true });
+    await writeLaneFile(cwd, CANDIDATES_FILE, next, { ordered: true });
     return true;
   } finally {
     await fs.rmdir(lock).catch(() => {});
@@ -137,7 +160,10 @@ export async function addCandidateLane(
   const lanes = await listCandidateLanes(cwd);
   if (!lanes.includes(lane)) {
     lanes.push(lane);
-    await writeLaneFile(cwd, CANDIDATES_FILE, lanes);
+    // Ordered: this file is the lane ORDER now, applied or not — see
+    // reorderLane. A sorted candidate list would silently reshuffle merge
+    // order every time a lane was added.
+    await writeLaneFile(cwd, CANDIDATES_FILE, lanes, { ordered: true });
   }
 }
 
