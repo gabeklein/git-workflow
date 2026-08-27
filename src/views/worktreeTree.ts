@@ -29,6 +29,7 @@ import {
 } from '../github/pr';
 import { BaseStatusTracker } from './baseStatusTracker';
 import { GitActivityHub } from './gitActivityHub';
+import { HotFollowPoll } from './hotFollowPoll';
 import {
   IntegrationController,
   type IntegrationState,
@@ -83,12 +84,8 @@ export class WorktreeTreeProvider
   private loading = false;
   private readonly disposables: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
-  private pollTimer: NodeJS.Timeout | undefined;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
-  /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
-  private pollPace: 'active' | 'idle' = 'idle';
-  private lastFingerprintChangeAt = 0;
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
@@ -100,6 +97,7 @@ export class WorktreeTreeProvider
   private readonly selectionDecorations =
     new WorktreeRowDecorationProvider();
 
+  private readonly poll: HotFollowPoll;
   private readonly integration: IntegrationController;
   private readonly baseStatus: BaseStatusTracker;
   private readonly activity: GitActivityHub;
@@ -108,6 +106,9 @@ export class WorktreeTreeProvider
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
   ) {
+    this.poll = new HotFollowPoll(output, (reason) =>
+      this.softRefreshSelected(reason),
+    );
     this.integration = new IntegrationController({
       output,
       getWorktrees: () => this.worktrees,
@@ -146,6 +147,7 @@ export class WorktreeTreeProvider
     this.selectionDecorations.setSelectedPath(this.selectedPath);
     this.disposables.push(
       this.selectionDecorations,
+      this.poll,
       this.integration,
       this.activity,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -156,7 +158,7 @@ export class WorktreeTreeProvider
         if (e.affectsConfiguration('worktreeCompare')) {
           if (e.affectsConfiguration('worktreeCompare.watchFolders'))
             this.activity.restartPoll();
-          this.restartPoll();
+          this.poll.restart();
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
             this.prCache.clear();
@@ -217,7 +219,7 @@ export class WorktreeTreeProvider
       }),
     );
     void this.activity.restart();
-    this.restartPoll();
+    this.poll.restart();
     void this.refresh();
   }
 
@@ -454,108 +456,13 @@ export class WorktreeTreeProvider
     // node_modules or dist write does not trigger git status.
     if (shouldIgnoreHotFollowPath(uri.fsPath, selected.path)) return;
     // File activity → mark active (poll pace, if enabled)
-    this.enterActivePollPace('file-event');
+    this.poll.markActive('file-event');
     if (this.contentDebounce) clearTimeout(this.contentDebounce);
     // Longer debounce: agent bursts can write many files in one go
     this.contentDebounce = setTimeout(() => {
       this.contentDebounce = undefined;
       void this.softRefreshSelected('file-event');
     }, 800);
-  }
-
-  /** Idle (relaxed) poll interval; 0 disables polling entirely. */
-  private idlePollIntervalMs(): number {
-    return vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIntervalMs', 0);
-  }
-
-  /** Active (rapid) poll while changes keep landing. */
-  private activePollIntervalMs(): number {
-    const configured = vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshActiveIntervalMs', 1500);
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) return configured;
-    // Never slower than idle; never below 500ms
-    return Math.max(500, Math.min(configured, idle));
-  }
-
-  /** Quiet time before stepping back from active → idle pace. */
-  private idleAfterMs(): number {
-    return vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIdleAfterMs', 15000);
-  }
-
-  private enterActivePollPace(reason: string): void {
-    const was = this.pollPace;
-    this.pollPace = 'active';
-    this.lastFingerprintChangeAt = Date.now();
-    if (was !== 'active') {
-      this.output.appendLine(`Hot-follow pace → active (${reason})`);
-      // Pull the next poll forward without a full restart/log spam
-      this.scheduleNextPoll();
-    }
-  }
-
-  private maybeRelaxPollPace(): void {
-    if (this.pollPace !== 'active') return;
-    if (Date.now() - this.lastFingerprintChangeAt < this.idleAfterMs()) return;
-    this.pollPace = 'idle';
-    this.output.appendLine('Hot-follow pace → idle (quiet)');
-  }
-
-  private currentPollIntervalMs(): number {
-    return this.pollPace === 'active'
-      ? this.activePollIntervalMs()
-      : this.idlePollIntervalMs();
-  }
-
-  private restartPoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = undefined;
-    }
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) {
-      this.output.appendLine(
-        'Hot-follow poll disabled (contentRefreshIntervalMs=0); save/create/delete events still refresh',
-      );
-      return;
-    }
-    this.pollPace = 'idle';
-    this.output.appendLine(
-      `Hot-follow poll: idle=${idle}ms active=${this.activePollIntervalMs()}ms relaxAfter=${this.idleAfterMs()}ms`,
-    );
-    this.scheduleNextPoll();
-  }
-
-  private scheduleNextPoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = undefined;
-    }
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) return;
-    this.maybeRelaxPollPace();
-    const ms = this.currentPollIntervalMs();
-    this.pollTimer = setTimeout(() => {
-      this.pollTimer = undefined;
-      void this.runPollTick();
-    }, ms);
-  }
-
-  private async runPollTick(): Promise<void> {
-    try {
-      if (vscode.window.state.focused) {
-        await this.softRefreshSelected('poll');
-      } else {
-        this.maybeRelaxPollPace();
-      }
-    } finally {
-      this.scheduleNextPoll();
-    }
   }
 
   /**
@@ -582,12 +489,12 @@ export class WorktreeTreeProvider
       this.compareErrors.delete(worktreePath);
 
       if (prevFp === nextFp) {
-        this.maybeRelaxPollPace();
+        this.poll.relax();
         return;
       }
-      this.enterActivePollPace(reason);
+      this.poll.markActive(reason);
       this.output.appendLine(
-        `Hot-follow update (${reason}, pace=${this.pollPace}): ${path.basename(worktreePath)}`,
+        `Hot-follow update (${reason}, pace=${this.poll.currentPace}): ${path.basename(worktreePath)}`,
       );
       this._onDidChangeTreeData.fire();
     } catch (err) {
@@ -1074,7 +981,6 @@ export class WorktreeTreeProvider
 
   dispose(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    if (this.pollTimer) clearTimeout(this.pollTimer);
     if (this.contentDebounce) clearTimeout(this.contentDebounce);
     for (const d of this.disposables) {
       d.dispose();
