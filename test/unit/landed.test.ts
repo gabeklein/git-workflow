@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findLandedLanes,
+  findStaleLandedLanes,
   laneNeverDiverged,
 } from '../../src/git/integration/status';
 import { addBranch, git, makeRepo, type ScratchRepo } from './helpers';
@@ -89,7 +90,7 @@ describe('findLandedLanes', () => {
   it('a fresh branch at the base tip is EMPTY, not landed', async () => {
     git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
   });
 
@@ -97,7 +98,7 @@ describe('findLandedLanes', () => {
     git(scratch.repo, ['branch', 'feat/fresh', 'origin/main']);
     land(['commit', '-q', '--allow-empty', '-m', 'base moves on']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
   });
 
@@ -110,7 +111,7 @@ describe('findLandedLanes', () => {
     git(scratch.repo, ['checkout', '-q', 'main']);
     git(scratch.repo, ['push', '-q', 'origin', 'feat/fresh']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
     // ...and landing it now reads as landed, not empty
     land([
@@ -122,7 +123,7 @@ describe('findLandedLanes', () => {
       'origin/feat/fresh',
     ]);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual(['feat/fresh']);
   });
 });
@@ -161,13 +162,16 @@ describe('laneNeverDiverged', () => {
 });
 
 /**
- * Retirement has to survive the base moving on. A lane that landed and
- * then watched other PRs merge on top used to conflict against the base,
- * read as not-landed, never retire, and sit in the preview reporting a
- * conflict forever — the fix existed for branch pruning and was simply not
- * shared.
+ * The landings the rebuild's cheap check cannot see. A lane that landed
+ * and then watched other PRs merge on top conflicts against the base, so
+ * the fast predicate reads it as unlanded: it never retires and sits in
+ * the preview reporting a conflict forever.
+ *
+ * This probe walks base history to find it, which is why it is a separate
+ * function on a slow cadence rather than part of findLandedLanes — putting
+ * it in the rebuild made CI loads take eighteen seconds.
  */
-describe('findLandedLanes — stale landings', () => {
+describe('findStaleLandedLanes', () => {
   let scratch: ScratchRepo;
 
   const write = (f: string, body: string) => {
@@ -200,7 +204,7 @@ describe('findLandedLanes — stale landings', () => {
     git(scratch.repo, ['push', '-q', 'origin', 'main']);
 
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/old']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/old']),
     ).toEqual(['feat/old']);
   });
 
@@ -211,14 +215,14 @@ describe('findLandedLanes — stale landings', () => {
     git(scratch.repo, ['checkout', '-q', 'main']);
 
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/live']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/live']),
     ).toEqual([]);
   });
 
   it('does not retire an EMPTY lane — it has nothing to retire', async () => {
     git(scratch.repo, ['branch', 'feat/fresh', 'main']);
     expect(
-      await findLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
+      await findStaleLandedLanes(scratch.repo, 'origin/main', ['feat/fresh']),
     ).toEqual([]);
   });
 });

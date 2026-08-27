@@ -1,5 +1,5 @@
 import { git, gitOk } from '../exec';
-import { LANDED_SCAN_HOT, landedVia } from '../landedProbe';
+import { landedVia } from '../landedProbe';
 import { revParseCommit } from '../plumbing';
 import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
@@ -130,29 +130,72 @@ export async function findLandedLanes(
   if (!baseSha) {
     return [];
   }
+  let baseTree: string;
+  try {
+    baseTree = (await git(cwd, ['rev-parse', `${baseSha}^{tree}`])).trim();
+  } catch {
+    return [];
+  }
   const landed: string[] = [];
   for (const lane of lanes) {
     const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
     if (!laneSha) {
       continue; // branch gone — not our call to make
     }
-    // Shallow scan: this runs on every rebuild, once per lane.
-    const via = await landedVia(
-      cwd,
-      laneSha,
-      baseSha,
-      LANDED_SCAN_HOT,
-    ).catch(() => undefined);
+    if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
+      if (!(await laneNeverDiverged(cwd, laneSha, baseSha))) {
+        landed.push(lane);
+      }
+      continue;
+    }
+    try {
+      const result = await mergeOffTree(cwd, baseSha, laneSha, {
+        strict: true,
+      });
+      if (result.kind === 'tree' && result.tree === baseTree) {
+        landed.push(lane);
+      }
+    } catch {
+      // probe failure ⇒ not landed
+    }
+  }
+  return landed;
+}
+
+/**
+ * Lanes whose landing the cheap check above cannot see.
+ *
+ * Kept SEPARATE from findLandedLanes on purpose. That one runs inside every
+ * rebuild, once per lane, and must stay cheap; this one walks base history
+ * and belongs on a slow cadence. Splitting them is what lets retirement be
+ * correct for a stale landing without putting a history scan in the tick —
+ * an earlier attempt merged the two and made loads take eighteen seconds
+ * on CI.
+ *
+ * Same probe the branch prune uses, so panel, retirement and prune agree.
+ */
+export async function findStaleLandedLanes(
+  cwd: string,
+  baseRef: string,
+  lanes: string[],
+): Promise<string[]> {
+  const baseSha = await resolveBaseSha(cwd, baseRef);
+  if (!baseSha) {
+    return [];
+  }
+  const landed: string[] = [];
+  for (const lane of lanes) {
+    const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
+    if (!laneSha) {
+      continue;
+    }
+    const via = await landedVia(cwd, laneSha, baseSha).catch(() => undefined);
     if (!via) {
       continue;
     }
-    // A lane that never diverged is EMPTY, not landed — it has nothing to
-    // retire, and retiring it would drop a fresh worktree out of the
-    // preview before its first commit.
-    if (
-      via === 'ancestor' &&
-      (await laneNeverDiverged(cwd, laneSha, baseSha))
-    ) {
+    // Empty is not landed: a fresh worktree keeps its place in the preview
+    // until its first commit.
+    if (via === 'ancestor' && (await laneNeverDiverged(cwd, laneSha, baseSha))) {
       continue;
     }
     landed.push(lane);
