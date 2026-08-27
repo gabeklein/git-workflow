@@ -54,7 +54,7 @@ import {
   type RebuildResult,
   type ResolvedLane,
 } from '../git/integration';
-import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
+import { isPathInside, shouldIgnoreHotFollowPath } from './paths';
 
 /** What the controller needs from its host (the tree provider). */
 interface IntegrationHost {

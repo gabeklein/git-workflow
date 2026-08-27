@@ -1,8 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git } from '../git/exec';
-import { childrenAtPrefix, joinPrefix } from './fileTree';
-import { isPathInside } from './pathFilters';
+import { childrenAtPrefix, isPathInside, joinPrefix } from './paths';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
 /**

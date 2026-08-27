@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GroupItem, type TreeNode } from './nodes';
-import { describeLocation } from './pathFilters';
+import { describeLocation } from './paths';
 import type { ExplorerNode, FilesTreeProvider } from './filesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
 

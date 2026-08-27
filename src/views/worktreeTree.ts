@@ -28,7 +28,6 @@ import {
   type PullRequestInfo,
 } from '../github/pr';
 import { BaseStatusTracker } from './baseStatusTracker';
-import { childrenAtPrefix, joinPrefix } from './fileTree';
 import { GitActivityHub } from './gitActivityHub';
 import {
   IntegrationController,
@@ -46,7 +45,12 @@ import {
   type TreeNode,
   WorktreeListItem,
 } from './nodes';
-import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
+import {
+  childrenAtPrefix,
+  isPathInside,
+  joinPrefix,
+  shouldIgnoreHotFollowPath,
+} from './paths';
 import { WorktreeRowDecorationProvider } from './worktreeDecorations';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
