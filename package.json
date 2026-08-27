@@ -164,6 +164,11 @@
           "default": true,
           "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first \u2014 an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
         },
+        "worktreeCompare.integrationCommitGuard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Install a pre-commit hook that refuses commits made while the integration branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
+        },
         "worktreeCompare.quickDeleteLandedWorktrees": {
           "type": "boolean",
           "default": true,

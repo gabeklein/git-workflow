@@ -32,6 +32,19 @@ export function isIntegrationAbsorbEnabled(): boolean {
 }
 
 /**
+ * Whether a pre-commit hook refuses commits made on the integration branch.
+ * The branch is derived — rebuilds recreate it — so a commit there has no
+ * home, and absorb (the rescue) can only ever aim at the base, which is the
+ * wrong destination when the work belonged to a lane. Off leaves the older
+ * behaviour: commit freely, and let the rebuild's unique guard catch it.
+ */
+export function isCommitGuardEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<boolean>('integrationCommitGuard', true);
+}
+
+/**
  * Whether a landed, clean, unlocked worktree is removed on Delete Worktree
  * without the confirmation modal. Its COMMITS are provably safe; ignored
  * files in the checkout are not, which is why this can be turned off.

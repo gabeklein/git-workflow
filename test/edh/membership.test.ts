@@ -46,21 +46,22 @@ describe('auto membership', () => {
     );
   });
 
-  it('applies the empty lane on sight — nothing to hide, and no landed tag', async () => {
-    // feat/c has no commits of its own, so merging it is a no-op: it joins
-    // the preview immediately, so its FIRST commit needs no checkbox. The
-    // one-shot is recorded in focus-candidates.
-    await poll('empty lane auto-applies', 30000, async () => {
+  it('enrolls the empty lane WITHOUT applying it — inclusion is opt-in', async () => {
+    // Being mergeable is not a reason to be in someone's preview. An empty
+    // lane is a candidate on sight, so it is visible and one click away,
+    // but joining is always a decision somebody made.
+    await poll('empty lane shows as a candidate', 30000, async () => {
       await run('worktreeCompare.refresh');
-      return appliedInView().includes('feat/c');
+      return candidates().includes('feat/c');
     });
+    await sleep(1500);
     assert.ok(
-      readLanes('focus-applied').includes('feat/c'),
-      'auto-apply persisted to focus-applied',
+      !appliedInView().includes('feat/c'),
+      'the empty lane was not applied by itself',
     );
     assert.ok(
-      readLanes('focus-candidates').includes('feat/c'),
-      'the one-shot is recorded, so the auto-apply never fights an uncheck',
+      !readLanes('focus-applied').includes('feat/c'),
+      'nothing was persisted to focus-applied',
     );
     assert.ok(
       !(api.integration()?.landed ?? []).includes('feat/c'),
@@ -68,7 +69,7 @@ describe('auto membership', () => {
     );
   });
 
-  it('re-points an empty lane cut from a stale base, then applies it', async () => {
+  it('re-points an empty lane cut from a stale base, without applying it', async () => {
     // Cut from main's PARENT: empty, but behind — nothing to rebase, so
     // the lane is moved rather than left reporting a rebase it cannot do.
     const stale = git(repo, ['rev-parse', 'origin/main~1']);
@@ -79,17 +80,20 @@ describe('auto membership', () => {
     // guessing.
     git(repo, ['config', 'branch.feat/stale.vscode-merge-base', 'main']);
     git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stale', 'feat/stale']);
-    // Both conditions in ONE poll: the fast-forward moves the ref before
-    // the same refresh pass records the lane, so asserting the applied
-    // state right after the ref moves is a race that only local timing wins.
-    await poll('stale empty lane is fast-forwarded, then applied', 30000, async () => {
+    // The re-point survives opt-in lanes: it is not about membership, it is
+    // about an empty lane starting from the right place when its first
+    // commit lands.
+    await poll('stale empty lane is fast-forwarded', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (
         git(repo, ['rev-parse', 'feat/stale']) ===
-          git(repo, ['rev-parse', 'origin/main']) &&
-        appliedInView().includes('feat/stale')
+        git(repo, ['rev-parse', 'origin/main'])
       );
     });
+    assert.ok(
+      !appliedInView().includes('feat/stale'),
+      'moving a lane is not the same as enrolling it in the preview',
+    );
     // Leave no lane behind — later scenarios are sequential and stateful
     git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-stale']);
     git(repo, ['branch', '-D', 'feat/stale']);

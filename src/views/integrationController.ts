@@ -18,6 +18,9 @@ import {
   addCandidateLane,
   addExcludedLane,
   alignIntegrationBranchName,
+  installCommitGuard,
+  isCommitGuardEnabled,
+  uninstallCommitGuard,
   baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
@@ -51,6 +54,7 @@ import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 export interface IntegrationHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
+  getRepoCwd(): string | undefined;
   getSelectedPath(): string | undefined;
   fireTreeData(): void;
   refresh(): void;
@@ -94,6 +98,8 @@ export interface IntegrationState {
  */
 export class IntegrationController implements vscode.Disposable {
   private integrationPath: string | undefined;
+  /** Path:branch:enabled the pre-commit guard was last reconciled for. */
+  private guardSyncedFor: string | undefined;
   private lanes: string[] = [];
   /** Everything shown under Integration: explicit + applied + auto members. */
   private candidates: string[] = [];
@@ -163,6 +169,10 @@ export class IntegrationController implements vscode.Disposable {
       if (this.integrationPath) {
         this.host.output.appendLine('Integration worktree gone — overlay off');
       }
+      if (this.guardSyncedFor) {
+        this.guardSyncedFor = undefined;
+        void this.syncCommitGuard(undefined, branch);
+      }
       this.integrationPath = undefined;
       this.lanes = [];
       this.candidates = [];
@@ -194,6 +204,11 @@ export class IntegrationController implements vscode.Disposable {
       }
     }
     this.integrationPath = wt.path;
+    const guardKey = `${wt.path}:${branch}:${isCommitGuardEnabled()}`;
+    if (this.guardSyncedFor !== guardKey) {
+      this.guardSyncedFor = guardKey;
+      void this.syncCommitGuard(wt.path, branch);
+    }
     try {
       // Dead lanes: a branch deleted out from under Integration (its
       // worktree died — landed and cleaned up, agent teardown) leaves
@@ -299,12 +314,10 @@ export class IntegrationController implements vscode.Disposable {
           continue;
         }
         auto.push(w.branch);
-        // Empty lane (created off the base, nothing committed yet): apply it
-        // on sight. There is nothing to hide — merging it is a literal no-op
-        // — and it means the first commit flows into the preview instead of
-        // waiting on a checkbox. Recorded as a candidate too, so this happens
-        // exactly ONCE per branch: the explicit guard above skips it forever
-        // after, and an uncheck stays unchecked.
+        // Empty lane (created off the base, nothing committed yet): keep it
+        // pointed AT the base. It is not applied — being mergeable is not a
+        // reason to be in someone's preview — it just starts from the right
+        // place when its first commit lands.
         const laneSha = await revParseCommit(wt.path, `refs/heads/${w.branch}`);
         if (
           effective &&
@@ -330,13 +343,6 @@ export class IntegrationController implements vscode.Disposable {
                   })`,
             );
           }
-          await addCandidateLane(wt.path, w.branch);
-          await addAppliedLane(wt.path, w.branch);
-          explicit.push(w.branch);
-          this.lanes.push(w.branch);
-          this.host.output.appendLine(
-            `Integration lane auto-applied (new worktree off ${integBase}): ${w.branch}`,
-          );
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
@@ -523,6 +529,48 @@ export class IntegrationController implements vscode.Disposable {
     }
     this.fingerprint = fp;
     await this.runRebuild('lane tips moved');
+  }
+
+  /**
+   * Keep the pre-commit guard in step with integration state. Installed
+   * while integration is on, removed when it goes off, and re-pointed when
+   * the branch is renamed — reconciled from refreshState rather than from
+   * the enable/disable commands so it also covers checkouts made by hand
+   * and repos that had integration on before the guard existed.
+   *
+   * Failure is logged, never surfaced: a repo where hooks cannot be written
+   * (read-only .git, an unusual hooksPath) still works exactly as it did
+   * before — it just does not get the extra warning.
+   */
+  private async syncCommitGuard(
+    workingPath: string | undefined,
+    branch: string,
+  ): Promise<void> {
+    const cwd = workingPath ?? this.host.getRepoCwd();
+    if (!cwd) {
+      return;
+    }
+    try {
+      if (!workingPath || !isCommitGuardEnabled()) {
+        await uninstallCommitGuard(cwd);
+        return;
+      }
+      const result = await installCommitGuard(cwd, branch);
+      if (result === 'foreign') {
+        this.host.output.appendLine(
+          `Commit guard not installed: ${cwd} has a pre-commit hook that is not a shell script — chaining into it could break every commit, so it was left alone`,
+        );
+      } else if (result !== 'unchanged') {
+        this.host.output.appendLine(
+          result === 'chained'
+            ? `Commit guard chained into the existing pre-commit hook: refusing commits on ${branch}`
+            : `Commit guard ${result}: refusing commits on ${branch}`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Commit guard sync failed: ${message}`);
+    }
   }
 
   /**
@@ -877,6 +925,14 @@ export class IntegrationController implements vscode.Disposable {
             );
           }
         });
+    } else if (result.code === 'busy') {
+      // One attempt per tip is what keeps a genuinely unabsorbable commit
+      // from retrying forever — but a held index.lock is not that. Clearing
+      // the guard lets the next tick try again, which is all this needs.
+      this.lastAbsorbHead = undefined;
+      this.host.output.appendLine(
+        `Absorbing integration strays deferred: ${result.message}`,
+      );
     } else if (result.code !== 'nothing') {
       this.host.output.appendLine(
         `Absorbing integration strays failed (${result.code}): ${result.message}${
