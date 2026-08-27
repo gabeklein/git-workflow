@@ -56,3 +56,26 @@ There are two layers — pick by what the code needs, not by convenience:
 
 - Do not add AI attribution trailers (`Co-authored-by`, sign-offs) to
   commits.
+
+## Working in a repo with integration on
+
+The **integration** branch (default `integration/{base}`) is a derived
+preview: the base with each applied lane merged on top, rebuilt with
+`reset --hard`. It is not a place work can live — commit on a real
+branch instead. A `pre-commit` hook refuses commits made there.
+
+A worktree you create off the integration base becomes a **candidate**
+automatically: it shows as an unchecked row, and nothing of yours is
+merged into anyone's preview. Joining is deliberate, and it is yours to
+decide — you know whether your work is ready to be seen next to the
+other lanes, and a base match does not.
+
+To opt in, once the work is worth previewing:
+
+```
+Git Workflow: Add to Integration    (worktreeCompare.addToIntegration)
+```
+
+Leave it out when the branch is mid-refactor, deliberately broken, or
+exploring something that would clash with other lanes. Being out costs
+nothing — the row stays visible and one click away.

@@ -299,12 +299,10 @@ export class IntegrationController implements vscode.Disposable {
           continue;
         }
         auto.push(w.branch);
-        // Empty lane (created off the base, nothing committed yet): apply it
-        // on sight. There is nothing to hide — merging it is a literal no-op
-        // — and it means the first commit flows into the preview instead of
-        // waiting on a checkbox. Recorded as a candidate too, so this happens
-        // exactly ONCE per branch: the explicit guard above skips it forever
-        // after, and an uncheck stays unchecked.
+        // Empty lane (created off the base, nothing committed yet): keep it
+        // pointed AT the base. It is not applied — being mergeable is not a
+        // reason to be in someone's preview — it just starts from the right
+        // place when its first commit lands.
         const laneSha = await revParseCommit(wt.path, `refs/heads/${w.branch}`);
         if (
           effective &&
@@ -330,13 +328,6 @@ export class IntegrationController implements vscode.Disposable {
                   })`,
             );
           }
-          await addCandidateLane(wt.path, w.branch);
-          await addAppliedLane(wt.path, w.branch);
-          explicit.push(w.branch);
-          this.lanes.push(w.branch);
-          this.host.output.appendLine(
-            `Integration lane auto-applied (new worktree off ${integBase}): ${w.branch}`,
-          );
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
