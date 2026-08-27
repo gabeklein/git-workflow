@@ -14,6 +14,24 @@ export function registerFileExplorerCommands(
   log: { appendLine(value: string): void },
 ): vscode.Disposable[] {
   return [
+    vscode.commands.registerCommand(
+      'worktreeCompare.copyPath',
+      async (item?: { resourceUri?: vscode.Uri; kind?: string }) => {
+        // The section row carries no resourceUri — it stands for the
+        // checkout itself, so fall back to the focused worktree's root.
+        const target =
+          item?.resourceUri?.fsPath ?? treeProvider.getSelectedPath();
+        if (!target) {
+          return;
+        }
+        await vscode.env.clipboard.writeText(target);
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: copied ${path.basename(target)} path`,
+          2000,
+        );
+        log.appendLine(`Copied path: ${target}`);
+      },
+    ),
     vscode.commands.registerCommand('worktreeCompare.refreshFiles', () =>
       filesProvider.refresh(),
     ),

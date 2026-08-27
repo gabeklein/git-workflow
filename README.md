@@ -207,8 +207,10 @@ Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `
 ▼ Commits · N                        description: → base [@sha]
 ▼ Staged / Unstaged                  ← hidden if empty; commit via context menu
 ▶ Full Diff · N new · M modified · …  ← collapsed until opened
-▶ Directory                          ← the focused worktree's working tree
+▶ Directory              ../gw-demo/repo   ← the focused worktree's working tree
 ```
+
+The row's description says **where that checkout is**, in the shortest form that is true: `.` for the workspace root, `./x` inside it, `../x` beside it (the usual worktree layout), `~/x` under home, absolute otherwise. Shortest rather than a fixed order, because a preference gets it wrong both ways — `../../Users/you/Projects/thing` is not "beside" anything and is plainly worse than `~/Projects/thing`, while a real sibling reads better as `../other` than as either. **Copy Path** is on the section row (the checkout root) and on any file or folder in it.
 
 The **Directory** section browses and opens the worktree's files as **real editable buffers**, not diffs. It is *Directory* and not *Files* because under a panel called Changes, "Files" reads as the changed files — the one thing it is not. The listing is git-driven (tracked + untracked, `.gitignore` respected — no `node_modules` noise) and follows focus; `New File…` / `Delete` sit on the section row and the context menus, and it refreshes on git activity and file events. It exists because the built-in Explorer can only reveal paths inside a workspace folder — a sibling worktree is outside every one of them — and converting the window to multi-root restarts the extension host.
 

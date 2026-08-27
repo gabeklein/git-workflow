@@ -491,6 +491,11 @@
         "title": "Sync with Remote",
         "category": "Git Workflow",
         "icon": "$(sync)"
+      },
+      {
+        "command": "worktreeCompare.copyPath",
+        "title": "Copy Path",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -761,6 +766,16 @@
           "command": "worktreeCompare.refreshFiles",
           "when": "view == worktreeCompare.changes && viewItem == group:directory",
           "group": "inline@2"
+        },
+        {
+          "command": "worktreeCompare.copyPath",
+          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "worktreeCompare.copyPath",
+          "when": "view == worktreeCompare.changes && viewItem =~ /^explorer(File|Folder)$/",
+          "group": "1_copy@1"
         }
       ]
     }

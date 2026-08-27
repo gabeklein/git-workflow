@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { GroupItem, type TreeNode } from './nodes';
+import { describeLocation } from './pathFilters';
 import type { ExplorerNode, FilesTreeProvider } from './filesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
@@ -72,12 +73,22 @@ export class ChangesTreeProvider
     if (!this.worktrees.getSelectedPath()) {
       return changes;
     }
+    const root = this.worktrees.getSelectedPath();
     return [
       ...changes,
       new GroupItem(
         'Directory',
         'directory',
         vscode.TreeItemCollapsibleState.Collapsed,
+        // Where this checkout actually is. Worktrees are usually siblings
+        // of the open folder, so the relationship is the useful part —
+        // `../gw-demo/repo` says something an absolute path buries.
+        root
+          ? describeLocation(
+              root,
+              vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            )
+          : undefined,
       ),
     ];
   }
