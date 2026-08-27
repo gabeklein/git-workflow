@@ -1,8 +1,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from './exec';
-import { laneNeverDiverged, resolveBaseSha } from './integration';
-import { gitErrorMessage, isWorktreeDirty } from './plumbing';
+import { landedPrefix, laneNeverDiverged, resolveBaseSha } from './integration';
+import { gitErrorMessage, isWorktreeDirty, revParseCommit } from './plumbing';
 
 /**
  * Manual catch-up operations on a lane's own worktree: rebase onto the
@@ -134,8 +134,21 @@ export async function startLaneRebase(
   if (!baseSha) {
     return { status: 'error', message: `base ${baseRef} does not resolve` };
   }
+  // Replay only what has NOT already landed. Plain `git rebase <base>`
+  // replays everything in base..HEAD, which after a SQUASH merge of a
+  // parent branch still lists the parent's originals — every one of them
+  // conflicting against a base that already has the content.
+  const head = await revParseCommit(worktree, 'HEAD');
+  const forkPoint = head
+    ? await landedPrefix(worktree, head, baseSha)
+    : undefined;
   try {
-    await git(worktree, ['rebase', baseSha]);
+    await git(
+      worktree,
+      forkPoint
+        ? ['rebase', '--onto', baseSha, forkPoint]
+        : ['rebase', baseSha],
+    );
     return { status: 'done' };
   } catch (err) {
     const files = await unmergedFiles(worktree);
@@ -209,6 +222,18 @@ export async function startBaseMerge(
   const baseSha = await resolveBaseSha(worktree, baseRef);
   if (!baseSha) {
     return { status: 'error', message: `base ${baseRef} does not resolve` };
+  }
+  // A merge cannot skip history the way a rebase can, so when part of this
+  // branch has already landed in the base the merge is guaranteed to
+  // conflict on content that is not actually in dispute. Say so instead of
+  // handing over a conflict nobody can resolve correctly — the exit is a
+  // rebase, which rewrites history and is therefore the user's call.
+  const head = await revParseCommit(worktree, 'HEAD');
+  if (head && (await landedPrefix(worktree, head, baseSha))) {
+    return {
+      status: 'blocked',
+      message: `part of ${branch} already landed in ${baseRef} (squashed or rebased), so merging would replay it as conflicts — catch up with a rebase instead`,
+    };
   }
   const subject = `Merge ${baseRef.replace(/^origin\//, '')} into ${branch}`;
   try {

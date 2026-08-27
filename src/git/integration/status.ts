@@ -157,6 +157,92 @@ export async function findLandedLanes(
 }
 
 /**
+ * The newest commit on HEAD's first-parent line whose CONTENT is already in
+ * `target` — the honest fork point when history says otherwise.
+ *
+ * Every PR in this repo squash-merges, and that is the case plain `git
+ * rebase <target>` gets wrong. A lane stacked on a parent branch carries
+ * the parent's original commits; once the parent squash-merges, `target`
+ * holds that work as ONE new commit with unrelated shas, so
+ * `target..HEAD` still lists the originals and rebase dutifully replays
+ * them — against a target that already has the content. Every one of those
+ * replays conflicts, and none of the conflicts is real.
+ *
+ * Detection is by content, not by name, because the parent BRANCH is
+ * usually gone by then: GitHub deletes it on merge. So this asks the
+ * question that still has an answer — "how much of my history is already
+ * in the target, however it got there?" — with the same strict off-tree
+ * probe findLandedLanes uses. That makes it uniform across squash, rebase
+ * and true merges.
+ *
+ * Monotone (merging a commit brings its ancestors too), so the boundary is
+ * found by binary search: log(n) probes, none of which touch a working
+ * tree. Returns undefined when nothing has landed — the ordinary case,
+ * where a plain rebase was right all along.
+ */
+/** Commits to probe before giving up — a lane deeper than this is not the
+ *  stacked-on-a-squashed-parent shape this exists for. */
+const MAX_FORK_SCAN = 100;
+
+export async function landedPrefix(
+  cwd: string,
+  headSha: string,
+  targetSha: string,
+): Promise<string | undefined> {
+  let targetTree: string;
+  try {
+    targetTree = (await git(cwd, ['rev-parse', `${targetSha}^{tree}`])).trim();
+  } catch {
+    return undefined;
+  }
+  // Newest first — we want the FURTHEST point that is already in the
+  // target, and we want to stop at the first hit.
+  const chain = (
+    await git(cwd, [
+      'rev-list',
+      '--first-parent',
+      `--max-count=${MAX_FORK_SCAN}`,
+      `${targetSha}..${headSha}`,
+    ]).catch(() => '')
+  )
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // Apply the commit's OWN delta to the target: would replaying it change
+  // anything? Cherry-pick semantics, the same probe absorb uses.
+  const isLanded = async (sha: string): Promise<boolean> => {
+    try {
+      const parent = (
+        await git(cwd, ['rev-parse', '--verify', `${sha}^`])
+      ).trim();
+      const result = await mergeOffTree(cwd, targetSha, sha, {
+        strict: true,
+        mergeBase: parent,
+      });
+      return result.kind === 'tree' && result.tree === targetTree;
+    } catch {
+      return false; // no parent, or probe failed ⇒ rebase plainly
+    }
+  };
+
+  for (const [i, sha] of chain.entries()) {
+    // The tip itself landing means the whole branch is done — that is
+    // retirement's business, not catch-up's; there is nothing to replay.
+    if (i === 0) {
+      if (await isLanded(sha)) {
+        return undefined;
+      }
+      continue;
+    }
+    if (await isLanded(sha)) {
+      return sha;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Merge two commits without touching any working tree.
  * Returns the merged tree oid, a conflict (with the files), or
  * 'unsupported' when git predates merge-tree --write-tree (< 2.38).
