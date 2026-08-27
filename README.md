@@ -151,7 +151,15 @@ That refusal is the point. `catchUpStrategy` is tuned for lane-vs-base, where be
 
 **Prune Landed Branches** (Focus panel title menu) deletes local branches whose work is already in the base. It exists because `git branch -d` cannot do this job: it decides "merged" by **ancestry**, and a squash-merged branch is not an ancestor of anything — so it refuses, and the only way past it is `-D`, which deletes unmerged work just as happily. At any real merge rate the local branch list grows without bound and nobody dares run the blunt version.
 
-The predicate is the same content-based one the Integration panel uses to retire landed lanes: a branch is landed when merging it into the base would change nothing — ancestry for true merges, a strict off-tree probe for squash and rebase landings. **Revert-safe by construction**: once a squash-merge is reverted, merging the branch *would* change the tree, so it stops reading as landed and survives the prune.
+Landing is decided by a stack of probes, each of which can only ever say *landed* (a miss means keep the branch — a false negative wastes disk, a false positive deletes work):
+
+1. **ancestry** — a true merge;
+2. **content** — merging it into the base right now changes nothing, which covers a branch that landed while the base sat still;
+3. **the squash it landed as** — a squash commit is built by merging the branch into the base as it stood just before, so if applying the branch to some commit's *parent* reproduces that commit's tree exactly, that commit **is** this branch.
+
+Probe 3 is what makes this work on stale crust. A "would merging it change anything" test alone reports *not landed* as soon as later work touches the same files, so old branches accumulate forever — measured on this repo, it missed 6 of 10 genuinely-landed branches.
+
+Having found where a branch landed, probe 3 re-applies that commit's own delta to the current base and reads three outcomes apart: a **no-op** means the landing is intact; a **conflict** means later work evolved those same lines, which is still landed (the base built *on* it); a **clean change** means the work is cleanly absent, so re-applying restores it — that is a **revert**, and the branch is the way back, so it is never offered. History-based tests (`git cherry`, patch-id comparison) are deliberately not used: a reverted squash still satisfies both, and the branch that could restore it is exactly what would be deleted.
 
 A multi-select picker shows what landed and how (`merged` / `squashed or rebased in`), flags branches `origin` still has, and lists branches that are checked out in a worktree without pre-selecting them — git refuses to delete those, and the worktree goes first. Every branch is **re-verified against the base immediately before deletion**, so a lane an agent committed to while the picker was open is kept, not deleted. The base and the integration branch are never offered. Agents and tests can pass names directly (`{ branches: [...] }`) to skip the picker; the proof still runs.
 
