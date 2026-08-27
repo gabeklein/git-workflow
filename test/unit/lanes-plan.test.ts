@@ -290,3 +290,24 @@ describe('planLaneRows — the ladder', () => {
     expect(result.landed).toEqual([]);
   });
 });
+
+/**
+ * Sync state is why a branch that exists locally AND on the remote is one
+ * row rather than two: the arrows say which side is ahead, so Remote can
+ * mean "no local ref" without hiding anything.
+ */
+describe('branch sync state', () => {
+  it('is carried on the branch, straight from the ref listing', () => {
+    const b = br('feat/x', 1, { hasRemote: true, ahead: 2, behind: 1 });
+    expect(b.ahead).toBe(2);
+    expect(b.behind).toBe(1);
+  });
+
+  it('a local-and-remote branch stays in Local, not Remote', () => {
+    const result = plan({
+      branches: [br('feat/x', 1, { hasRemote: true, ahead: 2 })],
+    });
+    expect(result.local.map((x) => x.name)).toEqual(['feat/x']);
+    expect(result.remote).toEqual([]);
+  });
+});

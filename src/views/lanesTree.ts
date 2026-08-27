@@ -299,6 +299,7 @@ export class LanesTreeProvider
           b.relativeDate,
           undefined, // a branch with a checkout is never in this group
           this.branches.getPullRequestFor(b.name),
+          { ahead: b.ahead, behind: b.behind },
         ),
     );
     if (hidden > 0) {
