@@ -1,5 +1,6 @@
-import { git, gitOk } from './exec';
-import { mergeOffTree, resolveBaseSha } from './integration';
+import { git } from './exec';
+import { resolveBaseSha } from './integration';
+import { landedVia } from './landedProbe';
 import { revParseCommit } from './plumbing';
 import { listWorktreeAdmin } from './worktreeAdmin';
 
@@ -13,20 +14,18 @@ import { listWorktreeAdmin } from './worktreeAdmin';
  * happily as merged work. At any real merge rate the local branch list
  * grows without bound and nobody dares run the blunt version.
  *
- * The predicate here is the same content-based one the integration panel
- * uses to retire landed lanes: a branch is landed when merging it into the
- * base would change nothing — ancestry for true merges, a strict off-tree
- * probe for squash and rebase landings. Revert-safe by construction: once
- * a squash-merge is reverted, merging the branch WOULD change the tree, so
- * it stops reporting as landed and survives the prune.
+ * The predicate lives in landedProbe: a stack of sound tests covering
+ * true merges, fresh squashes, squashes the base has since moved past, and
+ * rebase landings. Revert-safe by construction — once a squash-merge is
+ * reverted, the branch stops reading as landed and survives the prune.
  *
  * Everything here reads. Deletion is a separate, explicit step.
  */
 
 export interface LandedBranch {
   name: string;
-  /** How it landed — worth showing, since the two mean different things. */
-  via: 'ancestor' | 'content';
+  /** How it landed — worth showing, they mean different things. */
+  via: 'ancestor' | 'content' | 'squash' | 'replayed';
   /** Checkout holding it, if any: git refuses to delete a checked-out branch. */
   worktree?: string;
   /** Still published — deleting locally does not delete origin's copy. */
@@ -55,10 +54,6 @@ export async function findLandedBranches(
   if (!baseSha) {
     return { landed: [], keptCount: 0 };
   }
-  const baseTree = (
-    await git(repoCwd, ['rev-parse', `${baseSha}^{tree}`])
-  ).trim();
-
   const admin = await listWorktreeAdmin(repoCwd).catch(
     () => new Map<string, { branch?: string; path: string; detached: boolean }>(),
   );
@@ -103,21 +98,8 @@ export async function findLandedBranches(
     if (!sha || sha === baseSha) {
       continue;
     }
-    let via: LandedBranch['via'] | undefined;
-    if (await gitOk(repoCwd, ['merge-base', '--is-ancestor', sha, baseSha])) {
-      via = 'ancestor';
-    } else {
-      try {
-        const result = await mergeOffTree(repoCwd, baseSha, sha, {
-          strict: true,
-        });
-        if (result.kind === 'tree' && result.tree === baseTree) {
-          via = 'content';
-        }
-      } catch {
-        // probe failure ⇒ not landed. Never delete on a failed question.
-      }
-    }
+    // Every probe is sound and any may abstain, so a miss means "keep it".
+    const via = await landedVia(repoCwd, sha, baseSha).catch(() => undefined);
     if (!via) {
       keptCount += 1;
       continue;

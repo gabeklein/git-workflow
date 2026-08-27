@@ -132,3 +132,77 @@ describe('prune landed branches', () => {
     expect(git(scratch.repo, ['rev-parse', '--verify', 'feat/moved'])).toBeTruthy();
   });
 });
+
+/**
+ * The case the first version got wrong: a branch that landed a while ago,
+ * with the base moving on afterwards. Merging it into the base now
+ * conflicts on files later work also touched, so a "would this merge
+ * change anything" probe reports not-landed and the branch survives
+ * forever — which is precisely the crust the prune exists to clear.
+ */
+describe('prune landed branches — stale landings', () => {
+  let scratch: ScratchRepo;
+
+  const write = (f: string, body: string) => {
+    fs.writeFileSync(path.join(scratch.repo, f), body);
+    git(scratch.repo, ['add', '-A']);
+  };
+
+  beforeEach(() => {
+    scratch = makeRepo();
+    write('app.txt', 'one\ntwo\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'app']);
+  });
+  afterEach(() => {
+    scratch.cleanup();
+  });
+
+  it('finds a squash landing the base has since moved past', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/old', 'main']);
+    write('app.txt', 'one\nBRANCH\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'branch edit']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    git(scratch.repo, ['merge', '-q', '--squash', 'feat/old']);
+    git(scratch.repo, ['commit', '-qm', 'branch edit (#1)']);
+    // ...and then the base keeps going, touching the SAME line
+    write('app.txt', 'one\nBRANCH\nthree\nlater work\n');
+    git(scratch.repo, ['commit', '-qm', 'later (#2)']);
+    write('app.txt', 'one\nBRANCH AGAIN\nthree\nlater work\n');
+    git(scratch.repo, ['commit', '-qm', 'later still (#3)']);
+
+    const scan = await findLandedBranches(scratch.repo, 'main');
+    expect(scan.landed.map((b) => `${b.name}:${b.via}`)).toEqual([
+      'feat/old:squash',
+    ]);
+  });
+
+  it('still refuses a stale branch whose work was reverted', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/undone', 'main']);
+    write('app.txt', 'one\nUNDONE\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'work']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    git(scratch.repo, ['merge', '-q', '--squash', 'feat/undone']);
+    git(scratch.repo, ['commit', '-qm', 'work (#1)']);
+    git(scratch.repo, ['revert', '--no-edit', 'HEAD']);
+    write('other.txt', 'unrelated\n');
+    git(scratch.repo, ['commit', '-qm', 'moving on (#2)']);
+
+    // The squash is still in history — a history-based test would say
+    // landed. The work is not in the tree, so this must not.
+    const scan = await findLandedBranches(scratch.repo, 'main');
+    expect(scan.landed).toEqual([]);
+    expect(scan.keptCount).toBe(1);
+  });
+
+  it('keeps a branch whose work never landed at all', async () => {
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/live', 'main']);
+    write('app.txt', 'one\nLIVE\nthree\n');
+    git(scratch.repo, ['commit', '-qm', 'live work']);
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    write('app.txt', 'one\ntwo\nthree\nmain moved\n');
+    git(scratch.repo, ['commit', '-qm', 'main (#1)']);
+
+    const scan = await findLandedBranches(scratch.repo, 'main');
+    expect(scan.landed).toEqual([]);
+  });
+});
