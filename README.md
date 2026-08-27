@@ -140,6 +140,14 @@ The integration checkout is rebuilt as **base + a merge of each applied lane**, 
 - Absorbed commits carry their provenance: git's own `(cherry picked from commit <sha>)` line plus an `Absorbed-from: <branch>` trailer. The source commit lives on a branch the next rebuild destroys, so the sha stops resolving almost immediately — the trailer is the half that still answers "where did this come from" later.
 - Applied lanes live in `<git-common-dir>/focus-applied` (candidates in `focus-candidates`) and rebuilds take `<git-common-dir>/focus-working.lock` — the same protocol as agent-focus's `scripts/focus-working.sh`, so the script, its `post-commit` hook, and this extension can be mixed freely.
 
+## Pruning landed branches
+
+**Prune Landed Branches** (Focus panel title menu) deletes local branches whose work is already in the base. It exists because `git branch -d` cannot do this job: it decides "merged" by **ancestry**, and a squash-merged branch is not an ancestor of anything — so it refuses, and the only way past it is `-D`, which deletes unmerged work just as happily. At any real merge rate the local branch list grows without bound and nobody dares run the blunt version.
+
+The predicate is the same content-based one the Integration panel uses to retire landed lanes: a branch is landed when merging it into the base would change nothing — ancestry for true merges, a strict off-tree probe for squash and rebase landings. **Revert-safe by construction**: once a squash-merge is reverted, merging the branch *would* change the tree, so it stops reading as landed and survives the prune.
+
+A multi-select picker shows what landed and how (`merged` / `squashed or rebased in`), flags branches `origin` still has, and lists branches that are checked out in a worktree without pre-selecting them — git refuses to delete those, and the worktree goes first. Every branch is **re-verified against the base immediately before deletion**, so a lane an agent committed to while the picker was open is kept, not deleted. The base and the integration branch are never offered. Agents and tests can pass names directly (`{ branches: [...] }`) to skip the picker; the proof still runs.
+
 ## Catching lanes up with the base
 
 Base conflicts dominate multi-branch workflows (peer-lane conflicts are rare), so staleness is surfaced on the **worktree rows**: `N behind <base>`, `conflicts with <base>`, `rebasing`, or `merging base`. Every badge is computed against the same per-worktree base the Commits/Full Diff views use, and the paused states are probed from real git state (`rebase-merge`/`MERGE_HEAD`) — operations started in a terminal show the same controls.
