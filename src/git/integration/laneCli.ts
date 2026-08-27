@@ -135,9 +135,7 @@ export async function laneCliPath(cwd: string): Promise<string> {
 
 export async function installLaneCli(cwd: string): Promise<boolean> {
   const target = await laneCliPath(cwd);
-  if ((await read(target)) === SCRIPT) {
-    return false;
-  }
+  if ((await read(target)) === SCRIPT) return false;
   await fs.writeFile(target, SCRIPT, { mode: 0o755 });
   // writeFile does not chmod a file that already existed
   await fs.chmod(target, 0o755);
@@ -148,7 +146,5 @@ export async function installLaneCli(cwd: string): Promise<boolean> {
 export async function uninstallLaneCli(cwd: string): Promise<void> {
   const target = await laneCliPath(cwd);
   const existing = await read(target);
-  if (existing?.includes(SENTINEL)) {
-    await fs.rm(target, { force: true });
-  }
+  if (existing?.includes(SENTINEL)) await fs.rm(target, { force: true });
 }

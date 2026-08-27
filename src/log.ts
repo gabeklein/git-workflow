@@ -35,9 +35,7 @@ export function createFileBackedLogger(
   try {
     const vscodeLog = path.join(context.logUri.fsPath, 'git-workflow.log');
     fs.mkdirSync(context.logUri.fsPath, { recursive: true });
-    if (vscodeLog !== stableFile) {
-      logFiles.push(vscodeLog);
-    }
+    if (vscodeLog !== stableFile) logFiles.push(vscodeLog);
   } catch {
     // ignore secondary path
   }
@@ -48,9 +46,7 @@ export function createFileBackedLogger(
       'git-workflow.log',
     );
     fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
-    if (!logFiles.includes(globalLog)) {
-      logFiles.push(globalLog);
-    }
+    if (!logFiles.includes(globalLog)) logFiles.push(globalLog);
   } catch {
     // ignore
   }

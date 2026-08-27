@@ -18,15 +18,11 @@ export function childrenAtPrefix<T extends { path: string }>(
 
   for (const f of files) {
     if (prefix) {
-      if (f.path === prefix || !f.path.startsWith(prefixWithSlash)) {
-        continue;
-      }
+      if (f.path === prefix || !f.path.startsWith(prefixWithSlash)) continue;
     }
 
     const rest = prefix ? f.path.slice(prefixWithSlash.length) : f.path;
-    if (!rest) {
-      continue;
-    }
+    if (!rest) continue;
     const slash = rest.indexOf('/');
     if (slash === -1) {
       direct.push(f);

@@ -61,9 +61,7 @@ export function registerWorktreeCommands(
           typeof pathOrItem === 'string'
             ? pathOrItem
             : pathOrItem?.worktreePath;
-        if (!path) {
-          return;
-        }
+        if (!path) return;
         await treeProvider.setSelectedPath(path);
       },
     ),
@@ -74,9 +72,7 @@ export function registerWorktreeCommands(
           treeProvider.getWorktrees(),
           treeProvider.getSelectedPath(),
         );
-        if (!picked) {
-          return;
-        }
+        if (!picked) return;
         await treeProvider.setSelectedPath(picked.path);
       },
     ),
@@ -84,9 +80,7 @@ export function registerWorktreeCommands(
       'worktreeCompare.openWorktree',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!target) {
-          return;
-        }
+        if (!target) return;
         const uri = vscode.Uri.file(target);
         // revealInExplorer can only show what the Explorer already holds —
         // a worktree in a sibling directory is outside every workspace
@@ -109,9 +103,7 @@ export function registerWorktreeCommands(
       'worktreeCompare.unlockWorktree',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!target) {
-          return;
-        }
+        if (!target) return;
         try {
           await unlockWorktree(target);
           log.appendLine(`Unlocked worktree ${target}`);
@@ -133,9 +125,7 @@ export function registerWorktreeCommands(
       'worktreeCompare.deleteWorktree',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!target) {
-          return;
-        }
+        if (!target) return;
         const wt = treeProvider.getWorktree(target);
         if (!wt) {
           void vscode.window.showErrorMessage(
@@ -258,9 +248,7 @@ export function registerWorktreeCommands(
           'Delete',
           ...(wt.locked || dirty ? (['Force Delete'] as const) : []),
         );
-        if (confirm !== 'Delete' && confirm !== 'Force Delete') {
-          return;
-        }
+        if (confirm !== 'Delete' && confirm !== 'Force Delete') return;
 
         const tryRemove = async (force: boolean, forceLocked: boolean) =>
           removeWorktree(target, { force, forceLocked });
@@ -336,16 +324,12 @@ export function registerWorktreeCommands(
       async (item?: { worktreePath?: string; baseRef?: string }) => {
         const worktreePath =
           item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!worktreePath) {
-          return;
-        }
+        if (!worktreePath) return;
         const current =
           item?.baseRef ?? treeProvider.getBaseRef(worktreePath);
         try {
           const picked = await pickBaseRef(worktreePath, current);
-          if (!picked) {
-            return;
-          }
+          if (!picked) return;
           await treeProvider.setBaseRef(worktreePath, picked);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
@@ -360,9 +344,7 @@ export function registerWorktreeCommands(
       'worktreeCompare.copyCommitSha',
       async (item?: CommitItem) => {
         const sha = item?.commit.hash;
-        if (!sha) {
-          return;
-        }
+        if (!sha) return;
         await vscode.env.clipboard.writeText(sha);
         void vscode.window.setStatusBarMessage(
           `Git Workflow: copied ${item.commit.shortHash}`,
@@ -373,9 +355,7 @@ export function registerWorktreeCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.openFileDiff',
       async (item?: FileItem) => {
-        if (!item) {
-          return;
-        }
+        if (!item) return;
         try {
           if (item.diffKind === 'commit' && item.commitHash) {
             await openCommitFileDiff(
@@ -411,14 +391,10 @@ export function registerWorktreeCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.stageFile',
       async (item?: FileItem) => {
-        if (!item?.file.path) {
-          return;
-        }
+        if (!item?.file.path) return;
         try {
           const paths = [item.file.path];
-          if (item.file.oldPath) {
-            paths.push(item.file.oldPath);
-          }
+          if (item.file.oldPath) paths.push(item.file.oldPath);
           await stagePaths(item.worktreePath, paths);
           treeProvider.refreshCompare(item.worktreePath);
           log.appendLine(`Staged ${item.file.path}`);
@@ -436,9 +412,7 @@ export function registerWorktreeCommands(
       async (item?: SectionItem | { worktreePath?: string }) => {
         const worktreePath =
           item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!worktreePath) {
-          return;
-        }
+        if (!worktreePath) return;
         const message = await vscode.window.showInputBox({
           prompt: 'Commit message (staged files only)',
           placeHolder: 'Commit message',
@@ -446,9 +420,7 @@ export function registerWorktreeCommands(
           validateInput: (v) =>
             v.trim() ? undefined : 'Message is required',
         });
-        if (message === undefined) {
-          return;
-        }
+        if (message === undefined) return;
         try {
           await commitStaged(worktreePath, message);
           treeProvider.refreshCompare(worktreePath);
@@ -471,9 +443,7 @@ export function registerWorktreeCommands(
       async (item?: SectionItem | { worktreePath?: string }) => {
         const worktreePath =
           item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!worktreePath) {
-          return;
-        }
+        if (!worktreePath) return;
         const status = await getWorkingStatus(worktreePath);
         if (status.staged.length > 0) {
           void vscode.window.showWarningMessage(
@@ -495,9 +465,7 @@ export function registerWorktreeCommands(
           validateInput: (v) =>
             v.trim() ? undefined : 'Message is required',
         });
-        if (message === undefined) {
-          return;
-        }
+        if (message === undefined) return;
         try {
           const paths = status.unstaged.flatMap((f) =>
             f.oldPath ? [f.path, f.oldPath] : [f.path],
@@ -521,14 +489,10 @@ export function registerWorktreeCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.unstageFile',
       async (item?: FileItem) => {
-        if (!item?.file.path) {
-          return;
-        }
+        if (!item?.file.path) return;
         try {
           const paths = [item.file.path];
-          if (item.file.oldPath) {
-            paths.push(item.file.oldPath);
-          }
+          if (item.file.oldPath) paths.push(item.file.oldPath);
           await unstagePaths(item.worktreePath, paths);
           treeProvider.refreshCompare(item.worktreePath);
           log.appendLine(`Unstaged ${item.file.path}`);

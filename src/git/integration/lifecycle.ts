@@ -20,9 +20,7 @@ export async function createIntegrationWorktree(
     await git(repoCwd, ['worktree', 'add', destDir, branch]);
   } else {
     const baseSha = await resolveBaseSha(repoCwd, baseRef);
-    if (!baseSha) {
-      throw new Error(`base ref ${baseRef} does not resolve`);
-    }
+    if (!baseSha) throw new Error(`base ref ${baseRef} does not resolve`);
     await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
   }
   await ensureIntegrationPushBlocked(repoCwd);
@@ -68,9 +66,7 @@ export async function switchToIntegrationBranch(
     return previous;
   }
   const baseSha = await resolveBaseSha(checkoutPath, baseRef);
-  if (!baseSha) {
-    throw new Error(`base ref ${baseRef} does not resolve`);
-  }
+  if (!baseSha) throw new Error(`base ref ${baseRef} does not resolve`);
   await git(checkoutPath, ['switch', '-c', branch, baseSha]);
   await ensureIntegrationPushBlocked(checkoutPath);
   return previous;
@@ -86,15 +82,12 @@ export async function switchAwayFromIntegration(
   baseRef: string,
   previewBranch = integrationBranch(),
 ): Promise<string> {
-  if (await gitOk(checkoutPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
+  if (await gitOk(checkoutPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']))
     await git(checkoutPath, ['merge', '--abort']).catch(() => {});
-  }
   await git(checkoutPath, ['reset', '--hard']);
   const fallback = baseRef.replace(/^origin\//, '');
   for (const target of [returnBranch, fallback]) {
-    if (!target || target === previewBranch) {
-      continue;
-    }
+    if (!target || target === previewBranch) continue;
     if (
       await gitOk(checkoutPath, [
         'rev-parse',
@@ -108,9 +101,8 @@ export async function switchAwayFromIntegration(
   }
   // Last resort: detach at base so the checkout leaves the derived branch
   const baseSha = await resolveBaseSha(checkoutPath, baseRef);
-  if (!baseSha) {
+  if (!baseSha)
     throw new Error(`no branch to return to and ${baseRef} does not resolve`);
-  }
   await git(checkoutPath, ['switch', '--detach', baseSha]);
   return baseSha.slice(0, 7);
 }
@@ -143,9 +135,7 @@ export async function alignIntegrationBranchName(
   target = integrationBranch(),
 ): Promise<{ from: string; to: string } | undefined> {
   const current = await currentBranch(checkoutPath);
-  if (!current || current === target) {
-    return undefined;
-  }
+  if (!current || current === target) return undefined;
   await git(checkoutPath, ['branch', '-m', current, target]);
   return { from: current, to: target };
 }

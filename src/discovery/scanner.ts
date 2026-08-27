@@ -40,9 +40,7 @@ function getRootCheckoutMode(): RootCheckoutMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<string>('includeRootCheckout', 'dirty');
-  if (v === 'always' || v === 'never') {
-    return v;
-  }
+  if (v === 'always' || v === 'never') return v;
   return 'dirty';
 }
 
@@ -52,13 +50,11 @@ async function probePublishState(
   branch: string,
   detached: boolean,
 ): Promise<'pushed' | 'local' | undefined> {
-  if (detached || !branch || branch === 'HEAD' || branch === 'unknown') {
+  if (detached || !branch || branch === 'HEAD' || branch === 'unknown')
     return undefined;
-  }
   try {
-    if (await gitOk(dir, ['rev-parse', '--verify', `@{upstream}^{commit}`])) {
+    if (await gitOk(dir, ['rev-parse', '--verify', `@{upstream}^{commit}`]))
       return 'pushed';
-    }
   } catch {
     // no upstream
   }
@@ -106,9 +102,7 @@ async function listRegisteredWorktrees(
     // Dedup repos: the main worktree path identifies the repo
     const mainPath =
       [...admin.values()].find((s) => s.isMain)?.path ?? rootPath;
-    if (seenRepos.has(mainPath)) {
-      continue;
-    }
+    if (seenRepos.has(mainPath)) continue;
     seenRepos.add(mainPath);
     for (const state of admin.values()) {
       entries.push({ admin: state, workspaceFolder: folder });
@@ -152,9 +146,7 @@ export async function discoverWorktrees(
       const i = next++;
       const { admin, workspaceFolder } = entries[i]!;
       const normalized = path.normalize(admin.path);
-      if (admin.bare) {
-        continue;
-      }
+      if (admin.bare) continue;
       if (admin.prunable) {
         output?.appendLine(`Skipping prunable worktree: ${normalized}`);
         continue;
@@ -178,9 +170,7 @@ export async function discoverWorktrees(
         const isIntegration =
           !admin.detached && branch === integrationBranch();
         if ((isRootCheckout || admin.isMain) && !isIntegration) {
-          if (rootMode === 'never') {
-            continue;
-          }
+          if (rootMode === 'never') continue;
           dirty = await isWorktreeDirty(normalized);
           if (rootMode === 'dirty' && !dirty) {
             output?.appendLine(
@@ -234,9 +224,7 @@ export async function discoverWorktrees(
 
   // Root first, then linked worktrees by branch
   found.sort((a, b) => {
-    if (a.isRootCheckout !== b.isRootCheckout) {
-      return a.isRootCheckout ? -1 : 1;
-    }
+    if (a.isRootCheckout !== b.isRootCheckout) return a.isRootCheckout ? -1 : 1;
     const byBranch = a.branch.localeCompare(b.branch);
     return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
   });
@@ -288,9 +276,7 @@ export async function resolveRepoCommonDirs(): Promise<string[]> {
     try {
       const out = (await git(root, ['rev-parse', '--git-common-dir'])).trim();
       const abs = path.normalize(path.resolve(root, out));
-      if (!dirs.includes(abs)) {
-        dirs.push(abs);
-      }
+      if (!dirs.includes(abs)) dirs.push(abs);
     } catch {
       // not a git repo
     }
@@ -303,9 +289,7 @@ export function isDirectChildOfWatchRoot(fsPath: string): boolean {
   const resolved = path.resolve(fsPath);
   const parent = path.dirname(resolved);
   for (const root of resolveWatchRoots()) {
-    if (parent === path.resolve(root)) {
-      return true;
-    }
+    if (parent === path.resolve(root)) return true;
   }
   return false;
 }

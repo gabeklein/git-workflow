@@ -100,9 +100,7 @@ export function integrationAutoResolve(): AutoResolveMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<string>('integrationAutoResolve', 'best-effort');
-  if (v === 'off' || v === 'whitespace') {
-    return v;
-  }
+  if (v === 'off' || v === 'whitespace') return v;
   return 'best-effort';
 }
 
@@ -167,9 +165,7 @@ export function isLaneBranch(
    *  more than one. */
   previewBranch = integrationBranch(),
 ): boolean {
-  if (!branch || branch === 'HEAD' || branch === 'unknown') {
-    return false;
-  }
+  if (!branch || branch === 'HEAD' || branch === 'unknown') return false;
   const blocked = new Set([
     'main',
     'master',

@@ -65,9 +65,7 @@ export async function listWorktreeAdmin(
       isFirst = false;
       continue;
     }
-    if (!current) {
-      continue;
-    }
+    if (!current) continue;
     if (line.startsWith('HEAD ')) {
       current.head = line.slice(5).trim();
     } else if (line.startsWith('branch ')) {
@@ -81,9 +79,7 @@ export async function listWorktreeAdmin(
       current.locked = true;
       // `locked` or `locked <reason>`
       const reason = line.slice('locked'.length).trim();
-      if (reason) {
-        current.lockReason = reason;
-      }
+      if (reason) current.lockReason = reason;
     } else if (line.startsWith('prunable')) {
       current.prunable = true;
     }
@@ -168,9 +164,7 @@ export async function removeWorktree(
           ? err.message
           : String(err);
     const lower = message.toLowerCase();
-    if (lower.includes('locked')) {
-      return { ok: false, code: 'locked', message };
-    }
+    if (lower.includes('locked')) return { ok: false, code: 'locked', message };
     if (
       lower.includes('contains modified') ||
       lower.includes('untracked') ||

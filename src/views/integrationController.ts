@@ -144,9 +144,7 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Integration worktree + lanes, if one is checked out. */
   getState(): IntegrationState | undefined {
-    if (!this.integrationPath) {
-      return undefined;
-    }
+    if (!this.integrationPath) return undefined;
     return {
       path: this.integrationPath,
       branch: integrationBranch(),
@@ -174,9 +172,8 @@ export class IntegrationController implements vscode.Disposable {
       .getWorktrees()
       .find((w) => !w.detached && w.branch === branch);
     if (!wt) {
-      if (this.integrationPath) {
+      if (this.integrationPath)
         this.host.output.appendLine('Integration worktree gone — overlay off');
-      }
       if (this.guardSyncedFor) {
         this.guardSyncedFor = undefined;
         void this.syncCommitGuard(undefined, branch);
@@ -207,9 +204,8 @@ export class IntegrationController implements vscode.Disposable {
       // Enabling must not hijack the compare focus: if the selected
       // checkout just became the integration surface, move selection to a
       // real worktree. Explicit clicks on the Integration row still focus it.
-      if (this.host.getSelectedPath() === wt.path) {
+      if (this.host.getSelectedPath() === wt.path)
         this.host.moveSelectionOff(wt.path);
-      }
     }
     this.integrationPath = wt.path;
     const guardKey = `${wt.path}:${branch}:${isCommitGuardEnabled()}`;
@@ -318,9 +314,7 @@ export class IntegrationController implements vscode.Disposable {
           continue;
         }
         const base = await this.host.genuineBaseFor(w.path);
-        if (!base || base.replace(/^origin\//, '') !== integBase) {
-          continue;
-        }
+        if (!base || base.replace(/^origin\//, '') !== integBase) continue;
         auto.push(w.branch);
         // Empty lane (created off the base, nothing committed yet): keep it
         // pointed AT the base. It is not applied — being mergeable is not a
@@ -375,18 +369,14 @@ export class IntegrationController implements vscode.Disposable {
       // post-rebuild error memory.
       const conflicts: string[] = [];
       for (const lane of this.lanes) {
-        if (this.landed.includes(lane)) {
-          continue;
-        }
+        if (this.landed.includes(lane)) continue;
         const st = await baseStatusFor(
           wt.path,
           `refs/heads/${lane}`,
           integrationBaseRef(),
           this.probeMemo,
         );
-        if (st?.conflicts) {
-          conflicts.push(lane);
-        }
+        if (st?.conflicts) conflicts.push(lane);
       }
       this.conflicts = conflicts;
       // Paused base merges in candidate checkouts (started here or in a
@@ -426,13 +416,9 @@ export class IntegrationController implements vscode.Disposable {
    * (VS Code events only, per design) re-snapshots and rebuilds.
    */
   scheduleWipRebuildIfUnderWipLane(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file' || !this.integrationPath) {
-      return;
-    }
+    if (uri.scheme !== 'file' || !this.integrationPath) return;
     const wip = this.wip.filter((l) => this.lanes.includes(l));
-    if (wip.length === 0) {
-      return;
-    }
+    if (wip.length === 0) return;
     const hit = this.host
       .getWorktrees()
       .find(
@@ -442,15 +428,11 @@ export class IntegrationController implements vscode.Disposable {
           wip.includes(w.branch) &&
           isPathInside(uri.fsPath, w.path),
       );
-    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath, hit.path)) {
-      return;
-    }
+    if (!hit || shouldIgnoreHotFollowPath(uri.fsPath, hit.path)) return;
     this.host.output.appendLine(
       `Wip edit under ${hit.branch} (${path.basename(uri.fsPath)}) — rebuild scheduled`,
     );
-    if (this.wipDebounce) {
-      clearTimeout(this.wipDebounce);
-    }
+    if (this.wipDebounce) clearTimeout(this.wipDebounce);
     this.wipDebounce = setTimeout(() => {
       this.wipDebounce = undefined;
       if (this.rebuildInFlight) {
@@ -463,9 +445,7 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   private scheduleWipRebuildRetry(): void {
-    if (this.wipDebounce) {
-      return;
-    }
+    if (this.wipDebounce) return;
     this.wipDebounce = setTimeout(() => {
       this.wipDebounce = undefined;
       if (this.rebuildInFlight) {
@@ -478,15 +458,13 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Toggle overlaying a lane's uncommitted edits; rebuild when applied. */
   async setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
-    if (!this.integrationPath) {
+    if (!this.integrationPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     await setWipLane(this.integrationPath, branch, enabled);
     await this.refreshState();
     this.host.fireTreeData();
-    if (this.lanes.includes(branch)) {
+    if (this.lanes.includes(branch))
       return this.runRebuild(enabled ? `wip on ${branch}` : `wip off ${branch}`);
-    }
     return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
   }
 
@@ -495,9 +473,7 @@ export class IntegrationController implements vscode.Disposable {
    * lane tip moves (commit/amend/rebase anywhere — no git hook needed).
    */
   async tick(): Promise<void> {
-    if (!this.integrationPath || this.rebuildInFlight) {
-      return;
-    }
+    if (!this.integrationPath || this.rebuildInFlight) return;
     if (!isIntegrationAutoRebuildEnabled()) {
       this.fingerprint = undefined;
       return;
@@ -538,9 +514,7 @@ export class IntegrationController implements vscode.Disposable {
       this.fingerprint = fp;
       return;
     }
-    if (fp === this.fingerprint) {
-      return;
-    }
+    if (fp === this.fingerprint) return;
     this.fingerprint = fp;
     await this.runRebuild('lane tips moved');
   }
@@ -561,9 +535,7 @@ export class IntegrationController implements vscode.Disposable {
     branch: string,
   ): Promise<void> {
     const cwd = workingPath ?? this.host.getRepoCwd();
-    if (!cwd) {
-      return;
-    }
+    if (!cwd) return;
     try {
       if (!workingPath) {
         await uninstallCommitGuard(cwd);
@@ -629,9 +601,8 @@ export class IntegrationController implements vscode.Disposable {
   /** Run a rebuild and surface the outcome on the integration row. */
   async runRebuild(reason: string): Promise<RebuildResult> {
     const workingPath = this.integrationPath;
-    if (!workingPath) {
+    if (!workingPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     if (this.rebuildInFlight) {
       // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
       // follow-up run — it re-reads the lane files, so it applies whatever
@@ -735,12 +706,9 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Offer a branch under the Integration row (unchecked; no rebuild). */
   async addCandidate(branch: string): Promise<void> {
-    if (!this.integrationPath) {
-      return;
-    }
-    if (!isLaneBranch(branch, integrationBaseRef())) {
+    if (!this.integrationPath) return;
+    if (!isLaneBranch(branch, integrationBaseRef()))
       throw new Error(`${branch} cannot be an integration lane`);
-    }
     // Re-adding is also how an excluded auto member comes back
     await dropExcludedLane(this.integrationPath, branch);
     await addCandidateLane(this.integrationPath, branch);
@@ -755,14 +723,11 @@ export class IntegrationController implements vscode.Disposable {
    * exit for every row. Add to Integration clears the exclusion.
    */
   async removeCandidate(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
+    if (!this.integrationPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     await dropCandidateLane(this.integrationPath, branch);
     await addExcludedLane(this.integrationPath, branch);
-    if (this.lanes.includes(branch)) {
-      return this.hide(branch);
-    }
+    if (this.lanes.includes(branch)) return this.hide(branch);
     await this.refreshState();
     this.host.fireTreeData();
     return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
@@ -770,9 +735,8 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Add this branch as a lane and rebuild. */
   async apply(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
+    if (!this.integrationPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     if (!isLaneBranch(branch, integrationBaseRef())) {
       return {
         ok: false,
@@ -790,9 +754,8 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Drop this branch from the lanes and rebuild. */
   async hide(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath) {
+    if (!this.integrationPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     await dropAppliedLane(this.integrationPath, branch);
     return this.runRebuild(`hide ${branch}`);
   }
@@ -807,9 +770,8 @@ export class IntegrationController implements vscode.Disposable {
    * "never show main's local noise" survives future commits.
    */
   async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
-    if (!this.integrationPath) {
+    if (!this.integrationPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     const baseName = integrationBaseRef().replace(/^origin\//, '');
     if (included) {
       await dropExcludedLane(this.integrationPath, baseName);
@@ -830,9 +792,7 @@ export class IntegrationController implements vscode.Disposable {
    * so the rescue needs no escape hatches of its own.
    */
   private async absorbTarget(): Promise<AbsorbTarget | undefined> {
-    if (!this.integrationPath) {
-      return undefined;
-    }
+    if (!this.integrationPath) return undefined;
     const baseName = integrationBaseRef().replace(/^origin\//, '');
     if (!(await gitOk(this.integrationPath, [
       'rev-parse',
@@ -864,16 +824,13 @@ export class IntegrationController implements vscode.Disposable {
     options: { confirmed?: boolean } = {},
   ): Promise<AbsorbResult | undefined> {
     const workingPath = this.integrationPath;
-    if (!workingPath) {
-      return undefined;
-    }
+    if (!workingPath) return undefined;
     // One attempt per integration tip: a target that keeps refusing (dirty,
     // or a conflict needing a human) must not re-arm the rebuild queue on
     // every tick.
     const head = await revParseCommit(workingPath, 'HEAD');
-    if (!options.confirmed && head && head === this.lastAbsorbHead) {
+    if (!options.confirmed && head && head === this.lastAbsorbHead)
       return undefined;
-    }
     this.lastAbsorbHead = head;
     const target = await this.absorbTarget();
     if (!target) {
@@ -976,9 +933,7 @@ export class IntegrationController implements vscode.Disposable {
    * there is nothing to reconcile.
    */
   async reorderLane(lane: string, before?: string): Promise<void> {
-    if (!this.integrationPath) {
-      return;
-    }
+    if (!this.integrationPath) return;
     const moved = await reorderLaneFile(
       this.integrationPath,
       lane,
@@ -1012,22 +967,16 @@ export class IntegrationController implements vscode.Disposable {
     workingPath: string,
     baseRef: string,
   ): Promise<void> {
-    if (this.lanes.length === 0) {
-      return;
-    }
+    if (this.lanes.length === 0) return;
     const key = `${await resolveBaseSha(workingPath, baseRef)}\u0000${this.lanes.join(',')}`;
-    if (this.staleSweptFor === key) {
-      return;
-    }
+    if (this.staleSweptFor === key) return;
     this.staleSweptFor = key;
     const stale = await findStaleLandedLanes(
       workingPath,
       baseRef,
       this.lanes.filter((l) => !this.landed.includes(l)),
     ).catch(() => [] as string[]);
-    if (stale.length === 0) {
-      return;
-    }
+    if (stale.length === 0) return;
     this.host.output.appendLine(
       `Lanes landed (base moved past them), retiring: ${stale.join(', ')}`,
     );
@@ -1055,9 +1004,8 @@ export class IntegrationController implements vscode.Disposable {
    */
   async absorbEdits(): Promise<AbsorbResult> {
     const workingPath = this.integrationPath;
-    if (!workingPath) {
+    if (!workingPath)
       return { ok: false, code: 'error', message: 'no integration worktree' };
-    }
     const target = await this.absorbTarget();
     // Uncommitted work has to land in a working tree, so unlike stray
     // COMMITS this one cannot fall back to the ref. Committing it on the
@@ -1087,9 +1035,8 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   async catchUpBase(): Promise<RebuildResult> {
-    if (!this.integrationPath || !this.baseDrift) {
+    if (!this.integrationPath || !this.baseDrift)
       return { ok: false, code: 'error', message: 'no base drift to catch up' };
-    }
     await writeBasePin(this.integrationPath, this.baseDrift.sha);
     this.host.output.appendLine(
       `Integration base caught up to ${this.baseDrift.sha.slice(0, 10)}`,
@@ -1101,9 +1048,7 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Abort a conflicted lane merge, leaving the tree at the last good state. */
   async abortMerge(): Promise<void> {
-    if (!this.integrationPath) {
-      return;
-    }
+    if (!this.integrationPath) return;
     await abortIntegrationMerge(this.integrationPath);
     this.error = undefined;
     this.fingerprint = undefined;

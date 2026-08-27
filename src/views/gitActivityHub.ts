@@ -51,9 +51,7 @@ export class GitActivityHub implements vscode.Disposable {
     this.watchers = [];
     try {
       const commonDirs = await resolveRepoCommonDirs();
-      if (generation !== this.generation) {
-        return;
-      }
+      if (generation !== this.generation) return;
       for (const dir of commonDirs) {
         const watcher = new GitDirWatcher(
           dir,
@@ -94,9 +92,7 @@ export class GitActivityHub implements vscode.Disposable {
   }
 
   private schedulePoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-    }
+    if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = setTimeout(() => {
       this.pollTimer = undefined;
       void (async () => {

@@ -65,9 +65,8 @@ export async function syncBranchWithRemote(
   branch: string,
   worktree?: string,
 ): Promise<SyncResult> {
-  if (!branch || branch === 'HEAD') {
+  if (!branch || branch === 'HEAD')
     return { status: 'blocked', message: 'not on a branch' };
-  }
   try {
     // Targeted refspec: cheap, and it updates the remote-tracking ref the
     // comparison below reads. A branch absent from origin fails here, which
@@ -78,20 +77,16 @@ export async function syncBranchWithRemote(
       `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
     ]);
     if (!onRemote) {
-      if (!(await gitOk(repoCwd, ['remote', 'get-url', 'origin']))) {
+      if (!(await gitOk(repoCwd, ['remote', 'get-url', 'origin'])))
         return { status: 'no-remote' };
-      }
       await git(repoCwd, ['push', '-u', 'origin', branch]);
       return { status: 'published', branch };
     }
     const count = await counts(repoCwd, branch);
-    if (!count) {
+    if (!count)
       return { status: 'error', message: 'could not compare with origin' };
-    }
     const { ahead, behind } = count;
-    if (ahead === 0 && behind === 0) {
-      return { status: 'up-to-date' };
-    }
+    if (ahead === 0 && behind === 0) return { status: 'up-to-date' };
     if (ahead > 0 && behind > 0) {
       // The only case with a real decision in it, and the one where a wrong
       // guess costs somebody their commits.

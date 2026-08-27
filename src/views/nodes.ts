@@ -114,13 +114,9 @@ export class BranchItem extends vscode.TreeItem {
     const tags: string[] = [];
     if (pr) {
       tags.push(`PR #${pr.number}${pr.isDraft ? ' draft' : ''}`);
-      if (pr.mergeable === 'CONFLICTING') {
-        tags.push('conflicts');
-      }
+      if (pr.mergeable === 'CONFLICTING') tags.push('conflicts');
     }
-    if (worktreePath) {
-      tags.push('worktree');
-    }
+    if (worktreePath) tags.push('worktree');
     // Sync state as a badge, which is why a branch that exists both here
     // and on the remote is ONE row rather than two: ↑ is yours to push, ↓
     // is theirs to pull. Absent when there is no upstream to compare with —
@@ -131,19 +127,13 @@ export class BranchItem extends vscode.TreeItem {
     ]
       .filter(Boolean)
       .join(' ');
-    if (arrows) {
-      tags.push(arrows);
-    }
-    if (!hasLocalRef && (hasRemote || pr)) {
-      tags.push('remote');
-    }
+    if (arrows) tags.push(arrows);
+    if (!hasLocalRef && (hasRemote || pr)) tags.push('remote');
     // 'local only' says nothing: under Branches it is the default state.
     // The date goes LAST so it trails the row — the tree has no
     // right-aligned field, and the one right-edge slot (the decoration
     // badge) is spent marking preview membership.
-    if (relativeDate) {
-      tags.push(relativeDate);
-    }
+    if (relativeDate) tags.push(relativeDate);
     this.description = tags.join(' · ');
 
     const conflicting = pr?.mergeable === 'CONFLICTING';
@@ -438,17 +428,11 @@ export class WorktreeListItem extends vscode.TreeItem {
 
     // Context flags for menus: WithPr, Locked, Removable (not main/root)
     const flags: string[] = [];
-    if (pullRequest) {
-      flags.push('WithPr');
-    }
-    if (worktree.locked) {
-      flags.push('Locked');
-    }
+    if (pullRequest) flags.push('WithPr');
+    if (worktree.locked) flags.push('Locked');
     const removable =
       !worktree.isRootCheckout && worktree.isMainWorktree !== true;
-    if (removable) {
-      flags.push('Removable');
-    }
+    if (removable) flags.push('Removable');
     if (integration?.role === 'lane') {
       // Candidates are managed under the Integration row; here only add/remove
       flags.push(integration.candidate ? 'LaneCandidate' : 'LaneAddable');
@@ -516,19 +500,15 @@ export class WorktreeListItem extends vscode.TreeItem {
       // Say "conflicts" once. When the PR already reports conflicts the
       // second mention adds a base name and a lot of width for something
       // the reader has just been told.
-      if (!pullRequest || !prHasMergeConflicts(pullRequest)) {
+      if (!pullRequest || !prHasMergeConflicts(pullRequest))
         bits.push(`conflicts with ${baseStatus.baseRef}`);
-      }
     } else if (baseStatus && baseStatus.behind > 0) {
       bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
     }
 
-    if (worktree.isRootCheckout) {
+    if (worktree.isRootCheckout)
       bits.push(worktree.isDirty ? 'root · dirty' : 'root');
-    }
-    if (worktree.locked) {
-      bits.push('locked');
-    }
+    if (worktree.locked) bits.push('locked');
     this.description = bits.length > 0 ? bits.join(' · ') : undefined;
 
     const rel =
@@ -561,9 +541,8 @@ export class WorktreeListItem extends vscode.TreeItem {
         `PR #${pullRequest.number}: ${pullRequest.title}`,
         `${formatPrDescription(pullRequest)} · ${pullRequest.url}`,
       );
-      if (prHasMergeConflicts(pullRequest)) {
+      if (prHasMergeConflicts(pullRequest))
         tip.push('GitHub reports merge conflicts with the PR base.');
-      }
     }
     this.tooltip = tip.join('\n');
 
@@ -610,9 +589,7 @@ export class PreviewItem extends vscode.TreeItem {
     bits.push(
       opts.laneCount === 1 ? '1 lane' : `${opts.laneCount} lanes`,
     );
-    if (opts.wip) {
-      bits.push('+wip');
-    }
+    if (opts.wip) bits.push('+wip');
     // The failure states earn their place ahead of nothing else — a preview
     // that did not build is the only thing about it worth reading.
     if (opts.error?.code === 'conflict') {

@@ -58,21 +58,15 @@ export class ChangesTreeProvider
   }
 
   async getChildren(element?: ChangesNode): Promise<ChangesNode[]> {
-    if (element && isExplorerNode(element)) {
+    if (element && isExplorerNode(element))
       return this.files.getChildren(element);
-    }
-    if (element?.kind === 'group' && element.group === 'directory') {
+    if (element?.kind === 'group' && element.group === 'directory')
       return this.files.getChildren();
-    }
-    if (element) {
-      return this.worktrees.getChangesChildren(element);
-    }
+    if (element) return this.worktrees.getChangesChildren(element);
     const changes = await this.worktrees.getChangesChildren();
     // No selection: the diff half already says so — a second "select a
     // worktree" under a Directory header is the same sentence twice.
-    if (!this.worktrees.getSelectedPath()) {
-      return changes;
-    }
+    if (!this.worktrees.getSelectedPath()) return changes;
     const root = this.worktrees.getSelectedPath();
     // Warnings stay at the very top, above Directory. They are banners
     // about the focused checkout, and a banner sitting under a collapsible

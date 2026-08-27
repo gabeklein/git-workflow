@@ -114,9 +114,7 @@ export async function reorderLane(
   }
   try {
     const order = await readLaneFile(cwd, CANDIDATES_FILE);
-    if (!order.includes(lane) || lane === before) {
-      return false;
-    }
+    if (!order.includes(lane) || lane === before) return false;
     const without = order.filter((l) => l !== lane);
     const at = before ? without.indexOf(before) : -1;
     // A target that vanished (retired while the drag was in flight) means
@@ -259,9 +257,7 @@ export async function pruneDeadLanes(cwd: string): Promise<string[]> {
       dead.push(lane);
     }
   }
-  if (dead.length === 0) {
-    return [];
-  }
+  if (dead.length === 0) return [];
   const lock = path.join(await commonDir(cwd), LOCK_DIR);
   try {
     await fs.mkdir(lock);
@@ -304,9 +300,7 @@ export async function ensureIntegrationPushBlocked(
   } catch {
     // unset
   }
-  if (current !== 'no_push') {
-    await git(cwd, ['config', key, 'no_push']);
-  }
+  if (current !== 'no_push') await git(cwd, ['config', key, 'no_push']);
 }
 
 /** Lanes whose *uncommitted* worktree edits overlay into the rebuild. */

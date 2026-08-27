@@ -5,9 +5,7 @@ export async function stagePaths(
   worktreePath: string,
   relativePaths: string[],
 ): Promise<void> {
-  if (relativePaths.length === 0) {
-    return;
-  }
+  if (relativePaths.length === 0) return;
   await git(worktreePath, ['add', '--', ...relativePaths]);
 }
 
@@ -16,8 +14,6 @@ export async function unstagePaths(
   worktreePath: string,
   relativePaths: string[],
 ): Promise<void> {
-  if (relativePaths.length === 0) {
-    return;
-  }
+  if (relativePaths.length === 0) return;
   await git(worktreePath, ['restore', '--staged', '--', ...relativePaths]);
 }

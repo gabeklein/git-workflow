@@ -67,13 +67,9 @@ export function describeLocation(
   const candidates: string[] = [];
   if (workspaceRoot) {
     const root = path.resolve(workspaceRoot);
-    if (target === root) {
-      return '.';
-    }
+    if (target === root) return '.';
     const rel = path.relative(root, target);
-    if (rel && !path.isAbsolute(rel)) {
-      candidates.push(rel);
-    }
+    if (rel && !path.isAbsolute(rel)) candidates.push(rel);
   }
   const home = os.homedir();
   if (home && (target === home || target.startsWith(home + path.sep))) {

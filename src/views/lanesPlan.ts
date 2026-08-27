@@ -92,14 +92,10 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
     // Root first, always: it is the anchor the others were cut from.
     const rootA = a.isRootCheckout || a.isMainWorktree ? 1 : 0;
     const rootB = b.isRootCheckout || b.isMainWorktree ? 1 : 0;
-    if (rootA !== rootB) {
-      return rootB - rootA;
-    }
+    if (rootA !== rootB) return rootB - rootA;
     // Detached checkouts have no branch to date them — they sink below the
     // named ones rather than sorting as if they were ancient.
-    if (a.detached !== b.detached) {
-      return a.detached ? 1 : -1;
-    }
+    if (a.detached !== b.detached) return a.detached ? 1 : -1;
     const byDate = checkoutDate(b, dates) - checkoutDate(a, dates);
     return byDate !== 0 ? byDate : a.path.localeCompare(b.path);
   });

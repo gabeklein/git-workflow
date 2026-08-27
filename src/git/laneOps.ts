@@ -56,15 +56,12 @@ async function unmergedFiles(worktree: string): Promise<string[]> {
 
 /** Refuse to start anything on top of a paused rebase/merge or dirty tree. */
 async function startBlocker(worktree: string): Promise<string | undefined> {
-  if (await rebaseInProgress(worktree)) {
+  if (await rebaseInProgress(worktree))
     return 'a rebase is already in progress here — continue or abort it first';
-  }
-  if (await baseMergeInProgress(worktree)) {
+  if (await baseMergeInProgress(worktree))
     return 'a merge is already in progress here — complete or abort it first';
-  }
-  if (await isWorktreeDirty(worktree)) {
+  if (await isWorktreeDirty(worktree))
     return 'worktree has uncommitted changes — commit or stash first';
-  }
   return undefined;
 }
 
@@ -85,13 +82,11 @@ export async function fastForwardEmptyLane(
   baseRef: string,
 ): Promise<LaneOpResult> {
   const baseSha = await resolveBaseSha(worktree, baseRef);
-  if (!baseSha) {
+  if (!baseSha)
     return { status: 'error', message: `base ref ${baseRef} does not resolve` };
-  }
   const head = (await git(worktree, ['rev-parse', 'HEAD']).catch(() => '')).trim();
-  if (!head) {
+  if (!head)
     return { status: 'error', message: 'worktree HEAD does not resolve' };
-  }
   if (head === baseSha) {
     return { status: 'done' }; // already there
   }
@@ -105,9 +100,7 @@ export async function fastForwardEmptyLane(
     };
   }
   const blocker = await startBlocker(worktree);
-  if (blocker) {
-    return { status: 'blocked', message: blocker };
-  }
+  if (blocker) return { status: 'blocked', message: blocker };
   try {
     await git(worktree, ['merge', '--ff-only', baseSha]);
     return { status: 'done' };
@@ -127,13 +120,10 @@ export async function startLaneRebase(
   baseRef: string,
 ): Promise<LaneOpResult> {
   const blocked = await startBlocker(worktree);
-  if (blocked) {
-    return { status: 'blocked', message: blocked };
-  }
+  if (blocked) return { status: 'blocked', message: blocked };
   const baseSha = await resolveBaseSha(worktree, baseRef);
-  if (!baseSha) {
+  if (!baseSha)
     return { status: 'error', message: `base ${baseRef} does not resolve` };
-  }
   // Replay only what has NOT already landed. Plain `git rebase <base>`
   // replays everything in base..HEAD, which after a SQUASH merge of a
   // parent branch still lists the parent's originals — every one of them
@@ -152,13 +142,10 @@ export async function startLaneRebase(
     return { status: 'done' };
   } catch (err) {
     const files = await unmergedFiles(worktree);
-    if (files.length > 0) {
-      return { status: 'conflicts', files };
-    }
+    if (files.length > 0) return { status: 'conflicts', files };
     // Broken mid-flight without conflicts — clean up the rebase WE started
-    if (await rebaseInProgress(worktree)) {
+    if (await rebaseInProgress(worktree))
       await git(worktree, ['rebase', '--abort']).catch(() => {});
-    }
     return { status: 'error', message: gitErrorMessage(err) };
   }
 }
@@ -171,13 +158,10 @@ export async function startLaneRebase(
 export async function continueLaneRebase(
   worktree: string,
 ): Promise<LaneOpResult> {
-  if (!(await rebaseInProgress(worktree))) {
+  if (!(await rebaseInProgress(worktree)))
     return { status: 'blocked', message: 'no rebase in progress' };
-  }
   const markers = await stagedConflictMarkers(worktree);
-  if (markers) {
-    return { status: 'blocked', message: markers };
-  }
+  if (markers) return { status: 'blocked', message: markers };
   const unmerged = await unmergedFiles(worktree);
   if (unmerged.length > 0) {
     return {
@@ -190,18 +174,15 @@ export async function continueLaneRebase(
     return { status: 'done' };
   } catch (err) {
     const files = await unmergedFiles(worktree);
-    if (files.length > 0) {
-      return { status: 'conflicts', files };
-    }
+    if (files.length > 0) return { status: 'conflicts', files };
     return { status: 'error', message: gitErrorMessage(err) };
   }
 }
 
 /** Abort the paused rebase (UI only offers this while one is paused). */
 export async function abortLaneRebase(worktree: string): Promise<void> {
-  if (!(await rebaseInProgress(worktree))) {
+  if (!(await rebaseInProgress(worktree)))
     throw new Error('no rebase in progress');
-  }
   await git(worktree, ['rebase', '--abort']);
 }
 
@@ -216,13 +197,10 @@ export async function startBaseMerge(
   branch: string,
 ): Promise<LaneOpResult> {
   const blocked = await startBlocker(worktree);
-  if (blocked) {
-    return { status: 'blocked', message: blocked };
-  }
+  if (blocked) return { status: 'blocked', message: blocked };
   const baseSha = await resolveBaseSha(worktree, baseRef);
-  if (!baseSha) {
+  if (!baseSha)
     return { status: 'error', message: `base ${baseRef} does not resolve` };
-  }
   // A merge cannot skip history the way a rebase can, so when part of this
   // branch has already landed in the base the merge is guaranteed to
   // conflict on content that is not actually in dispute. Say so instead of
@@ -241,12 +219,9 @@ export async function startBaseMerge(
     return { status: 'done' };
   } catch (err) {
     const files = await unmergedFiles(worktree);
-    if (files.length > 0) {
-      return { status: 'conflicts', files };
-    }
-    if (await baseMergeInProgress(worktree)) {
+    if (files.length > 0) return { status: 'conflicts', files };
+    if (await baseMergeInProgress(worktree))
       await git(worktree, ['merge', '--abort']).catch(() => {});
-    }
     return { status: 'error', message: gitErrorMessage(err) };
   }
 }
@@ -258,13 +233,10 @@ export async function startBaseMerge(
 export async function completeBaseMerge(
   worktree: string,
 ): Promise<LaneOpResult> {
-  if (!(await baseMergeInProgress(worktree))) {
+  if (!(await baseMergeInProgress(worktree)))
     return { status: 'blocked', message: 'no merge in progress' };
-  }
   const markers = await stagedConflictMarkers(worktree);
-  if (markers) {
-    return { status: 'blocked', message: markers };
-  }
+  if (markers) return { status: 'blocked', message: markers };
   const unmerged = await unmergedFiles(worktree);
   if (unmerged.length > 0) {
     return {
@@ -282,9 +254,8 @@ export async function completeBaseMerge(
 
 /** Abort the paused base merge (UI only offers this while one is paused). */
 export async function abortBaseMerge(worktree: string): Promise<void> {
-  if (!(await baseMergeInProgress(worktree))) {
+  if (!(await baseMergeInProgress(worktree)))
     throw new Error('no merge in progress');
-  }
   await git(worktree, ['merge', '--abort']);
 }
 

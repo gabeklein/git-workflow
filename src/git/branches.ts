@@ -34,9 +34,7 @@ export interface BranchInfo {
  * which the row already says by other means.
  */
 function parseTrack(track?: string): { ahead?: number; behind?: number } {
-  if (!track || track.includes('gone')) {
-    return {};
-  }
+  if (!track || track.includes('gone')) return {};
   const ahead = /ahead (\d+)/.exec(track)?.[1];
   const behind = /behind (\d+)/.exec(track)?.[1];
   return {
@@ -57,13 +55,9 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
   ]);
   const byName = new Map<string, BranchInfo>();
   for (const line of out.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
+    if (!line.trim()) continue;
     const [refname, dateRaw, relative, track] = line.split('\0');
-    if (!refname) {
-      continue;
-    }
+    if (!refname) continue;
     let name: string;
     let isLocal: boolean;
     if (refname.startsWith('refs/heads/')) {
@@ -72,9 +66,7 @@ export async function listBranches(repoCwd: string): Promise<BranchInfo[]> {
     } else if (refname.startsWith('refs/remotes/origin/')) {
       name = refname.slice('refs/remotes/origin/'.length);
       isLocal = false;
-      if (name === 'HEAD') {
-        continue;
-      }
+      if (name === 'HEAD') continue;
     } else {
       continue;
     }
@@ -149,9 +141,8 @@ export async function createWorktreeForBranch(
     await fs.access(destDir);
     throw new Error(`Path already exists: ${destDir}`);
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('Path already')) {
+    if (err instanceof Error && err.message.startsWith('Path already'))
       throw err;
-    }
     // ENOENT — free to create
   }
   // Repo-local ignore before creation, so status never flashes dirty

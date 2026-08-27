@@ -141,9 +141,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
           );
           continue;
         }
-        if (item.kind !== 'integrationLane') {
-          continue;
-        }
+        if (item.kind !== 'integrationLane') continue;
         const result =
           state === vscode.TreeItemCheckboxState.Checked
             ? await treeProvider.applyToIntegration(item.branch)

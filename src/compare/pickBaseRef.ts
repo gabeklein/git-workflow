@@ -23,9 +23,7 @@ function toItems(refs: GitRef[], currentBase?: string): RefQuickPickItem[] {
 
   const pushGroup = (label: string, kind: RefKind) => {
     const group = refs.filter((r) => r.kind === kind);
-    if (group.length === 0 && kind !== 'head') {
-      return;
-    }
+    if (group.length === 0 && kind !== 'head') return;
     items.push({
       label,
       kind: vscode.QuickPickItemKind.Separator,
@@ -83,17 +81,13 @@ export async function pickBaseRef(
   qp.value = '';
   if (currentBase) {
     const active = items.find((i) => i.refName === currentBase);
-    if (active) {
-      qp.activeItems = [active];
-    }
+    if (active) qp.activeItems = [active];
   }
 
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value: string | undefined) => {
-      if (settled) {
-        return;
-      }
+      if (settled) return;
       settled = true;
       qp.hide();
       qp.dispose();

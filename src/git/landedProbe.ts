@@ -87,13 +87,9 @@ export async function landedVia(
   scan: number = SCAN_DEEP,
 ): Promise<LandedVia | undefined> {
   const key = `${cwd}\u0000${branchSha}\u0000${baseSha}\u0000${scan}`;
-  if (memo.has(key)) {
-    return memo.get(key);
-  }
+  if (memo.has(key)) return memo.get(key);
   const answer = await probe(cwd, branchSha, baseSha, scan);
-  if (memo.size >= MEMO_MAX) {
-    memo.clear();
-  }
+  if (memo.size >= MEMO_MAX) memo.clear();
   memo.set(key, answer);
   return answer;
 }
@@ -105,9 +101,8 @@ async function probe(
   scan: number,
 ): Promise<LandedVia | undefined> {
   // 1. True merge, or the branch simply never diverged.
-  if (await gitOk(cwd, ['merge-base', '--is-ancestor', branchSha, baseSha])) {
+  if (await gitOk(cwd, ['merge-base', '--is-ancestor', branchSha, baseSha]))
     return 'ancestor';
-  }
 
   const fork = (
     await git(cwd, ['merge-base', baseSha, branchSha]).catch(() => '')
@@ -127,9 +122,7 @@ async function probe(
       const result = await mergeOffTree(cwd, baseSha, branchSha, {
         strict: true,
       });
-      if (result.kind === 'tree' && result.tree === baseTree) {
-        return 'content';
-      }
+      if (result.kind === 'tree' && result.tree === baseTree) return 'content';
     } catch {
       // probe failed — fall through, never conclude from a failure
     }
@@ -163,9 +156,7 @@ async function probe(
         () => '',
       )
     ).trim();
-    if (!parent) {
-      continue;
-    }
+    if (!parent) continue;
     try {
       const result = await mergeOffTree(cwd, parent, branchSha, {
         mergeBase: fork,
@@ -173,9 +164,7 @@ async function probe(
       const tree = (
         await git(cwd, ['rev-parse', `${commit}^{tree}`]).catch(() => '')
       ).trim();
-      if (result.kind !== 'tree' || !tree || result.tree !== tree) {
-        continue;
-      }
+      if (result.kind !== 'tree' || !tree || result.tree !== tree) continue;
       // Found where it landed. Now: is the work still there? Re-apply
       // that commit's own delta to the base as it stands, and read the
       // three outcomes apart —
@@ -194,12 +183,9 @@ async function probe(
         mergeBase: parent,
         strict: true,
       });
-      if (still.kind === 'conflict') {
+      if (still.kind === 'conflict') return 'squash';
+      if (still.kind === 'tree' && baseTree && still.tree === baseTree)
         return 'squash';
-      }
-      if (still.kind === 'tree' && baseTree && still.tree === baseTree) {
-        return 'squash';
-      }
       // Cleanly removed — reverted. Stop: we know where it went.
       return undefined;
     } catch {

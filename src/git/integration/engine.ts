@@ -202,9 +202,8 @@ export async function rebuildIntegration(
   try {
     // Recover from a mid-merge state left by the shell script / old engine.
     // The tree is derived, so aborting is always safe.
-    if (await gitOk(workingPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
+    if (await gitOk(workingPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']))
       await git(workingPath, ['merge', '--abort']);
-    }
 
     if (await isWorktreeDirty(workingPath)) {
       return {
@@ -293,9 +292,7 @@ export async function rebuildIntegration(
       try {
         const admin = await listWorktreeAdmin(workingPath);
         for (const state of admin.values()) {
-          if (state.branch) {
-            laneCheckouts.set(state.branch, state.path);
-          }
+          if (state.branch) laneCheckouts.set(state.branch, state.path);
         }
       } catch {
         // no lookup — wip lanes fall back to branch tips
@@ -343,9 +340,7 @@ export async function rebuildIntegration(
         // so would unapply it, and the next rebuild would drop the overlay
         // with the row.
         if (landedSet.has(lane)) {
-          if (!wipLanes.has(lane)) {
-            landed.push(lane);
-          }
+          if (!wipLanes.has(lane)) landed.push(lane);
           continue;
         }
         // Lane already contained in the chain (e.g. no commits yet): nothing
@@ -447,9 +442,7 @@ export async function rebuildIntegration(
     // semantics: what lands is exactly the uncommitted delta, not the
     // lane's history a second time.
     for (const lane of chainLanes) {
-      if (!wipLanes.has(lane)) {
-        continue;
-      }
+      if (!wipLanes.has(lane)) continue;
       const checkout = laneCheckouts.get(lane);
       if (!checkout) {
         continue; // no worktree to read edits from
@@ -461,9 +454,7 @@ export async function rebuildIntegration(
       } catch {
         snapshot = undefined; // nothing dirty, or the snapshot failed
       }
-      if (!snapshot || !laneSha || snapshot === laneSha) {
-        continue;
-      }
+      if (!snapshot || !laneSha || snapshot === laneSha) continue;
       const result = await mergeOffTree(workingPath, current, snapshot, {
         mergeBase: laneSha,
       });
@@ -525,9 +516,7 @@ export async function rebuildIntegration(
           `${previewBranch}: ${lane} (wip)`,
         ])
       ).trim();
-      if (!merged.includes(lane)) {
-        merged.push(lane);
-      }
+      if (!merged.includes(lane)) merged.push(lane);
     }
 
     // Retire landed lanes while still holding the lock — the applied file

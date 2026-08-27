@@ -37,9 +37,7 @@ export async function revParseCommit(
 
 /** Best human-readable message from a git failure. */
 export function gitErrorMessage(err: unknown): string {
-  if (err instanceof GitError) {
-    return err.stderr.trim() || err.message;
-  }
+  if (err instanceof GitError) return err.stderr.trim() || err.message;
   return err instanceof Error ? err.message : String(err);
 }
 

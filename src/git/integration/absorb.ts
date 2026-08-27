@@ -71,9 +71,7 @@ export async function checkoutForBranch(
   try {
     const admin = await listWorktreeAdmin(cwd);
     for (const state of admin.values()) {
-      if (!state.detached && state.branch === branch) {
-        return state.path;
-      }
+      if (!state.detached && state.branch === branch) return state.path;
     }
   } catch {
     // fall through — no admin listing, no target
@@ -117,9 +115,7 @@ async function dirtyPaths(cwd: string): Promise<string[]> {
     // would read a bare path as a status code.
     if (status.startsWith('R') || status.startsWith('C')) {
       const source = fields[++i];
-      if (source) {
-        paths.push(source);
-      }
+      if (source) paths.push(source);
     }
   }
   return paths;
@@ -137,9 +133,7 @@ async function clashingPaths(
   targetPath: string,
   incoming: string[],
 ): Promise<string[]> {
-  if (incoming.length === 0) {
-    return [];
-  }
+  if (incoming.length === 0) return [];
   const dirty = new Set(await dirtyPaths(targetPath));
   return incoming.filter((p) => dirty.has(p));
 }
@@ -150,9 +144,7 @@ async function clashingPaths(
  * would take the target's unrelated work in progress with it.
  */
 async function restorePaths(cwd: string, paths: string[]): Promise<void> {
-  if (paths.length === 0) {
-    return;
-  }
+  if (paths.length === 0) return;
   await gitOk(cwd, ['reset', '-q', '--', ...paths]);
   for (const file of paths) {
     const tracked = await gitOk(cwd, [
@@ -217,9 +209,8 @@ async function replayOntoRef(
   { ok: true; tip: string } | { ok: false; message: string; files: string[] }
 > {
   const startTip = await revParseCommit(cwd, `refs/heads/${branch}`);
-  if (!startTip) {
+  if (!startTip)
     return { ok: false, message: `${branch} does not resolve`, files: [] };
-  }
   let current = startTip;
   for (const sha of shas) {
     const parent = (await git(cwd, ['rev-parse', `${sha}^`]).catch(() => ''))
@@ -312,9 +303,7 @@ async function withIndexLock<T>(run: () => Promise<T>): Promise<T> {
     try {
       return await run();
     } catch (err) {
-      if (!isIndexLocked(err)) {
-        throw err;
-      }
+      if (!isIndexLocked(err)) throw err;
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -479,18 +468,16 @@ export async function absorbDirtyEdits(
   targetPath: string,
   previewBranch = integrationBranch(),
 ): Promise<AbsorbResult> {
-  if (!(await isWorktreeDirty(integrationPath))) {
+  if (!(await isWorktreeDirty(integrationPath)))
     return { ok: false, code: 'nothing', message: 'nothing to absorb' };
-  }
   let snapshot: string | undefined;
   try {
     snapshot = await snapshotWorktreeCommit(integrationPath, previewBranch);
   } catch (err) {
     return { ok: false, code: 'error', message: gitErrorMessage(err) };
   }
-  if (!snapshot) {
+  if (!snapshot)
     return { ok: false, code: 'nothing', message: 'nothing to absorb' };
-  }
   const incoming = await pathsInCommit(integrationPath, snapshot);
   const clash = await clashingPaths(targetPath, incoming);
   if (clash.length > 0) {

@@ -34,9 +34,8 @@ async function releaseHoldingWorktree(
   worktree: string,
   log: { appendLine(value: string): void },
 ): Promise<{ ok: true } | { ok: false; why: string }> {
-  if (await isWorktreeDirty(worktree)) {
+  if (await isWorktreeDirty(worktree))
     return { ok: false, why: 'its checkout has uncommitted changes' };
-  }
   const ignored = await ignoredFiles(worktree);
   if (ignored.length > 0) {
     return {
@@ -45,9 +44,7 @@ async function releaseHoldingWorktree(
     };
   }
   const removed = await removeWorktree(worktree, {});
-  if (!removed.ok) {
-    return { ok: false, why: removed.message };
-  }
+  if (!removed.ok) return { ok: false, why: removed.message };
   log.appendLine(`Removed landed worktree ${worktree}`);
   return { ok: true };
 }
@@ -149,12 +146,8 @@ export function registerBranchCommands(
           const bits = [
             b.via === 'ancestor' ? 'merged' : 'squashed or rebased in',
           ];
-          if (b.hasRemote) {
-            bits.push('origin still has it');
-          }
-          if (b.worktree) {
-            bits.push('removes its checkout too');
-          }
+          if (b.hasRemote) bits.push('origin still has it');
+          if (b.worktree) bits.push('removes its checkout too');
           return bits.join(' · ');
         };
         const picked = await vscode.window.showQuickPick(
@@ -173,9 +166,7 @@ export function registerBranchCommands(
             placeHolder: `${scan.landed.length} landed, ${scan.keptCount} kept`,
           },
         );
-        if (!picked || picked.length === 0) {
-          return;
-        }
+        if (!picked || picked.length === 0) return;
         const chosen = picked.map((p) => p.label);
         const blocked = new Map<string, string>();
         // Free the checkouts first: `git branch -D` cannot delete a
@@ -225,9 +216,7 @@ export function registerBranchCommands(
             ? treeProvider.getWorktree(item.worktreePath)?.branch
             : undefined) ??
           treeProvider.getSelected()?.branch;
-        if (!repoCwd || !branch) {
-          return;
-        }
+        if (!repoCwd || !branch) return;
         // A branch may be checked out somewhere other than the row clicked
         const worktree = treeProvider
           .getWorktrees()
@@ -294,9 +283,7 @@ export function registerBranchCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.openRemotePrFile',
       async (item?: RemotePrFileItem) => {
-        if (!item) {
-          return;
-        }
+        if (!item) return;
         try {
           await openRemotePrFileDiff(
             item.repoCwd,
@@ -317,9 +304,7 @@ export function registerBranchCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.createWorktreeFromBranch',
       async (item?: BranchItem) => {
-        if (!item?.branch) {
-          return;
-        }
+        if (!item?.branch) return;
         const repoCwd = item.repoCwd;
         if (item.worktreePath) {
           void vscode.window.showInformationMessage(
@@ -338,9 +323,7 @@ export function registerBranchCommands(
           validateInput: (v) =>
             v.trim() ? undefined : 'Destination path is required',
         });
-        if (!dest?.trim()) {
-          return;
-        }
+        if (!dest?.trim()) return;
 
         try {
           await vscode.window.withProgress(

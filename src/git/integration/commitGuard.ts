@@ -113,24 +113,16 @@ async function hooksDir(cwd: string): Promise<string> {
   const configured = await git(cwd, ['config', '--get', 'core.hooksPath'])
     .then((v) => v.trim())
     .catch(() => '');
-  if (!configured) {
-    return path.join(await commonDir(cwd), 'hooks');
-  }
-  if (path.isAbsolute(configured)) {
-    return configured;
-  }
+  if (!configured) return path.join(await commonDir(cwd), 'hooks');
+  if (path.isAbsolute(configured)) return configured;
   // Relative hooksPath resolves against the top level of the WORKING TREE
   const top = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim();
   return path.resolve(top, configured);
 }
 
 function classify(existing: string | undefined): GuardState {
-  if (existing === undefined) {
-    return 'none';
-  }
-  if (existing === OWN_HOOK) {
-    return 'ours';
-  }
+  if (existing === undefined) return 'none';
+  if (existing === OWN_HOOK) return 'ours';
   return existing.includes(SENTINEL) ? 'chained' : 'foreign';
 }
 
@@ -149,9 +141,7 @@ function strip(hook: string): string {
   const [marker] = CHAIN.split('\n');
   const lines = hook.split('\n');
   const at = lines.findIndex((l) => l === marker);
-  if (at < 0) {
-    return hook;
-  }
+  if (at < 0) return hook;
   lines.splice(at, CHAIN.split('\n').length);
   return lines.join('\n');
 }
@@ -181,9 +171,8 @@ export async function installCommitGuard(
   const existing = await read(hook);
   const state = classify(existing);
 
-  if (state === 'foreign' && !SHELL_SHEBANG.test(existing ?? '')) {
+  if (state === 'foreign' && !SHELL_SHEBANG.test(existing ?? ''))
     return 'foreign';
-  }
 
   await fs.mkdir(dir, { recursive: true });
   // 'unchanged' has to mean every part already agrees: the scripts rarely
@@ -194,26 +183,20 @@ export async function installCommitGuard(
     state !== 'foreign' &&
     (await read(guard)) === REFUSAL &&
     (await read(marker))?.trim() === branch;
-  if (settled) {
-    return 'unchanged';
-  }
+  if (settled) return 'unchanged';
 
   await fs.writeFile(marker, `${branch}\n`);
   await fs.writeFile(guard, REFUSAL, { mode: 0o755 });
   // writeFile does not chmod a file that already existed
   await fs.chmod(guard, 0o755);
 
-  if (state === 'chained') {
-    return 'updated';
-  }
+  if (state === 'chained') return 'updated';
   if (state === 'foreign') {
     await fs.writeFile(hook, inject(existing ?? ''));
     await fs.chmod(hook, 0o755);
     return 'chained';
   }
-  if (state === 'ours') {
-    return 'updated';
-  }
+  if (state === 'ours') return 'updated';
   await fs.writeFile(hook, OWN_HOOK, { mode: 0o755 });
   await fs.chmod(hook, 0o755);
   return 'installed';
