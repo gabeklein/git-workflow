@@ -7,20 +7,39 @@ import type {
 } from '../views/filesTree';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
-/** Commands for the focused-worktree Files panel. */
+/** Commands for the Directory section of the Changes panel. */
 export function registerFileExplorerCommands(
   treeProvider: WorktreeTreeProvider,
   filesProvider: FilesTreeProvider,
   log: { appendLine(value: string): void },
 ): vscode.Disposable[] {
   return [
+    vscode.commands.registerCommand(
+      'worktreeCompare.copyPath',
+      async (item?: { resourceUri?: vscode.Uri; kind?: string }) => {
+        // The section row carries no resourceUri — it stands for the
+        // checkout itself, so fall back to the focused worktree's root.
+        const target =
+          item?.resourceUri?.fsPath ?? treeProvider.getSelectedPath();
+        if (!target) {
+          return;
+        }
+        await vscode.env.clipboard.writeText(target);
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: copied ${path.basename(target)} path`,
+          2000,
+        );
+        log.appendLine(`Copied path: ${target}`);
+      },
+    ),
     vscode.commands.registerCommand('worktreeCompare.refreshFiles', () =>
       filesProvider.refresh(),
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.newFileInWorktree',
-      // Folder context menus pass the item; the title button passes
-      // nothing; tests/automation may pass the relative path directly.
+      // Folder context menus pass the folder; the Directory group row passes a
+      // GroupItem, which is not a folder and correctly means "at the root";
+      // tests/automation may pass the relative path directly.
       async (item?: ExplorerFolderItem, nameArg?: unknown) => {
         const selected = treeProvider.getSelectedPath();
         if (!selected) {

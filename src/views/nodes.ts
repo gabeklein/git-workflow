@@ -40,7 +40,7 @@ export class GroupItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'ahead' | 'branches' | 'remote',
+    readonly group: 'worktrees' | 'ahead' | 'branches' | 'remote' | 'directory',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
     opts?: { worktreePath?: string; baseRef?: string },
@@ -57,7 +57,9 @@ export class GroupItem extends vscode.TreeItem {
           ? 'git-commit'
           : group === 'branches'
             ? 'git-branch'
-            : 'cloud',
+            : group === 'directory'
+              ? 'folder-opened'
+              : 'cloud',
     );
   }
 }

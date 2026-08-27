@@ -191,24 +191,29 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout
 
-**Worktrees** panel (selector — header shows the count):
+**Focus** panel (selector — header shows the worktree count):
 
 ```
-branch rows (PR / pushed / local / applied)  ← click to focus
+▼ Worktrees      checkouts, root first, then tip recency  ← click to focus
+▼ Branches       local branches with no worktree
+▶ Remote         remote-only branches (hidden when there are none)
 ```
+
+Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the integration preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs. A branch appears in exactly one group.
 
 **Changes** panel (presentation — header shows the focused branch):
 
 ```
 ⚠ PR #N has merge conflicts          ← GitHub conflicts only
-▼ Commits · N                        description: → base [@sha]
+▶ Directory              .worktrees/feat-a   ← the focused worktree's working tree
 ▼ Staged / Unstaged                  ← hidden if empty; commit via context menu
+▼ Commits · N                        description: → base [@sha]
 ▶ Full Diff · N new · M modified · …  ← collapsed until opened
 ```
 
-**Files** panel (explorer for the focused worktree — header shows its branch): browse and open the worktree's files as **real editable buffers**, not diffs. The listing is git-driven (tracked + untracked, `.gitignore` respected — no `node_modules` noise) and follows focus. `New File…` / `Delete` via the title button and context menus; it refreshes on git activity and file events. A custom panel rather than swapping workspace folders, because converting a single-folder window to multi-root restarts the extension host.
+The row's description says **where that checkout is**, in the shortest form that is true: `.` for the workspace root, `x` inside it, `../x` beside it (the usual worktree layout), `~/x` under home, absolute otherwise. Shortest rather than a fixed order, because a preference gets it wrong both ways — `../../Users/you/Projects/thing` is not "beside" anything and is plainly worse than `~/Projects/thing`, while a real sibling reads better as `../other` than as either. **Copy Path** is on the section row (the checkout root) and on any file or folder in it.
 
-**Branches** panel (separate): every branch — local, remote, PR-only — newest first, tagged with `worktree` / `PR #N` / `conflicts` / `remote` / `local only`. Create a worktree from any row (inline action); PR rows expand into read-only file diffs; click a row with a worktree to focus it.
+The **Directory** section browses and opens the worktree's files as **real editable buffers**, not diffs. It is *Directory* and not *Files* because under a panel called Changes, "Files" reads as the changed files — the one thing it is not. The listing is git-driven (tracked + untracked, `.gitignore` respected — no `node_modules` noise) and follows focus; `New File…` / `Delete` sit on the section row and the context menus, and it refreshes on git activity and file events. It exists because the built-in Explorer can only reveal paths inside a workspace folder — a sibling worktree is outside every one of them — and converting the window to multi-root restarts the extension host.
 
 Selection is persisted per workspace. Compare defaults to merge-base of the integration tip (not “must rebase” when main moves).
 

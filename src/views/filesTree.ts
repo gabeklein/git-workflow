@@ -7,9 +7,15 @@ import type { WorktreeTreeProvider } from './worktreeTree';
 
 /**
  * Explorer for the FOCUSED worktree: browse and open its files as real,
- * editable buffers — no diffs, no folder-swapping. A custom panel instead
- * of workspace.updateWorkspaceFolders because converting a single-folder
- * window to multi-root restarts the extension host (session-destroying).
+ * editable buffers — no diffs, no folder-swapping. Backs the **Directory**
+ * section of the Changes panel (it had its own Files panel once; the diffs
+ * and the directory are the same subject, and a whole panel to say "and
+ * here are the files" earned less than the space it took). Custom rather
+ * than
+ * workspace.updateWorkspaceFolders because converting a single-folder
+ * window to multi-root restarts the extension host (session-destroying),
+ * and the built-in Explorer cannot reveal a path outside every workspace
+ * folder — which a sibling worktree always is.
  *
  * Listing comes from git (tracked + untracked, .gitignore respected), so
  * node_modules/build noise never renders; deleted-but-tracked paths are
