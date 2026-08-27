@@ -139,7 +139,9 @@ export class LanesTreeProvider
       // — the row inside offers to turn it on.
       group('Preview', 'preview', this.worktrees.getIntegration() ? 1 : 0, true),
       group('Working', 'working', plan.working.length, true),
-      group('Local', 'local', plan.local.length, true),
+      // Closed by default: Local is where branches wait, and the list grows
+      // without bound in a busy repo. Working is what you are doing.
+      group('Local', 'local', plan.local.length, false),
     ];
     // Remote only earns a row when something lives ONLY on the remote — a
     // branch you already have locally is represented by its local row, so
@@ -166,8 +168,8 @@ export class LanesTreeProvider
       // What the removed panel's welcome content used to say. A group that
       // vanishes when off is a feature nobody finds.
       const row = new MessageItem(
-        'Enable integration…',
-        'preview your lanes merged together',
+        'Create Integration',
+        'preview lanes merged together',
         'beaker',
       );
       row.command = {
