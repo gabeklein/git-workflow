@@ -1,4 +1,5 @@
 import { git, gitOk } from '../exec';
+import { landedVia } from '../landedProbe';
 import { revParseCommit } from '../plumbing';
 import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
@@ -102,12 +103,17 @@ export async function laneNeverDiverged(
 }
 
 /**
- * Lanes that LANDED: merging them into the base changes nothing AND they
- * had something to contribute. One predicate for badges and retirement,
- * deliberately content-based:
- * - ancestry (true-merge landings) — merging an ancestor is a no-op;
- * - content-neutral (squash/rebase landings) — a STRICT off-tree merge
- *   yields the base tree unchanged.
+ * Lanes that LANDED: their work is in the base AND they had something to
+ * contribute. One predicate for badges and retirement.
+ *
+ * Delegates to landedVia — the same stack of probes the branch prune uses.
+ * This used to run its own weaker check (ancestry, else a strict merge
+ * yielding the base tree unchanged), which is correct for a lane that
+ * landed while the base sat still and silently wrong afterwards: once the
+ * base moves on, that merge CONFLICTS, the lane never reads as landed,
+ * never retires, and sits in the preview reporting a conflict forever.
+ * Seen in real use — a merged PR's lane stuck as `conflict` — and the fix
+ * was already written for prune, just not shared.
  * Revert-safe by construction: after a squash-merge is reverted, merging
  * the lane again WOULD change the tree, so it is not landed.
  *
@@ -124,34 +130,26 @@ export async function findLandedLanes(
   if (!baseSha) {
     return [];
   }
-  let baseTree: string;
-  try {
-    baseTree = (await git(cwd, ['rev-parse', `${baseSha}^{tree}`])).trim();
-  } catch {
-    return [];
-  }
   const landed: string[] = [];
   for (const lane of lanes) {
     const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
     if (!laneSha) {
       continue; // branch gone — not our call to make
     }
-    if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
-      if (!(await laneNeverDiverged(cwd, laneSha, baseSha))) {
-        landed.push(lane);
-      }
+    const via = await landedVia(cwd, laneSha, baseSha).catch(() => undefined);
+    if (!via) {
       continue;
     }
-    try {
-      const result = await mergeOffTree(cwd, baseSha, laneSha, {
-        strict: true,
-      });
-      if (result.kind === 'tree' && result.tree === baseTree) {
-        landed.push(lane);
-      }
-    } catch {
-      // probe failure ⇒ not landed
+    // A lane that never diverged is EMPTY, not landed — it has nothing to
+    // retire, and retiring it would drop a fresh worktree out of the
+    // preview before its first commit.
+    if (
+      via === 'ancestor' &&
+      (await laneNeverDiverged(cwd, laneSha, baseSha))
+    ) {
+      continue;
     }
+    landed.push(lane);
   }
   return landed;
 }

@@ -1,5 +1,7 @@
 import { git, gitOk } from './exec';
-import { mergeOffTree } from './integration';
+// Imported from the module, not the barrel: status.ts uses this, and
+// the barrel re-exports status.ts — going through it would be a cycle.
+import { mergeOffTree } from './integration/merge';
 
 /**
  * Deciding whether a branch's work is already in the base.
