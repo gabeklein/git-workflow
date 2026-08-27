@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
+import { orderLaneRows } from './focusPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
@@ -349,9 +350,8 @@ export class IntegrationController implements vscode.Disposable {
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
-      this.candidates = [
-        ...new Set([...explicit, ...this.lanes, ...auto]),
-      ].sort();
+      // Applied lanes render in MERGE order, not sorted — see orderLaneRows.
+      this.candidates = orderLaneRows(this.lanes, [...explicit, ...auto]);
       this.wip = await listWipLanes(wt.path);
       this.landed = await findLandedLanes(
         wt.path,
