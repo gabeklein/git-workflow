@@ -74,7 +74,14 @@ export class ChangesTreeProvider
       return changes;
     }
     const root = this.worktrees.getSelectedPath();
+    // Warnings stay at the very top, above Directory. They are banners
+    // about the focused checkout, and a banner sitting under a collapsible
+    // group reads as belonging to that group — which is exactly how it
+    // looked once Directory moved to the top.
+    const banners = changes.filter((n) => n.kind === 'conflictWarning');
+    const rest = changes.filter((n) => n.kind !== 'conflictWarning');
     return [
+      ...banners,
       new GroupItem(
         'Directory',
         'directory',
@@ -89,7 +96,7 @@ export class ChangesTreeProvider
             )
           : undefined,
       ),
-      ...changes,
+      ...rest,
     ];
   }
 
