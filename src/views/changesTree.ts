@@ -75,7 +75,6 @@ export class ChangesTreeProvider
     }
     const root = this.worktrees.getSelectedPath();
     return [
-      ...changes,
       new GroupItem(
         'Directory',
         'directory',
@@ -90,6 +89,7 @@ export class ChangesTreeProvider
             )
           : undefined,
       ),
+      ...changes,
     ];
   }
 

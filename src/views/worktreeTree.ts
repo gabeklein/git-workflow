@@ -868,21 +868,6 @@ export class WorktreeTreeProvider
             );
           }
 
-          // "Commits · N → branch (@ SHA)" — @ sha only when pinned off tip
-          const aheadCount = compare.ahead;
-          const aheadTarget = compare.compareIsTip
-            ? `→ ${compare.baseRef}`
-            : `→ ${compare.baseRef} @ ${compare.baseHead}`;
-          nodes.push(
-            new GroupItem(
-              `Commits · ${aheadCount}`,
-              'ahead',
-              vscode.TreeItemCollapsibleState.Collapsed,
-              aheadTarget,
-              { worktreePath, baseRef: compare.baseRef },
-            ),
-          );
-
           if (status.staged.length > 0) {
             nodes.push(
               new SectionItem(
@@ -908,6 +893,21 @@ export class WorktreeTreeProvider
               ),
             );
           }
+
+          // "Commits · N → branch (@ SHA)" — @ sha only when pinned off tip
+          const aheadCount = compare.ahead;
+          const aheadTarget = compare.compareIsTip
+            ? `→ ${compare.baseRef}`
+            : `→ ${compare.baseRef} @ ${compare.baseHead}`;
+          nodes.push(
+            new GroupItem(
+              `Commits · ${aheadCount}`,
+              'ahead',
+              vscode.TreeItemCollapsibleState.Collapsed,
+              aheadTarget,
+              { worktreePath, baseRef: compare.baseRef },
+            ),
+          );
 
           // Context keys for Commit menu enablement
           void vscode.commands.executeCommand(

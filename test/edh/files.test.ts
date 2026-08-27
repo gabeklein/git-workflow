@@ -29,14 +29,16 @@ describe('directory section', () => {
   const rootLabels = async () =>
     (await api.explorerChildren()).map((n) => n.label);
 
-  it('renders below the diff sections, not as its own panel', async () => {
+  it('renders as a section of Changes, not as its own panel', async () => {
     await run('worktreeCompare.focusWorktree', laneA);
     await poll('Changes shows the Directory group', 30000, async () =>
       (await api.changesRows()).some((r) => r.label === 'Directory'),
     );
     const labels = (await api.changesRows()).map((r) => r.label);
-    // Directory last: the diffs are what the panel is opened for
-    assert.equal(labels[labels.length - 1], 'Directory');
+    // Directory first, Full Diff last — the two expandable sections
+    // bracket the panel, with the actionable rows between them.
+    assert.equal(labels[0], 'Directory');
+    assert.equal(labels[labels.length - 1], 'Full Diff');
     assert.ok(
       labels.some((l) => l.startsWith('Commits')),
       'the diff half is still there',
