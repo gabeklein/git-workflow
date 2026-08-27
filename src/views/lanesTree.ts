@@ -148,13 +148,15 @@ export class LanesTreeProvider
     }
     return landed.map((lane) =>
       lane.worktree
-        ? this.worktrees.buildCheckoutRow(lane.worktree)
+        ? this.worktrees.buildCheckoutRow(lane.worktree, true)
         : new BranchItem(
             cwd,
             lane.branch,
             true,
             false,
-            'landed',
+            // No date: under Landed, "3 hours ago" is when it merged, which
+            // reads as activity on something that is finished.
+            '',
             undefined,
             this.branches.getPullRequestFor(lane.branch),
           ),

@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
 import { syncBranchWithRemote } from '../git/syncRemote';
+import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
+import { removeWorktree } from '../git/worktreeAdmin';
 import { integrationBaseRef, integrationBranch } from '../git/integration';
 import {
   findLandedBranches,
@@ -13,6 +15,42 @@ import { createWorktreeForPr } from '../github/remotePrs';
 import type { BranchItem, RemotePrFileItem } from '../views/nodes';
 import type { BranchesTreeProvider } from '../views/branchesTree';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
+
+
+/**
+ * A landed branch is often still checked out — its own worktree is the
+ * usual reason it is on your disk at all. `git branch -D` cannot touch a
+ * checked-out ref, so a prune that only deleted refs would refuse exactly
+ * the rows the Landed group is showing you and leave the group unclearable.
+ *
+ * So prune removes the holding worktree first, under the same conditions
+ * the landed quick-delete uses: clean, unlocked, attached, and holding no
+ * ignored files. Ignored files are the one thing removal can still
+ * destroy — the dirty probe cannot see them and `git worktree remove`
+ * takes them without complaint — so a checkout holding any keeps its
+ * folder, and says why.
+ */
+async function releaseHoldingWorktree(
+  worktree: string,
+  log: { appendLine(value: string): void },
+): Promise<{ ok: true } | { ok: false; why: string }> {
+  if (await isWorktreeDirty(worktree)) {
+    return { ok: false, why: 'its checkout has uncommitted changes' };
+  }
+  const ignored = await ignoredFiles(worktree);
+  if (ignored.length > 0) {
+    return {
+      ok: false,
+      why: `its checkout holds ignored files (${ignored.slice(0, 3).join(', ')})`,
+    };
+  }
+  const removed = await removeWorktree(worktree, {});
+  if (!removed.ok) {
+    return { ok: false, why: removed.message };
+  }
+  log.appendLine(`Removed landed worktree ${worktree}`);
+  return { ok: true };
+}
 
 export function registerBranchCommands(
   treeProvider: WorktreeTreeProvider,
@@ -73,10 +111,25 @@ export function registerBranchCommands(
           for (const name of unknown) {
             log.appendLine(`Prune skipped ${name}: not landed in ${baseRef}`);
           }
+          const chosen = args.branches.filter((b) => known.has(b));
+          const blocked = new Map<string, string>();
+        // Free the checkouts first: `git branch -D` cannot delete a
+        // checked-out ref, so without this the prune refuses precisely the
+        // rows Landed is showing.
+        const holding = scan.landed.filter(
+          (b) => b.worktree && chosen.includes(b.name),
+        );
+        for (const b of holding) {
+          const freed = await releaseHoldingWorktree(b.worktree as string, log);
+          if (!freed.ok) {
+            log.appendLine(`Prune kept ${b.name}: ${freed.why}`);
+            blocked.set(b.name, freed.why);
+          }
+        }
           const outcome = await pruneLandedBranches(
             repoCwd,
             baseRef,
-            args.branches.filter((b) => known.has(b)),
+            chosen.filter((b) => !blocked.has(b)),
             protect,
           );
           for (const [name, why] of outcome.failed) {
@@ -100,7 +153,7 @@ export function registerBranchCommands(
             bits.push('origin still has it');
           }
           if (b.worktree) {
-            bits.push('checked out — remove the worktree first');
+            bits.push('removes its checkout too');
           }
           return bits.join(' · ');
         };
@@ -108,9 +161,9 @@ export function registerBranchCommands(
           scan.landed.map((b) => ({
             label: b.name,
             description: describe(b),
-            // Held branches cannot be deleted, so they are shown (you should
-            // know they are done) but never pre-selected.
-            picked: !b.worktree,
+            // Held branches are selectable now: prune frees a clean
+            // checkout before deleting the ref.
+            picked: true,
             branch: b,
           })),
           {
@@ -123,10 +176,25 @@ export function registerBranchCommands(
         if (!picked || picked.length === 0) {
           return;
         }
+        const chosen = picked.map((p) => p.label);
+        const blocked = new Map<string, string>();
+        // Free the checkouts first: `git branch -D` cannot delete a
+        // checked-out ref, so without this the prune refuses precisely the
+        // rows Landed is showing.
+        const holding = scan.landed.filter(
+          (b) => b.worktree && chosen.includes(b.name),
+        );
+        for (const b of holding) {
+          const freed = await releaseHoldingWorktree(b.worktree as string, log);
+          if (!freed.ok) {
+            log.appendLine(`Prune kept ${b.name}: ${freed.why}`);
+            blocked.set(b.name, freed.why);
+          }
+        }
         const outcome = await pruneLandedBranches(
           repoCwd,
           baseRef,
-          picked.map((p) => p.label),
+          chosen.filter((b) => !blocked.has(b)),
           protect,
         );
         for (const [name, why] of outcome.failed) {
@@ -140,7 +208,7 @@ export function registerBranchCommands(
           branchesProvider.setWorktrees(treeProvider.getWorktrees());
           branchesProvider.refresh();
         }
-        const kept = outcome.failed.size;
+        const kept = outcome.failed.size + blocked.size;
         void vscode.window.showInformationMessage(
           `Git Workflow: deleted ${outcome.deleted.length} branch(es)` +
             (kept > 0 ? ` — ${kept} kept, see the log for why` : ''),

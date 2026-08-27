@@ -400,6 +400,13 @@ export class WorktreeListItem extends vscode.TreeItem {
       merging?: boolean;
       baseRef: string;
     },
+    /**
+     * Rendered under Landed. The group and the icon already say the work
+     * is done, so the row drops what would only repeat them — and drops
+     * "behind the base", which after a squash merge is both inevitable and
+     * unactionable: the branch is behind by the very commit that landed it.
+     */
+    landed = false,
   ) {
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
@@ -467,7 +474,11 @@ export class WorktreeListItem extends vscode.TreeItem {
     // origin/main · #37 · conflicts` did.
     const bits: string[] = [];
     if (pullRequest) {
-      bits.push(formatPrDescription(pullRequest));
+      // Under Landed the state word is redundant with the group; the
+      // NUMBER is not, so keep that and drop the rest.
+      bits.push(
+        landed ? `#${pullRequest.number}` : formatPrDescription(pullRequest),
+      );
     } else if (worktree.publishState && worktree.publishState !== 'local') {
       // No PR: worth saying only when the branch got somewhere — 'local' is
       // the default state of a checkout and reads as noise on every row.
@@ -475,7 +486,10 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
 
     // Selection is shown via blue decoration tint only (no "selected" label)
-    if (baseStatus?.rebasing) {
+    if (landed) {
+      // Nothing here applies to a landed branch: it is behind because it
+      // landed, and catching it up is not a thing anyone wants to do.
+    } else if (baseStatus?.rebasing) {
       bits.push('rebasing');
     } else if (baseStatus?.merging) {
       bits.push('merging base');

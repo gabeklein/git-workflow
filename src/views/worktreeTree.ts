@@ -973,7 +973,7 @@ export class WorktreeTreeProvider
    * Public so the Focus panel can order the checkouts itself and still get
    * rows built the one way.
    */
-  buildCheckoutRow(wt: DiscoveredWorktree): TreeNode {
+  buildCheckoutRow(wt: DiscoveredWorktree, landed = false): TreeNode {
     const selected = this.getSelectedPath();
     const baseRef = integrationBaseRef();
     const state = this.integration.getState();
@@ -1001,6 +1001,7 @@ export class WorktreeTreeProvider
           baseStatus.merging)
           ? baseStatus
           : undefined,
+        landed,
       );
     })();
   }
