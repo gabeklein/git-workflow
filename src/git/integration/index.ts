@@ -1,3 +1,4 @@
+export * from './identity';
 export * from './config';
 export * from './lanes';
 export * from './merge';

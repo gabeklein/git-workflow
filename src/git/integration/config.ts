@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { Integration } from './identity';
 
 /**
  * Subject prefix of the ephemeral wip snapshot commits rebuilds overlay.
@@ -6,6 +7,17 @@ import * as vscode from 'vscode';
  * apart from work a person actually committed on the integration branch.
  */
 export const WIP_SUBJECT = 'wip(gw):';
+
+/**
+ * The configured integration for this workspace.
+ *
+ * The one place the setting is read. Below the view layer nothing consults
+ * it — see identity.ts for why — so this exists to be resolved once and
+ * passed down.
+ */
+export function currentIntegration(): Integration {
+  return { branch: integrationBranch(), baseRef: integrationBaseRef() };
+}
 
 export function integrationBranch(): string {
   const template =
@@ -147,14 +159,21 @@ export function autoRebaseLanes(): AutoRebaseMode {
 }
 
 /** Branches that must never be applied as a lane. */
-export function isLaneBranch(branch: string, baseRef: string): boolean {
+export function isLaneBranch(
+  branch: string,
+  baseRef: string,
+  /** The preview branch is not a lane. Defaults to the configured one so
+   *  existing callers keep working; pass it explicitly once there can be
+   *  more than one. */
+  previewBranch = integrationBranch(),
+): boolean {
   if (!branch || branch === 'HEAD' || branch === 'unknown') {
     return false;
   }
   const blocked = new Set([
     'main',
     'master',
-    integrationBranch(),
+    previewBranch,
     baseRef.replace(/^origin\//, ''),
   ]);
   return !blocked.has(branch) && !branch.startsWith('gitbutler/');
