@@ -67,7 +67,7 @@ export async function mergeOffTree(
  * touching the working tree.
  */
 
-export interface ResolvedConflicts {
+interface ResolvedConflicts {
   tree: string;
   /** Files resolved by a LOSSLESS rule (union insert / linewise 3-way). */
   lossless: string[];

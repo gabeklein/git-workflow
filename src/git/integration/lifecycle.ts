@@ -26,7 +26,7 @@ export async function createIntegrationWorktree(
   await ensureIntegrationPushBlocked(repoCwd);
 }
 
-export async function currentBranch(cwd: string): Promise<string | undefined> {
+async function currentBranch(cwd: string): Promise<string | undefined> {
   try {
     const out = (
       await git(cwd, ['symbolic-ref', '-q', '--short', 'HEAD'])

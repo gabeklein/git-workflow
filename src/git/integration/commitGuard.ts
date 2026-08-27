@@ -29,7 +29,7 @@ import { commonDir } from './lanes';
  * exists.
  */
 
-export const GUARD_FILE = 'focus-guard';
+const GUARD_FILE = 'focus-guard';
 
 /** Standalone refusal, invoked by whatever pre-commit hook is in place. */
 const GUARD_SCRIPT = 'git-workflow-integration-guard';
@@ -45,8 +45,8 @@ const SENTINEL = '# git-workflow: integration commit guard';
 const CHAIN = `${SENTINEL} (remove these 2 lines to stop guarding)
 gw_guard="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/${GUARD_SCRIPT}"; [ -x "$gw_guard" ] && { "$gw_guard" || exit $?; }`;
 
-export type GuardState = 'ours' | 'chained' | 'foreign' | 'none';
-export type GuardInstall =
+type GuardState = 'ours' | 'chained' | 'foreign' | 'none';
+type GuardInstall =
   | 'installed'
   | 'chained'
   | 'updated'

@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from './exec';
 import { isWorktreeDirty } from './plumbing';
-import { integrationBranch } from './integration';
+import { integrationBranch } from './integration/config';
 import { listWorktreeAdmin, type WorktreeAdminState } from './worktreeAdmin';
 
 /** What `git worktree list` knows about a checkout, before we look closer. */

@@ -37,7 +37,7 @@ export type AbsorbTarget =
   | { kind: 'ref'; branch: string };
 
 /** Human-facing name for a target. */
-export function absorbTargetLabel(target: AbsorbTarget): string {
+function absorbTargetLabel(target: AbsorbTarget): string {
   return target.kind === 'checkout' ? target.path : target.branch;
 }
 

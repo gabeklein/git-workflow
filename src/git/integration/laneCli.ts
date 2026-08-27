@@ -22,7 +22,7 @@ import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
  * lock), so it does not care whether VS Code is running.
  */
 
-export const LANE_CLI = 'gw-lane';
+const LANE_CLI = 'gw-lane';
 
 const SENTINEL = '# git-workflow: lane CLI';
 

@@ -277,7 +277,7 @@ export async function landedPrefix(
  * 'unsupported' when git predates merge-tree --write-tree (< 2.38).
  */
 
-export interface BaseStatus {
+interface BaseStatus {
   /** Commits the base has that this branch lacks */
   behind: number;
   /** Commits this branch has that the base lacks */

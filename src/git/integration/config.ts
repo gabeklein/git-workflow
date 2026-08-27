@@ -84,7 +84,7 @@ export function integrationBaseRef(): string {
   return dedicated || config.get<string>('defaultBaseRef', 'main');
 }
 
-export type AutoResolveMode = 'off' | 'whitespace' | 'best-effort';
+type AutoResolveMode = 'off' | 'whitespace' | 'best-effort';
 
 /**
  * How far a lane merge may auto-resolve clashes. Non-overlapping hunks in
@@ -96,7 +96,7 @@ export type AutoResolveMode = 'off' | 'whitespace' | 'best-effort';
  * lane, TAGGED on the lane row so dropped hunks are never silent.
  * 'lane-wins' is accepted as a legacy alias for 'best-effort'.
  */
-export function integrationAutoResolve(): AutoResolveMode {
+function integrationAutoResolve(): AutoResolveMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<string>('integrationAutoResolve', 'best-effort');
@@ -125,7 +125,7 @@ export function conflictResolverMode(): 'none' | 'lossless' | 'full' {
   }
 }
 
-export type CatchUpStrategy = 'auto' | 'rebase' | 'merge';
+type CatchUpStrategy = 'auto' | 'rebase' | 'merge';
 
 /**
  * How Catch Up with Base brings a lane up to date. 'auto': rebase
@@ -140,7 +140,7 @@ export function catchUpStrategy(): CatchUpStrategy {
   return v === 'rebase' || v === 'merge' ? v : 'auto';
 }
 
-export type AutoRebaseMode = 'off' | 'local-only';
+type AutoRebaseMode = 'off' | 'local-only';
 
 /**
  * Proactive catch-up: automatically bring lanes up to date as the base

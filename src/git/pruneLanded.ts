@@ -1,5 +1,5 @@
 import { git } from './exec';
-import { resolveBaseSha } from './integration';
+import { resolveBaseSha } from './integration/status';
 import { landedVia } from './landedProbe';
 import { revParseCommit } from './plumbing';
 import { listWorktreeAdmin } from './worktreeAdmin';

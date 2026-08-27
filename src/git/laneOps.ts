@@ -1,7 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from './exec';
-import { landedPrefix, laneNeverDiverged, resolveBaseSha } from './integration';
+import {
+  landedPrefix,
+  laneNeverDiverged,
+  resolveBaseSha,
+} from './integration/status';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from './plumbing';
 
 /**
