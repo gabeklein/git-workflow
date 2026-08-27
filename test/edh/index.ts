@@ -14,6 +14,7 @@ import { getApi } from './helpers';
 const ORDER = [
   'overlay.test.cjs', //     activation, enroll/apply, selection, wip overlay
   'files.test.cjs', //       focused-worktree explorer (cleans up after itself)
+  'focus.test.cjs', //       unified Focus panel: checkouts, groups, no duplicates
   'landing.test.cjs', //     landed lifecycle, base badges
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase
@@ -33,6 +34,36 @@ export async function run(): Promise<void> {
       `test files out of sync with ORDER — unknown: [${unknown.join(', ')}], missing: [${missing.join(', ')}]`,
     );
   }
+  // Local iteration: GW_EDH_ONLY=focus runs the ORDER PREFIX up to and
+  // including that file. A prefix, not the file alone — scenarios are
+  // stateful and later ones inherit what earlier ones left behind, so
+  // running one in isolation fails for reasons that have nothing to do with
+  // the code under test. The tail is what gets skipped, and CI always runs
+  // the whole list.
+  let order = ORDER;
+  const only = (process.env.GW_EDH_ONLY ?? '').trim();
+  if (only) {
+    const wanted = only
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const last = Math.max(
+      ...wanted.map((t) =>
+        ORDER.findIndex((f) => f === t || f.startsWith(`${t}.`)),
+      ),
+    );
+    if (last < 0) {
+      throw new Error(
+        `GW_EDH_ONLY=${only} matched no scenario; known: ${ORDER.join(', ')}`,
+      );
+    }
+    order = ORDER.slice(0, last + 1);
+    const skipped = ORDER.slice(last + 1);
+    console.log(
+      `[edh] GW_EDH_ONLY=${only} → running ${order.length}/${ORDER.length}` +
+        (skipped.length > 0 ? `, skipping ${skipped.join(', ')}` : ''),
+    );
+  }
   const mocha = new Mocha({
     ui: 'bdd',
     color: true,
@@ -40,7 +71,7 @@ export async function run(): Promise<void> {
     timeout: 120_000,
     slow: 5_000,
   });
-  for (const file of ORDER) {
+  for (const file of order) {
     mocha.addFile(path.join(__dirname, file));
   }
   await new Promise<void>((resolve, reject) => {

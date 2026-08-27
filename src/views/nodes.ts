@@ -9,7 +9,11 @@ import {
   type PullRequestInfo,
 } from '../github/pr';
 import type { RemotePullRequest } from '../github/remotePrs';
-import { worktreeFileUri, worktreeResourceUri } from './worktreeDecorations';
+import {
+  branchResourceUri,
+  worktreeFileUri,
+  worktreeResourceUri,
+} from './worktreeDecorations';
 
 export type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
 
@@ -36,7 +40,7 @@ export class GroupItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'ahead',
+    readonly group: 'worktrees' | 'ahead' | 'branches' | 'remote',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
     opts?: { worktreePath?: string; baseRef?: string },
@@ -46,10 +50,15 @@ export class GroupItem extends vscode.TreeItem {
     this.description = description;
     this.worktreePath = opts?.worktreePath;
     this.baseRef = opts?.baseRef;
-    this.iconPath =
+    this.iconPath = new vscode.ThemeIcon(
       group === 'worktrees'
-        ? new vscode.ThemeIcon('repo')
-        : new vscode.ThemeIcon('git-commit');
+        ? 'repo'
+        : group === 'ahead'
+          ? 'git-commit'
+          : group === 'branches'
+            ? 'git-branch'
+            : 'cloud',
+    );
   }
 }
 
@@ -80,11 +89,11 @@ export class BranchItem extends vscode.TreeItem {
       pr ? 'WithPr' : '',
     ].join('');
     this.contextValue = `branch${flags}`;
+    // Lets the row carry the preview-membership badge; the icon is set
+    // explicitly below, so this never drives file-icon theming.
+    this.resourceUri = branchResourceUri(branch);
 
     const tags: string[] = [];
-    if (relativeDate) {
-      tags.push(relativeDate);
-    }
     if (worktreePath) {
       tags.push('worktree');
     }
@@ -96,8 +105,13 @@ export class BranchItem extends vscode.TreeItem {
     }
     if (!hasLocalRef && (hasRemote || pr)) {
       tags.push('remote');
-    } else if (hasLocalRef && !hasRemote && !pr) {
-      tags.push('local only');
+    }
+    // 'local only' says nothing: under Branches it is the default state.
+    // The date goes LAST so it trails the row — the tree has no
+    // right-aligned field, and the one right-edge slot (the decoration
+    // badge) is spent marking preview membership.
+    if (relativeDate) {
+      tags.push(relativeDate);
     }
     this.description = tags.join(' · ');
 
@@ -445,9 +459,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     } else if (baseStatus && baseStatus.behind > 0) {
       bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
     }
-    if (integration?.role === 'lane' && integration.applied) {
-      bits.push('applied');
-    }
+
     if (worktree.isRootCheckout) {
       bits.push(worktree.isDirty ? 'root · dirty' : 'root');
     }
@@ -456,8 +468,9 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
     if (pullRequest) {
       bits.push(formatPrDescription(pullRequest));
-    } else if (worktree.publishState) {
-      // No PR: show whether branch exists on a remote
+    } else if (worktree.publishState && worktree.publishState !== 'local') {
+      // No PR: worth saying only when the branch got somewhere — 'local' is
+      // the default state of a checkout and reads as noise on every row.
       bits.push(worktree.publishState);
     }
     this.description = bits.length > 0 ? bits.join(' · ') : undefined;

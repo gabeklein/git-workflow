@@ -72,6 +72,33 @@ export class BranchesTreeProvider
     this._onDidChangeTreeData.fire();
   }
 
+  /** Branch list as loaded, newest first (for-each-ref --sort=-committerdate). */
+  getBranches(): BranchInfo[] {
+    return this.branches;
+  }
+
+  /** Branch names that head an open PR. */
+  getPrHeads(): ReadonlySet<string> {
+    return new Set(this.prsByHead.keys());
+  }
+
+  getPullRequestFor(branch: string): RemotePullRequest | undefined {
+    return this.prsByHead.get(branch);
+  }
+
+  /** Read-only file rows under a PR branch. */
+  getPrFileRows(cwd: string, pr: RemotePullRequest): Promise<TreeNode[]> {
+    return this.getPrFiles(cwd, pr);
+  }
+
+  isLoading(): boolean {
+    return this.loading;
+  }
+
+  getError(): string | undefined {
+    return this.error;
+  }
+
   getRepoCwd(): string | undefined {
     return this.repoCwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }

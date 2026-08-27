@@ -87,10 +87,22 @@ export function registerWorktreeCommands(
         if (!target) {
           return;
         }
-        await vscode.commands.executeCommand(
-          'revealInExplorer',
-          vscode.Uri.file(target),
-        );
+        const uri = vscode.Uri.file(target);
+        // revealInExplorer can only show what the Explorer already holds —
+        // a worktree in a sibling directory is outside every workspace
+        // folder, so the command silently did nothing. Fall back to the OS
+        // file manager, which can show any path.
+        const inWorkspace = Boolean(vscode.workspace.getWorkspaceFolder(uri));
+        try {
+          await vscode.commands.executeCommand(
+            inWorkspace ? 'revealInExplorer' : 'revealFileInOS',
+            uri,
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Reveal worktree failed (${target}): ${message}`);
+          await vscode.commands.executeCommand('revealFileInOS', uri);
+        }
       },
     ),
     vscode.commands.registerCommand(

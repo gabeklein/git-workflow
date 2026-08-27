@@ -38,6 +38,16 @@ export interface TestApi {
     label: string;
     path?: string;
   }[]>;
+  /** The RENDERED Focus panel rows; pass a group to list its children. */
+  focusRows(group?: 'worktrees' | 'branches' | 'remote'): Promise<
+    {
+      kind?: string;
+      group?: string;
+      label: string;
+      description: string;
+      contextValue?: string;
+    }[]
+  >;
   /** The RENDERED Integration panel rows (what VS Code actually paints). */
   integrationRows(): {
     kind?: string;

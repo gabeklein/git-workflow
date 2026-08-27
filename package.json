@@ -200,8 +200,9 @@
     "views": {
       "worktreeCompare": [
         {
-          "id": "worktreeCompare.worktrees",
-          "name": "Worktrees"
+          "id": "worktreeCompare.focus",
+          "name": "Focus",
+          "contextualTitle": "Focus"
         },
         {
           "id": "worktreeCompare.changes",
@@ -214,10 +215,6 @@
         {
           "id": "worktreeCompare.integration",
           "name": "Integration"
-        },
-        {
-          "id": "worktreeCompare.branches",
-          "name": "Branches"
         }
       ]
     },
@@ -492,7 +489,7 @@
       "view/title": [
         {
           "command": "worktreeCompare.selectWorktree",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.focus",
           "group": "navigation@1"
         },
         {
@@ -502,18 +499,13 @@
         },
         {
           "command": "worktreeCompare.refreshPullRequests",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.focus",
           "group": "navigation@3"
         },
         {
           "command": "worktreeCompare.refresh",
-          "when": "view == worktreeCompare.worktrees",
+          "when": "view == worktreeCompare.focus",
           "group": "navigation@4"
-        },
-        {
-          "command": "worktreeCompare.refreshBranches",
-          "when": "view == worktreeCompare.branches",
-          "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.newFileInWorktree",
@@ -579,17 +571,17 @@
         },
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /WithPr/",
           "group": "1_github@1"
         },
         {
           "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /WithPr/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /WithPr/",
           "group": "1_github@2"
         },
         {
           "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /^worktreeListItem/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /^worktreeListItem/",
           "group": "navigation@1"
         },
         {
@@ -599,52 +591,52 @@
         },
         {
           "command": "worktreeCompare.unlockWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /Locked/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /Locked/",
           "group": "1_worktree@1"
         },
         {
           "command": "worktreeCompare.catchUpWithBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.rebaseOntoBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.mergeFromBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@3"
         },
         {
           "command": "worktreeCompare.continueRebase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /Rebasing/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /Rebasing/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.abortRebase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /Rebasing/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /Rebasing/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.completeMergeFromBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /MergingBase/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /MergingBase/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.abortMergeFromBase",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /MergingBase/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /MergingBase/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.addToIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneAddable/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /LaneAddable/",
           "group": "2_integration@1"
         },
         {
           "command": "worktreeCompare.removeFromIntegration",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /LaneCandidate/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /LaneCandidate/",
           "group": "2_integration@1"
         },
         {
@@ -699,27 +691,17 @@
         },
         {
           "command": "worktreeCompare.deleteWorktree",
-          "when": "view == worktreeCompare.worktrees && viewItem =~ /Removable/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /Removable/",
           "group": "9_danger@1"
         },
         {
-          "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.branches && viewItem =~ /WithPr/",
-          "group": "1_github@1"
-        },
-        {
-          "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.branches && viewItem =~ /WithPr/",
-          "group": "1_github@2"
-        },
-        {
           "command": "worktreeCompare.createWorktreeFromBranch",
-          "when": "view == worktreeCompare.branches && viewItem =~ /NoWorktree/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /NoWorktree/",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.createWorktreeFromBranch",
-          "when": "view == worktreeCompare.branches && viewItem =~ /NoWorktree/",
+          "when": "view == worktreeCompare.focus && viewItem =~ /NoWorktree/",
           "group": "2_worktree@1"
         },
         {

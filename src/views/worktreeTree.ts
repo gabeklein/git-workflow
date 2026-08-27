@@ -47,7 +47,7 @@ import {
   WorktreeListItem,
 } from './nodes';
 import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
-import { WorktreeSelectionDecorationProvider } from './worktreeDecorations';
+import { WorktreeRowDecorationProvider } from './worktreeDecorations';
 
 export type { TreeNode } from './nodes';
 export { CommitItem, FileItem, WorktreeListItem } from './nodes';
@@ -101,7 +101,7 @@ export class WorktreeTreeProvider
 
   private selectedPath: string | undefined;
   private readonly selectionDecorations =
-    new WorktreeSelectionDecorationProvider();
+    new WorktreeRowDecorationProvider();
 
   private readonly integration: IntegrationController;
   private readonly baseStatus: BaseStatusTracker;
@@ -116,7 +116,10 @@ export class WorktreeTreeProvider
       getWorktrees: () => this.worktrees,
       getRepoCwd: () => this.getRepoCwd(),
       getSelectedPath: () => this.selectedPath,
-      fireTreeData: () => this._onDidChangeTreeData.fire(),
+      fireTreeData: () => {
+        this.syncAppliedDecorations();
+        this._onDidChangeTreeData.fire();
+      },
       refresh: () => this.refresh(),
       refreshCompare: (p) => this.refreshCompare(p),
       moveSelectionOff: (p) => this.moveSelectionOff(p),
@@ -356,6 +359,9 @@ export class WorktreeTreeProvider
       this.prCache.clear();
     } finally {
       this.loading = false;
+      // Paths changed, so the applied-lane badges have to be recomputed even
+      // when integration state itself did not move.
+      this.syncAppliedDecorations();
       this._onDidChangeTreeData.fire();
       this._onDidChangeWorktrees.fire();
       // Background: associate open PRs with worktree branches
@@ -934,6 +940,24 @@ export class WorktreeTreeProvider
 
   /** Worktrees shown in the list — the integration checkout lives under
    *  the Integration row instead. */
+  /**
+   * Tell the decoration provider what is in the preview — checkout paths
+   * for rows that have one, branch names for the rest, since a row keys its
+   * decoration on whichever it carries.
+   */
+  private syncAppliedDecorations(): void {
+    const applied = new Set(this.integration.getState()?.lanes ?? []);
+    const withCheckout = this.worktrees.filter(
+      (w) => !w.detached && applied.has(w.branch),
+    );
+    this.selectionDecorations.setApplied({
+      paths: withCheckout.map((w) => w.path),
+      // A lane needs no worktree — it is merged from its ref — so applied
+      // branches without a checkout are badged on their branch row instead.
+      branches: applied,
+    });
+  }
+
   private listedWorktrees(): DiscoveredWorktree[] {
     return this.worktrees.filter(
       (wt) => wt.path !== this.integration.getPath(),
@@ -941,10 +965,19 @@ export class WorktreeTreeProvider
   }
 
   private getWorktreeListChildren(): TreeNode[] {
+    return this.listedWorktrees().map((wt) => this.buildCheckoutRow(wt));
+  }
+
+  /**
+   * One checkout row, with its PR, lane role and base status attached.
+   * Public so the Focus panel can order the checkouts itself and still get
+   * rows built the one way.
+   */
+  buildCheckoutRow(wt: DiscoveredWorktree): TreeNode {
     const selected = this.getSelectedPath();
     const baseRef = integrationBaseRef();
     const state = this.integration.getState();
-    return this.listedWorktrees().map((wt) => {
+    return ((): TreeNode => {
       const key = prCacheKey(wt.path, wt.branch);
       const pr = this.prCache.get(key);
       let integration: IntegrationRowInfo | undefined;
@@ -969,7 +1002,7 @@ export class WorktreeTreeProvider
           ? baseStatus
           : undefined,
       );
-    });
+    })();
   }
 
   /** Commits ahead of compare point (merge-base of integration tip by default). */
