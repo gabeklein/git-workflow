@@ -779,6 +779,11 @@ export class WorktreeTreeProvider
     return this.integration.abortMerge();
   }
 
+  /** Move a lane in the merge order (drag-and-drop), then rebuild. */
+  reorderLane(lane: string, before?: string): Promise<void> {
+    return this.integration.reorderLane(lane, before);
+  }
+
   /** Absorb approved stray COMMITS from the integration checkout. */
   absorbIntegrationCommits(): Promise<AbsorbResult | undefined> {
     return this.integration.absorbStraysConfirmed();

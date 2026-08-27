@@ -41,6 +41,7 @@ import {
   isLaneBranch,
   laneNeverDiverged,
   listAppliedLanes,
+  reorderLane as reorderLaneFile,
   dropExcludedLane,
   listCandidateLanes,
   listExcludedLanes,
@@ -353,8 +354,12 @@ export class IntegrationController implements vscode.Disposable {
         }
       }
       // Applied lanes (e.g. from the shell script) always show as candidates
-      // Applied lanes render in MERGE order, not sorted — see orderLaneRows.
-      this.candidates = orderLaneRows(this.lanes, [...explicit, ...auto]);
+      // One ordered list, checked or not: the candidate file IS the order,
+      // so a toggle changes a checkbox and never moves a row.
+      this.candidates = orderLaneRows(
+        await listCandidateLanes(wt.path),
+        [...explicit, ...auto, ...this.lanes],
+      );
       this.wip = await listWipLanes(wt.path);
       this.landed = await findLandedLanes(
         wt.path,
@@ -962,6 +967,33 @@ export class IntegrationController implements vscode.Disposable {
       );
     }
     return result;
+  }
+
+  /**
+   * Move a lane in the merge order, then rebuild so the preview reflects
+   * it. A rebuild holding the lock means the reorder did not happen — the
+   * tick that follows it will render the order that actually exists, so
+   * there is nothing to reconcile.
+   */
+  async reorderLane(lane: string, before?: string): Promise<void> {
+    if (!this.integrationPath) {
+      return;
+    }
+    const moved = await reorderLaneFile(
+      this.integrationPath,
+      lane,
+      before,
+    ).catch(() => false);
+    if (!moved) {
+      this.host.fireTreeData();
+      return;
+    }
+    this.host.output.appendLine(
+      `Lane ${lane} moved ${before ? `before ${before}` : 'last'}`,
+    );
+    await this.refreshState();
+    await this.runRebuild('lane order changed');
+    this.host.fireTreeData();
   }
 
   /**

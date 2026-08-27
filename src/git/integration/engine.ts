@@ -15,6 +15,7 @@ import {
   LOCK_DIR,
   commonDir,
   listAppliedLanes,
+  listCandidateLanes,
   listExcludedLanes,
   listWipLanes,
   writeLaneFile,
@@ -213,7 +214,17 @@ export async function rebuildIntegration(
       };
     }
 
-    const lanes = await listAppliedLanes(workingPath);
+    // Merge order = the candidate list, filtered to applied. Order and
+    // membership live in separate files so that checking a lane cannot
+    // restate where it merges — see reorderLane.
+    const applied = new Set(await listAppliedLanes(workingPath));
+    const order = await listCandidateLanes(workingPath);
+    const lanes = [
+      ...order.filter((l) => applied.has(l)),
+      // Anything applied without a candidate entry — the shell script
+      // appends straight to focus-applied — keeps appending's meaning.
+      ...[...applied].filter((l) => !order.includes(l)).sort(),
+    ];
     const baseSha = await resolveBaseSha(workingPath, baseRef);
     if (!baseSha) {
       return {

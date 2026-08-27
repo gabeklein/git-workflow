@@ -160,21 +160,21 @@ export function checkoutLabel(
 }
 
 /**
- * Row order for the lanes under Integration: applied lanes first, in the
- * order they will actually be merged, then the rest as a sorted set.
+ * Row order for the lanes under Preview: the stored order first, then
+ * anything not in it, sorted.
  *
- * Merge order is the order lanes were included, and it decides conflict
- * outcomes — union inserts land in merge order, and best-effort resolves
- * same-line clashes toward the incoming lane. Rendering that list sorted
- * therefore shows an order the rebuild does not use, on exactly the
- * question where order matters. Unapplied candidates have no position in
- * the chain, so for them a sorted list is the honest presentation.
+ * ONE list, whether or not a lane is checked. Order used to come from the
+ * applied file, which meant checking a lane appended it and the row jumped
+ * to the end under the user's cursor — a toggle silently restating where a
+ * lane merges. Order and membership are separate files now, so the row
+ * stays put and only dragging moves it.
+ *
+ * Merge order is this list filtered to the applied ones, so an unchecked
+ * lane still holds its place and reclaims it when checked.
  */
-export function orderLaneRows(
-  applied: string[],
-  others: string[],
-): string[] {
-  const seen = new Set(applied);
-  const rest = [...new Set(others)].filter((l) => !seen.has(l)).sort();
-  return [...applied, ...rest];
+export function orderLaneRows(order: string[], known: string[]): string[] {
+  const placed = order.filter((l) => known.includes(l));
+  const seen = new Set(placed);
+  const rest = [...new Set(known)].filter((l) => !seen.has(l)).sort();
+  return [...placed, ...rest];
 }

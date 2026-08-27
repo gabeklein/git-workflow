@@ -13,6 +13,7 @@ import { BranchesTreeProvider } from './views/branchesTree';
 import { LanesTreeProvider } from './views/lanesTree';
 import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
+import { LaneDragAndDropController } from './views/laneDragAndDrop';
 import { WorktreeTreeProvider } from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): unknown {
@@ -58,6 +59,12 @@ export function activate(context: vscode.ExtensionContext): unknown {
   const treeView = vscode.window.createTreeView('worktreeCompare.lanes', {
     treeDataProvider: lanesProvider,
     showCollapseAll: true,
+    // Lanes live under Preview here now; dragging one states which lane
+    // wins a conflict, which is only meaningful because merge order is the
+    // order YOU set rather than alphabetical (#35).
+    dragAndDropController: new LaneDragAndDropController((lane, before) =>
+      treeProvider.reorderLane(lane, before),
+    ),
   });
   context.subscriptions.push(treeView);
 
