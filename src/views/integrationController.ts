@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../discovery/scanner';
-import { orderLaneRows } from './focusPlan';
+import { orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';

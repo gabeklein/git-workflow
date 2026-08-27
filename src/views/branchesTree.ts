@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { listBranches, type BranchInfo } from '../git/branches';
 import type { FileChange } from '../git/compare';
-import { integrationBranch } from '../git/integration';
+import { integrationBaseRef, integrationBranch } from '../git/integration';
+import { findLandedBranches } from '../git/pruneLanded';
 import {
   isGithubPrIntegrationEnabled,
   resetGithubPrClient,
@@ -34,6 +35,14 @@ export class BranchesTreeProvider
 
   private branches: BranchInfo[] = [];
   private branchesFingerprint = '';
+  /**
+   * Branches whose work is confirmed in the base — the Landed rung.
+   *
+   * Cached rather than computed per render: the probe walks base history
+   * with off-tree merges, so it is cheap enough to run when the branch
+   * list changes and far too expensive to run while drawing rows.
+   */
+  private landed = new Set<string>();
   private prsByHead = new Map<string, RemotePullRequest>();
   private worktreeByBranch = new Map<string, string>();
   private loading = false;
@@ -133,6 +142,9 @@ export class BranchesTreeProvider
         this.branchesFingerprint = fp;
         this.branches = list;
         this._onDidChangeTreeData.fire();
+        // After the rows are up: landing is a slow question and nothing
+        // renders differently until it is answered.
+        void this.refreshLanded(cwd);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -271,6 +283,36 @@ export class BranchesTreeProvider
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`PR #${pr.number} files failed: ${message}`);
       return [new MessageItem('Could not load PR files', message, 'error')];
+    }
+  }
+
+  /** Branches confirmed landed in the base, for the Landed group. */
+  getLanded(): ReadonlySet<string> {
+    return this.landed;
+  }
+
+  /**
+   * Re-probe which branches have landed. Failure leaves the previous
+   * answer standing rather than emptying the group — a branch wrongly
+   * absent from Landed is invisible crust, which is the state the group exists
+   * to fix, and a probe that could not run is not evidence of anything.
+   */
+  private async refreshLanded(cwd: string): Promise<void> {
+    try {
+      const scan = await findLandedBranches(cwd, integrationBaseRef(), [
+        integrationBranch(),
+      ]);
+      const next = new Set(scan.landed.map((b) => b.name));
+      const same =
+        next.size === this.landed.size &&
+        [...next].every((n) => this.landed.has(n));
+      if (!same) {
+        this.landed = next;
+        this._onDidChangeTreeData.fire();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Landed scan failed: ${message}`);
     }
   }
 

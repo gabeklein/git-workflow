@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   checkoutLabel,
   orderLaneRows,
-  planFocusRows,
-  type FocusPlanInput,
-} from '../../src/views/focusPlan';
+  planLaneRows,
+  type LanesPlanInput,
+} from '../../src/views/lanesPlan';
 import type { DiscoveredWorktree } from '../../src/discovery/scanner';
 import type { BranchInfo } from '../../src/git/branches';
 
 /**
- * Ordering and grouping for the unified Focus panel. The rule under test
+ * Ordering and grouping for the Lanes panel. The rule under test
  * throughout: a worktree is an activity status of a branch, so a branch
  * appears exactly once — as a checkout if it has one, otherwise as a
  * branch row.
@@ -38,10 +38,10 @@ const br = (
   ...opts,
 });
 
-const plan = (input: Partial<FocusPlanInput>) =>
-  planFocusRows({ worktrees: [], branches: [], ...input });
+const plan = (input: Partial<LanesPlanInput>) =>
+  planLaneRows({ worktrees: [], branches: [], ...input });
 
-describe('planFocusRows', () => {
+describe('planLaneRows', () => {
   it('puts the root checkout first regardless of recency', () => {
     const result = plan({
       worktrees: [
@@ -50,7 +50,7 @@ describe('planFocusRows', () => {
       ],
       branches: [br('feat/new', 200), br('main', 100)],
     });
-    expect(result.checkouts.map((c) => c.branch)).toEqual(['main', 'feat/new']);
+    expect(result.working.map((c) => c.branch)).toEqual(['main', 'feat/new']);
   });
 
   it('orders the rest by tip recency, newest first', () => {
@@ -58,7 +58,7 @@ describe('planFocusRows', () => {
       worktrees: [wt('feat/old'), wt('feat/new'), wt('feat/mid')],
       branches: [br('feat/new', 300), br('feat/mid', 200), br('feat/old', 100)],
     });
-    expect(result.checkouts.map((c) => c.branch)).toEqual([
+    expect(result.working.map((c) => c.branch)).toEqual([
       'feat/new',
       'feat/mid',
       'feat/old',
@@ -74,7 +74,7 @@ describe('planFocusRows', () => {
       ],
       branches: [br('feat/a', 100), br('main', 50)],
     });
-    expect(result.checkouts.map((c) => c.branch)).toEqual([
+    expect(result.working.map((c) => c.branch)).toEqual([
       'main',
       'feat/a',
       'abc1234',
@@ -87,8 +87,8 @@ describe('planFocusRows', () => {
       worktrees: [wt('feat/a')],
       branches: [br('feat/a', 200), br('feat/b', 100)],
     });
-    expect(result.checkouts.map((c) => c.branch)).toEqual(['feat/a']);
-    expect(result.branches.map((b) => b.name)).toEqual(['feat/b']);
+    expect(result.working.map((c) => c.branch)).toEqual(['feat/a']);
+    expect(result.local.map((b) => b.name)).toEqual(['feat/b']);
   });
 
   it('splits local-only from remote-only', () => {
@@ -99,7 +99,7 @@ describe('planFocusRows', () => {
         br('feat/both', 100, { hasRemote: true }),
       ],
     });
-    expect(result.branches.map((b) => b.name)).toEqual([
+    expect(result.local.map((b) => b.name)).toEqual([
       'feat/local',
       'feat/both',
     ]);
@@ -113,8 +113,8 @@ describe('planFocusRows', () => {
       integrationBranch: 'integration/main',
       integrationPath: '/repo/working',
     });
-    expect(result.checkouts).toEqual([]);
-    expect(result.branches.map((b) => b.name)).toEqual(['feat/a']);
+    expect(result.working).toEqual([]);
+    expect(result.local.map((b) => b.name)).toEqual(['feat/a']);
   });
 
   it('a detached checkout does not claim any branch row', () => {
@@ -122,7 +122,7 @@ describe('planFocusRows', () => {
       worktrees: [wt('abc1234', { detached: true })],
       branches: [br('abc1234', 100)],
     });
-    expect(result.branches.map((b) => b.name)).toEqual(['abc1234']);
+    expect(result.local.map((b) => b.name)).toEqual(['abc1234']);
   });
 
   it('floats branches with an open PR above the remote cap', () => {
@@ -146,8 +146,8 @@ describe('planFocusRows', () => {
       branches: Array.from({ length: 7 }, (_, i) => br(`feat/${i}`, 100 - i)),
       limit: 3,
     });
-    expect(result.branches).toHaveLength(3);
-    expect(result.hiddenBranches).toBe(4);
+    expect(result.local).toHaveLength(3);
+    expect(result.hiddenLocal).toBe(4);
   });
 });
 
@@ -191,5 +191,87 @@ describe('orderLaneRows', () => {
 
   it('handles nothing applied', () => {
     expect(orderLaneRows([], ['c', 'a'])).toEqual(['a', 'c']);
+  });
+});
+
+/**
+ * The ladder. Each rung is defined by falling through the one above, so
+ * the properties worth pinning are that nothing appears twice and that
+ * Landed — decided FIRST, shown LAST — claims a branch even when it still
+ * has a checkout. Miss that and the group whose entire purpose is cleanup
+ * never sees the thing most worth cleaning.
+ */
+describe('planLaneRows — the ladder', () => {
+  it('claims a landed branch even though it still has a checkout', () => {
+    const result = plan({
+      worktrees: [wt('feat/done'), wt('feat/live')],
+      branches: [br('feat/done', 2), br('feat/live', 1)],
+      landed: new Set(['feat/done']),
+    });
+    expect(result.landed.map((l) => l.branch)).toEqual(['feat/done']);
+    // ...and carries the checkout, so the row can offer to remove the folder
+    expect(result.landed[0]?.worktree?.branch).toBe('feat/done');
+    expect(result.working.map((w) => w.branch)).toEqual(['feat/live']);
+  });
+
+  it('lists a landed branch with no checkout as a bare lane', () => {
+    const result = plan({
+      branches: [br('feat/gone', 1)],
+      landed: new Set(['feat/gone']),
+    });
+    expect(result.landed).toEqual([{ branch: 'feat/gone' }]);
+    expect(result.local).toEqual([]);
+  });
+
+  it('never lists a branch in two groups', () => {
+    const result = plan({
+      worktrees: [wt('feat/a')],
+      branches: [
+        br('feat/a', 3),
+        br('feat/b', 2),
+        br('feat/c', 1, { hasLocalRef: false, hasRemote: true }),
+        br('feat/done', 4),
+      ],
+      landed: new Set(['feat/done']),
+    });
+    const everywhere = [
+      ...result.working.map((w) => w.branch),
+      ...result.local.map((b) => b.name),
+      ...result.remote.map((b) => b.name),
+      ...result.landed.map((l) => l.branch),
+    ];
+    expect(new Set(everywhere).size).toBe(everywhere.length);
+    expect(everywhere.sort()).toEqual([
+      'feat/a',
+      'feat/b',
+      'feat/c',
+      'feat/done',
+    ]);
+  });
+
+  it('keeps a branch that is both local and remote in Local only', () => {
+    // Sync state is a badge on the Local row, not a second row in Remote
+    const result = plan({
+      branches: [br('feat/pushed', 1, { hasRemote: true })],
+    });
+    expect(result.local.map((b) => b.name)).toEqual(['feat/pushed']);
+    expect(result.remote).toEqual([]);
+  });
+
+  it('cannot land a detached checkout — it has no branch to land', () => {
+    const result = plan({
+      worktrees: [wt('abc1234', { detached: true })],
+      landed: new Set(['abc1234']),
+    });
+    expect(result.landed).toEqual([]);
+    expect(result.working).toHaveLength(1);
+  });
+
+  it('leaves every group empty-but-present when nothing has landed', () => {
+    const result = plan({
+      worktrees: [wt('feat/a')],
+      branches: [br('feat/a', 1)],
+    });
+    expect(result.landed).toEqual([]);
   });
 });

@@ -1,24 +1,28 @@
 import * as vscode from 'vscode';
 import { integrationBranch } from '../git/integration';
 import { BranchItem, GroupItem, MessageItem, type TreeNode } from './nodes';
-import { planFocusRows } from './focusPlan';
+import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
 /**
- * Focus panel: one list of the repo's branches, ordered by how live they
- * are.
+ * Lanes panel: every line of work in the repo, grouped by how live it is.
  *
  * A worktree is an ACTIVITY STATUS of a branch rather than a separate kind
- * of object, so checkouts sort to the top as themselves — root first, then
- * most recently committed — and everything else waits below as a branch
- * that could become one. A branch is never in two places at once.
+ * of object, so the groups form a ladder — Working has a checkout, Local
+ * has a ref, Remote has neither, Landed is done — and a branch appears in
+ * exactly one of them. Sync state against the remote shows as badges on a
+ * Local row rather than listing the branch twice.
+ *
+ * Landed renders LAST but is decided FIRST, so a landed branch that still
+ * has a checkout reaches the group whose whole purpose is cleaning it up.
  *
  * State stays where it already lives: WorktreeTreeProvider owns discovery,
- * selection and integration; BranchesTreeProvider owns the branch list and
- * PR association. This provider only decides what the rows are.
+ * selection and integration; BranchesTreeProvider owns the branch list, PR
+ * association and the landed set. This provider only decides what the rows
+ * are.
  */
-export class FocusTreeProvider
+export class LanesTreeProvider
   implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable
 {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<
@@ -57,14 +61,18 @@ export class FocusTreeProvider
         return [];
       }
       const plan = this.plan();
-      if (element.group === 'worktrees') {
-        return plan.checkouts.length > 0
-          ? plan.checkouts.map((wt) => this.worktrees.buildCheckoutRow(wt))
-          : [new MessageItem('No worktrees')];
+      switch (element.group) {
+        case 'working':
+          return plan.working.length > 0
+            ? plan.working.map((wt) => this.worktrees.buildCheckoutRow(wt))
+            : [new MessageItem('No checkouts')];
+        case 'landed':
+          return this.landedRows(cwd, plan.landed);
+        case 'local':
+          return this.branchRows(cwd, plan.local, plan.hiddenLocal);
+        default:
+          return this.branchRows(cwd, plan.remote, plan.hiddenRemote);
       }
-      return element.group === 'branches'
-        ? this.branchRows(cwd, plan.branches, plan.hiddenBranches)
-        : this.branchRows(cwd, plan.remote, plan.hiddenRemote);
     }
     if (element) {
       return [];
@@ -80,23 +88,24 @@ export class FocusTreeProvider
   }
 
   private plan() {
-    return planFocusRows({
+    return planLaneRows({
       worktrees: this.worktrees.getWorktrees(),
       branches: this.branches.getBranches(),
       prHeads: this.branches.getPrHeads(),
       integrationBranch: integrationBranch(),
       integrationPath: this.worktrees.getIntegration()?.path,
+      landed: this.branches.getLanded(),
     });
   }
 
   private rootRows(): TreeNode[] {
     const plan = this.plan();
-    if (plan.checkouts.length === 0 && this.branches.isLoading()) {
+    if (plan.working.length === 0 && this.branches.isLoading()) {
       return [new MessageItem('Loading…', undefined, 'loading~spin')];
     }
     const group = (
       label: string,
-      key: 'worktrees' | 'branches' | 'remote',
+      key: 'working' | 'local' | 'remote' | 'landed',
       count: number,
       open: boolean,
     ) =>
@@ -109,8 +118,8 @@ export class FocusTreeProvider
         count > 0 ? String(count) : 'none',
       );
     const rows = [
-      group('Worktrees', 'worktrees', plan.checkouts.length, true),
-      group('Branches', 'branches', plan.branches.length, true),
+      group('Working', 'working', plan.working.length, true),
+      group('Local', 'local', plan.local.length, true),
     ];
     // Remote only earns a row when something lives ONLY on the remote — a
     // branch you already have locally is represented by its local row, so
@@ -119,7 +128,37 @@ export class FocusTreeProvider
     if (plan.remote.length > 0) {
       rows.push(group('Remote', 'remote', plan.remote.length, false));
     }
+    // Landed appears only when there is something to clear. A permanent
+    // "Landed · none" is the clutter the group exists to remove.
+    if (plan.landed.length > 0) {
+      rows.push(group('Landed', 'landed', plan.landed.length, false));
+    }
     return rows;
+  }
+
+  /**
+   * Landed rows. A landed branch that still has a checkout renders as the
+   * checkout — so the folder is visible and removable — while one that is
+   * only a ref renders as a branch. Either way the row is the handle for
+   * getting rid of it.
+   */
+  private landedRows(cwd: string, landed: LandedLane[]): TreeNode[] {
+    if (landed.length === 0) {
+      return [new MessageItem('None')];
+    }
+    return landed.map((lane) =>
+      lane.worktree
+        ? this.worktrees.buildCheckoutRow(lane.worktree)
+        : new BranchItem(
+            cwd,
+            lane.branch,
+            true,
+            false,
+            'landed',
+            undefined,
+            this.branches.getPullRequestFor(lane.branch),
+          ),
+    );
   }
 
   private branchRows(

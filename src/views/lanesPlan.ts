@@ -2,28 +2,46 @@ import type { DiscoveredWorktree } from '../discovery/scanner';
 import type { BranchInfo } from '../git/branches';
 
 /**
- * Row planning for the Focus panel — pure, so the ordering and grouping
- * rules are testable without a workbench.
+ * Row planning for the Lanes panel — pure, so the grouping rules are
+ * testable without a workbench.
  *
  * The model: a worktree is an ACTIVITY STATUS of a branch, not a separate
- * kind of thing. So checkouts sort to the top as themselves, everything
- * else is a branch waiting to become one, and a branch never appears in
- * two places.
+ * kind of thing. So the groups are a LADDER, not four categories — each
+ * rung is defined by falling through the one above it:
+ *
+ *   Landed   its work is in the base (and usually its remote is gone)
+ *   Working  has a checkout on disk
+ *   Local    has a local ref, no checkout — may also exist on the remote,
+ *            which shows as sync badges rather than a second row
+ *   Remote   no local ref at all
+ *
+ * Evaluation runs top-down and first match wins, so a branch appears in
+ * exactly one group. Note that Landed is evaluated FIRST and displayed
+ * LAST: a landed branch that still has a checkout has to reach the Landed
+ * group, or the cleanup affordance that group exists for never sees it.
  */
 
-export interface FocusPlan {
+export interface LandedLane {
+  branch: string;
+  /** Present when the landed branch still has a checkout to clean up. */
+  worktree?: DiscoveredWorktree;
+}
+
+export interface LanesPlan {
   /** Checkouts, root first, then most recently committed. */
-  checkouts: DiscoveredWorktree[];
+  working: DiscoveredWorktree[];
   /** Local branches with no checkout of their own. */
-  branches: BranchInfo[];
+  local: BranchInfo[];
   /** Branches that exist only on the remote. */
   remote: BranchInfo[];
-  /** Local branches beyond the cap, reported rather than silently dropped. */
-  hiddenBranches: number;
+  /** Done: merged into the base, ready to prune. Displayed last. */
+  landed: LandedLane[];
+  /** Rows beyond the cap, reported rather than silently dropped. */
+  hiddenLocal: number;
   hiddenRemote: number;
 }
 
-export interface FocusPlanInput {
+export interface LanesPlanInput {
   worktrees: DiscoveredWorktree[];
   branches: BranchInfo[];
   /** Branch names with an open PR — kept visible in the remote group. */
@@ -32,6 +50,13 @@ export interface FocusPlanInput {
   integrationBranch?: string;
   /** Checkout the integration branch occupies, if any. */
   integrationPath?: string;
+  /**
+   * Branches whose work is CONFIRMED in the base. Confirmed, not merely
+   * absent from the remote: a remote branch deleted without merging looks
+   * identical from the ref alone, and offering that for deletion is how
+   * unmerged work disappears. The caller decides — see landedProbe.
+   */
+  landed?: ReadonlySet<string>;
   limit?: number;
 }
 
@@ -45,15 +70,24 @@ function checkoutDate(
   return wt.detached ? 0 : (dates.get(wt.branch) ?? 0);
 }
 
-export function planFocusRows(input: FocusPlanInput): FocusPlan {
+export function planLaneRows(input: LanesPlanInput): LanesPlan {
   const limit = input.limit ?? DEFAULT_LIMIT;
   const dates = new Map(input.branches.map((b) => [b.name, b.committerDate]));
 
   // The integration checkout is derived state, not someone's work — it is
   // the panel's subject, not a row in its list.
-  const checkouts = input.worktrees.filter(
+  const landedNames = input.landed ?? new Set<string>();
+  const listed = input.worktrees.filter(
     (wt) => wt.path !== input.integrationPath,
   );
+
+  // Rung 1, evaluated first: anything landed leaves the ladder here, even
+  // when it still has a checkout. A detached checkout has no branch and so
+  // can never be landed.
+  const landedCheckouts = listed.filter(
+    (wt) => !wt.detached && landedNames.has(wt.branch),
+  );
+  const checkouts = listed.filter((wt) => !landedCheckouts.includes(wt));
   const ordered = checkouts.slice().sort((a, b) => {
     // Root first, always: it is the anchor the others were cut from.
     const rootA = a.isRootCheckout || a.isMainWorktree ? 1 : 0;
@@ -74,8 +108,26 @@ export function planFocusRows(input: FocusPlanInput): FocusPlan {
     checkouts.filter((w) => !w.detached).map((w) => w.branch),
   );
   const rest = input.branches.filter(
-    (b) => !claimed.has(b.name) && b.name !== input.integrationBranch,
+    (b) =>
+      !claimed.has(b.name) &&
+      b.name !== input.integrationBranch &&
+      !landedNames.has(b.name),
   );
+
+  // Landed branches with no checkout of their own, newest first like the
+  // rest; the ones that DO have a checkout carry it, so the row can offer
+  // to remove the folder as well as the ref.
+  const landedRows: LandedLane[] = [
+    ...landedCheckouts.map((wt) => ({ branch: wt.branch, worktree: wt })),
+    ...input.branches
+      .filter(
+        (b) =>
+          landedNames.has(b.name) &&
+          b.hasLocalRef &&
+          !landedCheckouts.some((wt) => wt.branch === b.name),
+      )
+      .map((b) => ({ branch: b.name })),
+  ];
 
   // listBranches already sorts by committerdate desc, so slicing preserves
   // recency without a second sort.
@@ -90,10 +142,11 @@ export function planFocusRows(input: FocusPlanInput): FocusPlan {
   ];
 
   return {
-    checkouts: ordered,
-    branches: local.slice(0, limit),
+    working: ordered,
+    local: local.slice(0, limit),
     remote: remoteRanked.slice(0, limit),
-    hiddenBranches: Math.max(0, local.length - limit),
+    landed: landedRows,
+    hiddenLocal: Math.max(0, local.length - limit),
     hiddenRemote: Math.max(0, remoteRanked.length - limit),
   };
 }

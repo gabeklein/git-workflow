@@ -150,7 +150,7 @@ That refusal is the point. `catchUpStrategy` is tuned for lane-vs-base, where be
 
 ## Pruning landed branches
 
-**Prune Landed Branches** (Focus panel title menu) deletes local branches whose work is already in the base. It exists because `git branch -d` cannot do this job: it decides "merged" by **ancestry**, and a squash-merged branch is not an ancestor of anything — so it refuses, and the only way past it is `-D`, which deletes unmerged work just as happily. At any real merge rate the local branch list grows without bound and nobody dares run the blunt version.
+**Prune Landed Branches** (on the Lanes panel's **Landed** group row) deletes local branches whose work is already in the base. It exists because `git branch -d` cannot do this job: it decides "merged" by **ancestry**, and a squash-merged branch is not an ancestor of anything — so it refuses, and the only way past it is `-D`, which deletes unmerged work just as happily. At any real merge rate the local branch list grows without bound and nobody dares run the blunt version.
 
 Landing is decided by a stack of probes, each of which can only ever say *landed* (a miss means keep the branch — a false negative wastes disk, a false positive deletes work):
 
@@ -200,17 +200,20 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout
 
-**Focus** panel (selector — header shows the worktree count):
+**Lanes** panel (selector — header shows the checkout count):
 
 ```
-▼ Worktrees      checkouts, root first, then tip recency  ← click to focus
-▼ Branches       local branches with no worktree
-▶ Remote         remote-only branches (hidden when there are none)
+▼ Working        has a checkout, root first then tip recency  ← click to focus
+▼ Local          has a local ref, no checkout
+▶ Remote         no local ref (hidden when there are none)
+▶ Landed         merged into the base (hidden when empty) — Prune lives here
 ```
 
-Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the integration preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs. A branch appears in exactly one group.
+The groups are a **ladder**, not four categories: each rung is what falls through the one above it, so a branch appears in exactly one. A branch that exists both locally and on the remote stays in **Local** — its sync state is a badge, not a second row. **Landed is decided first and shown last**, so a landed branch that still has a checkout reaches the group whose purpose is clearing it, rather than hiding in Working forever.
 
-**Changes** panel (presentation — header shows the focused branch):
+Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the integration preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
+
+**Focus** panel (presentation — header shows the focused branch):
 
 ```
 ⚠ PR #N has merge conflicts          ← GitHub conflicts only

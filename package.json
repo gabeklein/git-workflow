@@ -200,13 +200,13 @@
     "views": {
       "worktreeCompare": [
         {
-          "id": "worktreeCompare.focus",
-          "name": "Focus",
-          "contextualTitle": "Focus"
+          "id": "worktreeCompare.lanes",
+          "name": "Lanes",
+          "contextualTitle": "Lanes"
         },
         {
-          "id": "worktreeCompare.changes",
-          "name": "Changes"
+          "id": "worktreeCompare.focused",
+          "name": "Focus"
         },
         {
           "id": "worktreeCompare.integration",
@@ -502,22 +502,22 @@
       "view/title": [
         {
           "command": "worktreeCompare.selectWorktree",
-          "when": "view == worktreeCompare.focus",
+          "when": "view == worktreeCompare.lanes",
           "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.toggleSquashLayout",
-          "when": "view == worktreeCompare.changes",
+          "when": "view == worktreeCompare.focused",
           "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.refreshPullRequests",
-          "when": "view == worktreeCompare.focus",
+          "when": "view == worktreeCompare.lanes",
           "group": "navigation@3"
         },
         {
           "command": "worktreeCompare.refresh",
-          "when": "view == worktreeCompare.focus",
+          "when": "view == worktreeCompare.lanes",
           "group": "navigation@4"
         },
         {
@@ -544,107 +544,102 @@
           "command": "worktreeCompare.disableIntegration",
           "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
           "group": "9_danger@1"
-        },
-        {
-          "command": "worktreeCompare.pruneLandedBranches",
-          "when": "view == worktreeCompare.focus",
-          "group": "1_maintenance@1"
         }
       ],
       "view/item/context": [
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.changes && viewItem == conflictWarning",
+          "when": "view == worktreeCompare.focused && viewItem == conflictWarning",
           "group": "0_github@1"
         },
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.changes && viewItem == conflictWarning",
+          "when": "view == worktreeCompare.focused && viewItem == conflictWarning",
           "group": "0_compare@2"
         },
         {
           "command": "worktreeCompare.toggleSquashLayout",
-          "when": "view == worktreeCompare.changes && viewItem == section:squash",
+          "when": "view == worktreeCompare.focused && viewItem == section:squash",
           "group": "inline"
         },
         {
           "command": "worktreeCompare.newFileInWorktree",
-          "when": "view == worktreeCompare.changes && viewItem == explorerFolder",
+          "when": "view == worktreeCompare.focused && viewItem == explorerFolder",
           "group": "1_files@1"
         },
         {
           "command": "worktreeCompare.deleteWorktreeEntry",
-          "when": "view == worktreeCompare.changes && viewItem =~ /^explorer(File|Folder)$/",
+          "when": "view == worktreeCompare.focused && viewItem =~ /^explorer(File|Folder)$/",
           "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.openPullRequest",
-          "when": "view == worktreeCompare.focus && viewItem =~ /WithPr/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /WithPr/",
           "group": "1_github@1"
         },
         {
           "command": "worktreeCompare.copyPullRequestUrl",
-          "when": "view == worktreeCompare.focus && viewItem =~ /WithPr/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /WithPr/",
           "group": "1_github@2"
         },
         {
           "command": "worktreeCompare.openWorktree",
-          "when": "view == worktreeCompare.focus && viewItem =~ /^worktreeListItem/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^worktreeListItem/",
           "group": "navigation@1"
         },
         {
           "command": "worktreeCompare.changeBaseRef",
-          "when": "view == worktreeCompare.changes && viewItem == group:ahead",
+          "when": "view == worktreeCompare.focused && viewItem == group:ahead",
           "group": "0_compare@1"
         },
         {
           "command": "worktreeCompare.unlockWorktree",
-          "when": "view == worktreeCompare.focus && viewItem =~ /Locked/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Locked/",
           "group": "1_worktree@1"
         },
         {
           "command": "worktreeCompare.catchUpWithBase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.rebaseOntoBase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.mergeFromBase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /BehindBase|ConflictsBase/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /BehindBase|ConflictsBase/",
           "group": "1_base@3"
         },
         {
           "command": "worktreeCompare.continueRebase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /Rebasing/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Rebasing/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.abortRebase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /Rebasing/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Rebasing/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.completeMergeFromBase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /MergingBase/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /MergingBase/",
           "group": "1_base@1"
         },
         {
           "command": "worktreeCompare.abortMergeFromBase",
-          "when": "view == worktreeCompare.focus && viewItem =~ /MergingBase/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /MergingBase/",
           "group": "1_base@2"
         },
         {
           "command": "worktreeCompare.addToIntegration",
-          "when": "view == worktreeCompare.focus && viewItem =~ /LaneAddable/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /LaneAddable/",
           "group": "2_integration@1"
         },
         {
           "command": "worktreeCompare.removeFromIntegration",
-          "when": "view == worktreeCompare.focus && viewItem =~ /LaneCandidate/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /LaneCandidate/",
           "group": "2_integration@1"
         },
         {
@@ -699,83 +694,88 @@
         },
         {
           "command": "worktreeCompare.deleteWorktree",
-          "when": "view == worktreeCompare.focus && viewItem =~ /Removable/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Removable/",
           "group": "9_danger@1"
         },
         {
           "command": "worktreeCompare.createWorktreeFromBranch",
-          "when": "view == worktreeCompare.focus && viewItem =~ /NoWorktree/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /NoWorktree/",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.createWorktreeFromBranch",
-          "when": "view == worktreeCompare.focus && viewItem =~ /NoWorktree/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /NoWorktree/",
           "group": "2_worktree@1"
         },
         {
           "command": "worktreeCompare.copyCommitSha",
-          "when": "view == worktreeCompare.changes && viewItem == commit",
+          "when": "view == worktreeCompare.focused && viewItem == commit",
           "group": "1_copy"
         },
         {
           "command": "worktreeCompare.stageFile",
-          "when": "view == worktreeCompare.changes && viewItem == unstagedFile",
+          "when": "view == worktreeCompare.focused && viewItem == unstagedFile",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.stageFile",
-          "when": "view == worktreeCompare.changes && viewItem == unstagedFile",
+          "when": "view == worktreeCompare.focused && viewItem == unstagedFile",
           "group": "1_scm"
         },
         {
           "command": "worktreeCompare.unstageFile",
-          "when": "view == worktreeCompare.changes && viewItem == stagedFile",
+          "when": "view == worktreeCompare.focused && viewItem == stagedFile",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.unstageFile",
-          "when": "view == worktreeCompare.changes && viewItem == stagedFile",
+          "when": "view == worktreeCompare.focused && viewItem == stagedFile",
           "group": "1_scm"
         },
         {
           "command": "worktreeCompare.commitStaged",
-          "when": "view == worktreeCompare.changes && viewItem == section:staged",
+          "when": "view == worktreeCompare.focused && viewItem == section:staged",
           "group": "1_scm@1"
         },
         {
           "command": "worktreeCompare.commitUnstaged",
-          "when": "view == worktreeCompare.changes && viewItem == section:unstaged",
+          "when": "view == worktreeCompare.focused && viewItem == section:unstaged",
           "group": "1_scm@1"
         },
         {
           "command": "worktreeCompare.syncWithRemote",
-          "when": "view == worktreeCompare.focus && viewItem =~ /^worktreeListItem/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^worktreeListItem/",
           "group": "0_github@9"
         },
         {
           "command": "worktreeCompare.syncWithRemote",
-          "when": "view == worktreeCompare.focus && viewItem =~ /^branch/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^branch/",
           "group": "0_github@9"
         },
         {
           "command": "worktreeCompare.newFileInWorktree",
-          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "when": "view == worktreeCompare.focused && viewItem == group:directory",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.refreshFiles",
-          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "when": "view == worktreeCompare.focused && viewItem == group:directory",
           "group": "inline@2"
         },
         {
           "command": "worktreeCompare.copyPath",
-          "when": "view == worktreeCompare.changes && viewItem == group:directory",
+          "when": "view == worktreeCompare.focused && viewItem == group:directory",
           "group": "1_copy@1"
         },
         {
           "command": "worktreeCompare.copyPath",
-          "when": "view == worktreeCompare.changes && viewItem =~ /^explorer(File|Folder)$/",
+          "when": "view == worktreeCompare.focused && viewItem =~ /^explorer(File|Folder)$/",
           "group": "1_copy@1"
+        },
+        {
+          "command": "worktreeCompare.pruneLandedBranches",
+          "when": "view == worktreeCompare.lanes && viewItem == group:landed",
+          "group": "inline@1"
         }
       ]
     }

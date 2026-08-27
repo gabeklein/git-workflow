@@ -41,8 +41,8 @@ export interface TestApi {
   }[]>;
   /** Top-level Changes rows, in render order. */
   changesRows(): Promise<{ kind: string; label: string }[]>;
-  /** The RENDERED Focus panel rows; pass a group to list its children. */
-  focusRows(group?: 'worktrees' | 'branches' | 'remote'): Promise<
+  /** The RENDERED Lanes panel rows; pass a group to list its children. */
+  focusRows(group?: 'working' | 'local' | 'remote' | 'landed'): Promise<
     {
       kind?: string;
       group?: string;

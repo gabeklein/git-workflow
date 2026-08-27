@@ -11,7 +11,7 @@ import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { integrationBaseRef } from './git/integration';
 import { createFileBackedLogger } from './log';
 import { BranchesTreeProvider } from './views/branchesTree';
-import { FocusTreeProvider } from './views/focusTree';
+import { LanesTreeProvider } from './views/lanesTree';
 import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
 import { IntegrationTreeProvider } from './views/integrationTree';
@@ -55,10 +55,10 @@ export function activate(context: vscode.ExtensionContext): unknown {
   // One panel for checkouts AND branches: a worktree is an activity status
   // of a branch, so they belong in one ordered list rather than two views
   // that show the same branch twice.
-  const focusProvider = new FocusTreeProvider(treeProvider, branchesProvider);
-  context.subscriptions.push(focusProvider);
-  const treeView = vscode.window.createTreeView('worktreeCompare.focus', {
-    treeDataProvider: focusProvider,
+  const lanesProvider = new LanesTreeProvider(treeProvider, branchesProvider);
+  context.subscriptions.push(lanesProvider);
+  const treeView = vscode.window.createTreeView('worktreeCompare.lanes', {
+    treeDataProvider: lanesProvider,
     showCollapseAll: true,
   });
   context.subscriptions.push(treeView);
@@ -67,7 +67,10 @@ export function activate(context: vscode.ExtensionContext): unknown {
   context.subscriptions.push(filesProvider);
   const changesProvider = new ChangesTreeProvider(treeProvider, filesProvider);
   context.subscriptions.push(changesProvider);
-  const changesView = vscode.window.createTreeView('worktreeCompare.changes', {
+  // A fresh id, not the old selector's: VS Code persists size, position and
+  // collapse state BY id, so handing `worktreeCompare.focus` to a different
+  // panel would make it inherit remembered state that maps to nothing.
+  const changesView = vscode.window.createTreeView('worktreeCompare.focused', {
     treeDataProvider: changesProvider,
     showCollapseAll: true,
   });
@@ -216,13 +219,15 @@ export function activate(context: vscode.ExtensionContext): unknown {
             kind: n.kind,
             label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
           })),
-        focusRows: async (group?: 'worktrees' | 'branches' | 'remote') => {
+        focusRows: async (
+          group?: 'working' | 'local' | 'remote' | 'landed',
+        ) => {
           const parent = group
-            ? (await focusProvider.getChildren()).find(
+            ? (await lanesProvider.getChildren()).find(
                 (n) => n.kind === 'group' && n.group === group,
               )
             : undefined;
-          return (await focusProvider.getChildren(parent)).map((item) => ({
+          return (await lanesProvider.getChildren(parent)).map((item) => ({
             kind: (item as { kind?: string }).kind,
             group: (item as { group?: string }).group,
             label:
