@@ -2,6 +2,12 @@ import * as vscode from 'vscode';
 /** Command registrations — split by domain; wired from extension.ts. */
 import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
+import { integrationBaseRef, integrationBranch } from '../git/integration';
+import {
+  findLandedBranches,
+  pruneLandedBranches,
+  type LandedBranch,
+} from '../git/pruneLanded';
 import { createWorktreeForPr } from '../github/remotePrs';
 import type { BranchItem, RemotePrFileItem } from '../views/nodes';
 import type { BranchesTreeProvider } from '../views/branchesTree';
@@ -21,6 +27,122 @@ export function registerBranchCommands(
         void vscode.window.setStatusBarMessage(
           'Git Workflow: refreshed branches',
           2000,
+        );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.pruneLandedBranches',
+      // An agent (or a test) can pass the names outright and skip the
+      // picker. It still re-verifies every one against the base before
+      // deleting, so scripting this is not a way around the proof.
+      async (args?: { branches?: string[] }) => {
+        const repoCwd = treeProvider.getRepoCwd();
+        if (!repoCwd) {
+          void vscode.window.showErrorMessage(
+            'Git Workflow: no git repository found in this workspace',
+          );
+          return;
+        }
+        const baseRef = integrationBaseRef();
+        // The integration branch is derived, and the base is the thing we
+        // are measuring against — neither is a unit of work.
+        const protect = [integrationBranch()];
+        let scan: Awaited<ReturnType<typeof findLandedBranches>>;
+        try {
+          scan = await findLandedBranches(repoCwd, baseRef, protect);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.appendLine(`Prune landed branches failed: ${message}`);
+          void vscode.window.showErrorMessage(
+            `Git Workflow: could not scan branches — ${message}`,
+          );
+          return;
+        }
+        if (scan.landed.length === 0) {
+          void vscode.window.showInformationMessage(
+            scan.keptCount > 0
+              ? `Git Workflow: nothing landed in ${baseRef} — ${scan.keptCount} branch(es) still have work of their own`
+              : `Git Workflow: no local branches to prune`,
+          );
+          return;
+        }
+        if (args?.branches) {
+          const known = new Set(scan.landed.map((b) => b.name));
+          const unknown = args.branches.filter((b) => !known.has(b));
+          for (const name of unknown) {
+            log.appendLine(`Prune skipped ${name}: not landed in ${baseRef}`);
+          }
+          const outcome = await pruneLandedBranches(
+            repoCwd,
+            baseRef,
+            args.branches.filter((b) => known.has(b)),
+            protect,
+          );
+          for (const [name, why] of outcome.failed) {
+            log.appendLine(`Prune kept ${name}: ${why}`);
+          }
+          if (outcome.deleted.length > 0) {
+            log.appendLine(
+              `Pruned landed branches: ${outcome.deleted.join(', ')}`,
+            );
+            treeProvider.refresh();
+            branchesProvider.setWorktrees(treeProvider.getWorktrees());
+            branchesProvider.refresh();
+          }
+          return;
+        }
+        const describe = (b: LandedBranch): string => {
+          const bits = [
+            b.via === 'ancestor' ? 'merged' : 'squashed or rebased in',
+          ];
+          if (b.hasRemote) {
+            bits.push('origin still has it');
+          }
+          if (b.worktree) {
+            bits.push('checked out — remove the worktree first');
+          }
+          return bits.join(' · ');
+        };
+        const picked = await vscode.window.showQuickPick(
+          scan.landed.map((b) => ({
+            label: b.name,
+            description: describe(b),
+            // Held branches cannot be deleted, so they are shown (you should
+            // know they are done) but never pre-selected.
+            picked: !b.worktree,
+            branch: b,
+          })),
+          {
+            canPickMany: true,
+            ignoreFocusOut: true,
+            title: `Landed in ${baseRef} — delete locally?`,
+            placeHolder: `${scan.landed.length} landed, ${scan.keptCount} kept`,
+          },
+        );
+        if (!picked || picked.length === 0) {
+          return;
+        }
+        const outcome = await pruneLandedBranches(
+          repoCwd,
+          baseRef,
+          picked.map((p) => p.label),
+          protect,
+        );
+        for (const [name, why] of outcome.failed) {
+          log.appendLine(`Prune kept ${name}: ${why}`);
+        }
+        if (outcome.deleted.length > 0) {
+          log.appendLine(
+            `Pruned landed branches: ${outcome.deleted.join(', ')}`,
+          );
+          treeProvider.refresh();
+          branchesProvider.setWorktrees(treeProvider.getWorktrees());
+          branchesProvider.refresh();
+        }
+        const kept = outcome.failed.size;
+        void vscode.window.showInformationMessage(
+          `Git Workflow: deleted ${outcome.deleted.length} branch(es)` +
+            (kept > 0 ? ` — ${kept} kept, see the log for why` : ''),
         );
       },
     ),

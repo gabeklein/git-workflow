@@ -483,6 +483,12 @@
         "command": "worktreeCompare.deleteWorktreeEntry",
         "title": "Delete",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.pruneLandedBranches",
+        "title": "Prune Landed Branches",
+        "category": "Git Workflow",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -541,6 +547,11 @@
           "command": "worktreeCompare.disableIntegration",
           "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
           "group": "9_danger@1"
+        },
+        {
+          "command": "worktreeCompare.pruneLandedBranches",
+          "when": "view == worktreeCompare.focus",
+          "group": "1_maintenance@1"
         }
       ],
       "view/item/context": [
