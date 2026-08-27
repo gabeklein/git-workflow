@@ -287,9 +287,12 @@ export function prThemeIcon(pr: PullRequestInfo): vscode.ThemeIcon {
     );
   }
   if (prHasMergeConflicts(pr)) {
+    // charts.red, not list.errorForeground: the latter is whatever the
+    // theme makes of it and commonly renders orange, which reads as a
+    // warning next to genuinely orange states like a paused merge.
     return new vscode.ThemeIcon(
       'git-pull-request',
-      new vscode.ThemeColor('list.errorForeground'),
+      new vscode.ThemeColor('charts.red'),
     );
   }
   if (pr.isDraft) {

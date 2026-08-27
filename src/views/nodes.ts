@@ -103,15 +103,17 @@ export class BranchItem extends vscode.TreeItem {
     // explicitly below, so this never drives file-icon theming.
     this.resourceUri = branchResourceUri(branch);
 
+    // Same rule as checkout rows: the PR number leads, because it is what
+    // identifies the row and descriptions truncate from the right.
     const tags: string[] = [];
-    if (worktreePath) {
-      tags.push('worktree');
-    }
     if (pr) {
       tags.push(`PR #${pr.number}${pr.isDraft ? ' draft' : ''}`);
       if (pr.mergeable === 'CONFLICTING') {
         tags.push('conflicts');
       }
+    }
+    if (worktreePath) {
+      tags.push('worktree');
     }
     if (!hasLocalRef && (hasRemote || pr)) {
       tags.push('remote');
@@ -458,14 +460,32 @@ export class WorktreeListItem extends vscode.TreeItem {
       );
     }
 
+    // The PR number goes FIRST. It is the row's most identifying fact — the
+    // thing you match against a PR you are looking at — and descriptions
+    // are truncated from the right, so anything ahead of it can push it out
+    // of the panel entirely. That is exactly what `conflicts with
+    // origin/main · #37 · conflicts` did.
     const bits: string[] = [];
+    if (pullRequest) {
+      bits.push(formatPrDescription(pullRequest));
+    } else if (worktree.publishState && worktree.publishState !== 'local') {
+      // No PR: worth saying only when the branch got somewhere — 'local' is
+      // the default state of a checkout and reads as noise on every row.
+      bits.push(worktree.publishState);
+    }
+
     // Selection is shown via blue decoration tint only (no "selected" label)
     if (baseStatus?.rebasing) {
       bits.push('rebasing');
     } else if (baseStatus?.merging) {
       bits.push('merging base');
     } else if (baseStatus?.conflicts) {
-      bits.push(`conflicts with ${baseStatus.baseRef}`);
+      // Say "conflicts" once. When the PR already reports conflicts the
+      // second mention adds a base name and a lot of width for something
+      // the reader has just been told.
+      if (!pullRequest || !prHasMergeConflicts(pullRequest)) {
+        bits.push(`conflicts with ${baseStatus.baseRef}`);
+      }
     } else if (baseStatus && baseStatus.behind > 0) {
       bits.push(`${baseStatus.behind} behind ${baseStatus.baseRef}`);
     }
@@ -475,13 +495,6 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
     if (worktree.locked) {
       bits.push('locked');
-    }
-    if (pullRequest) {
-      bits.push(formatPrDescription(pullRequest));
-    } else if (worktree.publishState && worktree.publishState !== 'local') {
-      // No PR: worth saying only when the branch got somewhere — 'local' is
-      // the default state of a checkout and reads as noise on every row.
-      bits.push(worktree.publishState);
     }
     this.description = bits.length > 0 ? bits.join(' · ') : undefined;
 
@@ -548,7 +561,7 @@ export class ConflictWarningItem extends vscode.TreeItem {
     this.contextValue = 'conflictWarning';
     this.iconPath = new vscode.ThemeIcon(
       'warning',
-      new vscode.ThemeColor('list.errorForeground'),
+      new vscode.ThemeColor('charts.red'),
     );
     this.description = pullRequest.baseRefName
       ? `vs ${pullRequest.baseRefName}`
