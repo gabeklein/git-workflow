@@ -31,6 +31,7 @@ import {
   ensureIntegrationPushBlocked,
   fetchIntegrationBase,
   findLandedLanes,
+  findStaleLandedLanes,
   findStrayCommits,
   integrationBaseRef,
   integrationBranch,
@@ -105,6 +106,8 @@ export class IntegrationController implements vscode.Disposable {
   private integrationPath: string | undefined;
   /** Path:branch:enabled the pre-commit guard was last reconciled for. */
   private guardSyncedFor: string | undefined;
+  /** Base sha + lane set the stale-landing sweep last ran for. */
+  private staleSweptFor: string | undefined;
   private lanes: string[] = [];
   /** Everything shown under Integration: explicit + applied + auto members. */
   private candidates: string[] = [];
@@ -363,6 +366,9 @@ export class IntegrationController implements vscode.Disposable {
         integrationBaseRef(),
         this.candidates,
       );
+      // Off the rebuild path, and throttled: catches a lane that landed
+      // before the base moved on, which the cheap check above cannot see.
+      void this.sweepStaleLandings(wt.path, integrationBaseRef());
       // Persistent conflict badge: re-probe applied lanes against the base
       // on every refresh (memoized per tip pair), so 'conflict' and its
       // Resolve action survive window reloads instead of living only in
@@ -988,6 +994,49 @@ export class IntegrationController implements vscode.Disposable {
     await this.refreshState();
     await this.runRebuild('lane order changed');
     this.host.fireTreeData();
+  }
+
+  /**
+   * Retire lanes whose landing the rebuild's cheap check cannot see.
+   *
+   * A lane that landed and then watched other PRs merge on top conflicts
+   * against the base, so the fast predicate reads it as unlanded: it never
+   * retires and sits in the preview reporting a conflict forever. The
+   * deeper probe finds it, but walks base history, so it runs HERE — once
+   * per meaningful change — rather than inside every rebuild.
+   *
+   * Keyed on the base and the applied set, so a moving base re-sweeps once
+   * and a quiet repo never sweeps twice.
+   */
+  private async sweepStaleLandings(
+    workingPath: string,
+    baseRef: string,
+  ): Promise<void> {
+    if (this.lanes.length === 0) {
+      return;
+    }
+    const key = `${await resolveBaseSha(workingPath, baseRef)}\u0000${this.lanes.join(',')}`;
+    if (this.staleSweptFor === key) {
+      return;
+    }
+    this.staleSweptFor = key;
+    const stale = await findStaleLandedLanes(
+      workingPath,
+      baseRef,
+      this.lanes.filter((l) => !this.landed.includes(l)),
+    ).catch(() => [] as string[]);
+    if (stale.length === 0) {
+      return;
+    }
+    this.host.output.appendLine(
+      `Lanes landed (base moved past them), retiring: ${stale.join(', ')}`,
+    );
+    for (const lane of stale) {
+      await dropAppliedLane(workingPath, lane).catch(() => {});
+    }
+    this.landed = [...new Set([...this.landed, ...stale])];
+    this.lanes = this.lanes.filter((l) => !stale.includes(l));
+    await this.runRebuild('stale landings retired');
   }
 
   /** Absorb stray commits the user explicitly approved, then rebuild. */
