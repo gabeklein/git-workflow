@@ -66,6 +66,8 @@ npm run install:local
 
 ### Install notes
 
+The local install **always unpacks the VSIX it just built**. Neither of the alternatives is trustworthy: `code --install-extension` exits 0 even when it prints `Failed Installing Extensions`, and over Remote-SSH it installs to the *server*, leaving `~/.vscode/extensions` untouched — so an existing folder there proves nothing about its age. It was previously the mirror source, which is how a build from weeks earlier could keep being installed while the script reported success. A size check on the installed bundle warns if anything still serves a stale copy.
+
 - VSIX path: `artifacts/git-workflow-<version>.vsix` (gitignored). Runtime bundle is `dist/` (packaged inside the VSIX).
 - **Remote-SSH:** run install on the remote. The extension host does not use the client’s `~/.vscode/extensions` alone.
 - **Cursor:** if `code` is missing, ensure `cursor` is on PATH, or set `VSCODE_CLI=/path/to/cursor`.

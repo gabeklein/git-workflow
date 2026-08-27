@@ -17,6 +17,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -46,6 +47,33 @@ function run(cmd, opts = {}) {
     env: process.env,
     ...opts,
   });
+}
+
+/**
+ * Run the editor CLI and decide whether it ACTUALLY installed anything.
+ *
+ * `code --install-extension` exits 0 even when it prints
+ * "Failed Installing Extensions" — a pending uninstall it wants a restart
+ * for is the common case. So exit status is not evidence, and the output
+ * has to be read. Everything downstream used to treat the CLI as
+ * successful and skip unpacking the fresh VSIX, mirroring whatever old
+ * directory happened to be sitting there.
+ */
+function tryEditorInstall(cmd) {
+  log(`$ ${cmd}`);
+  let out = '';
+  let status = 0;
+  try {
+    out = execSync(`${cmd} 2>&1`, { cwd: root, env: process.env }).toString();
+  } catch (err) {
+    out = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    status = err.status ?? 1;
+  }
+  process.stdout.write(out);
+  const failed =
+    status !== 0 ||
+    /Failed Installing Extensions|^Error:/m.test(out);
+  return !failed;
 }
 
 function which(bin) {
@@ -87,8 +115,16 @@ const editorBin =
   which('code') ||
   which('cursor') ||
   which('code-insiders');
+let cliInstalled = false;
 if (!process.env.SKIP_CODE_CLI && editorBin) {
-  run(`"${editorBin}" --install-extension "${vsixPath}" --force`);
+  cliInstalled = tryEditorInstall(
+    `"${editorBin}" --install-extension "${vsixPath}" --force`,
+  );
+  if (!cliInstalled) {
+    log(
+      'editor CLI did not install (it exits 0 even when it fails) — unpacking the VSIX instead',
+    );
+  }
 } else if (!editorBin) {
   log(
     'No code/cursor CLI found — skipping CLI install (will still mirror folders)',
@@ -101,8 +137,20 @@ if (!process.env.SKIP_CODE_CLI && editorBin) {
 const localExtRoot = path.join(homedir(), '.vscode', 'extensions');
 const localExtDir = path.join(localExtRoot, extFolderName);
 
-if (!existsSync(path.join(localExtDir, 'package.json'))) {
-  log(`CLI did not create ${localExtDir}; unpacking VSIX there`);
+// ALWAYS unpack. Nothing else here is trustworthy:
+//
+//   - `code --install-extension` exits 0 even when it prints
+//     "Failed Installing Extensions";
+//   - and on Remote-SSH it installs to the SERVER, leaving
+//     ~/.vscode/extensions untouched — so even a genuine success does not
+//     mean this directory was refreshed.
+//
+// An existing directory therefore proves nothing about its age, and it was
+// the mirror source. That is how a build from a fortnight earlier kept
+// getting installed while the script cheerfully reported success. The VSIX
+// we just built is the only thing here that is known to be current.
+{
+  log(`Unpacking VSIX into ${localExtDir}`);
   mkdirSync(localExtRoot, { recursive: true });
   const tmp = path.join(root, '.vsix-unpack-tmp');
   rmSync(tmp, { recursive: true, force: true });
@@ -140,7 +188,25 @@ if (!process.env.SKIP_SERVER) {
   log('SKIP_SERVER set — not mirroring to ~/.vscode-server');
 }
 
-log(`Installed ${extId}@${pkg.version}`);
+// Verify what was actually placed, rather than reporting on intent. A
+// silent mismatch here is the whole failure mode: the script said
+// "Installed" for weeks while mirroring a build from a fortnight earlier.
+const placed = path.join(localExtDir, 'dist', 'extension.js');
+const built = path.join(root, 'dist', 'extension.js');
+if (existsSync(placed) && existsSync(built)) {
+  const same = statSync(placed).size === statSync(built).size;
+  if (!same) {
+    log(
+      `WARNING: installed bundle differs from the one just built (${statSync(placed).size} vs ${statSync(built).size} bytes) — something served a stale copy`,
+    );
+  }
+}
+
+log(
+  cliInstalled
+    ? `Installed ${extId}@${pkg.version} (via editor CLI)`
+    : `Installed ${extId}@${pkg.version} (unpacked; the editor CLI declined)`,
+);
 log('Reload the VS Code window (or reconnect Remote-SSH) to activate.');
 log('F5 Extension Development Host still overrides this only in the EDH window.');
 
