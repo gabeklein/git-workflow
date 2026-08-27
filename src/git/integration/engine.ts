@@ -244,30 +244,20 @@ export async function rebuildIntegration(
     const landed: string[] = [];
     const resolved: ResolvedLane[] = [];
     for (const lane of chainLanes) {
-      let laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
+      const laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
       if (!laneSha) {
         skipped.push(lane);
         continue;
       }
-      let isSnapshot = false;
-      if (wipLanes.has(lane)) {
-        const checkout = laneCheckouts.get(lane);
-        if (checkout) {
-          try {
-            const snapshot = await snapshotWorktreeCommit(checkout, lane);
-            if (snapshot) {
-              laneSha = snapshot;
-              isSnapshot = true;
-            }
-          } catch {
-            // snapshot failed — merge the branch tip instead
-          }
-        }
-      }
       // Landed: merging the branch tip adds nothing (strict, precomputed).
-      // A wip snapshot is never landed — its uncommitted edits remain.
-      if (!isSnapshot && landedSet.has(lane)) {
-        landed.push(lane);
+      // Its wip, if any, is still overlaid below — uncommitted edits have
+      // not landed anywhere, so a lane holding them is NOT retired. Doing
+      // so would unapply it, and the next rebuild would drop the overlay
+      // with the row.
+      if (landedSet.has(lane)) {
+        if (!wipLanes.has(lane)) {
+          landed.push(lane);
+        }
         continue;
       }
       // Lane already contained in the chain (e.g. no commits yet): nothing
@@ -341,6 +331,97 @@ export async function rebuildIntegration(
       merged.push(lane);
     }
 
+    // Wip overlay, LAST and on top of the finished chain.
+    //
+    // Not by reordering the dirty lane to the end: that would move its
+    // COMMITTED work too, and since the resolver is order-sensitive it
+    // would change how those hunks resolve against every other lane. Which
+    // worktree happens to be dirty would then decide preview content —
+    // the same "order means something arbitrary" problem that sorting
+    // focus-applied caused.
+    //
+    // So inclusion order governs committed work, and wip is an overlay.
+    // mergeBase is the lane's own tip, which makes this cherry-pick
+    // semantics: what lands is exactly the uncommitted delta, not the
+    // lane's history a second time.
+    for (const lane of chainLanes) {
+      if (!wipLanes.has(lane)) {
+        continue;
+      }
+      const checkout = laneCheckouts.get(lane);
+      if (!checkout) {
+        continue; // no worktree to read edits from
+      }
+      const laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
+      let snapshot: string | undefined;
+      try {
+        snapshot = (await snapshotWorktreeCommit(checkout, lane)) ?? undefined;
+      } catch {
+        snapshot = undefined; // nothing dirty, or the snapshot failed
+      }
+      if (!snapshot || !laneSha || snapshot === laneSha) {
+        continue;
+      }
+      const result = await mergeOffTree(workingPath, current, snapshot, {
+        mergeBase: laneSha,
+      });
+      if (result.kind === 'unsupported') {
+        return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
+      }
+      let overlayTree: string;
+      if (result.kind === 'conflict') {
+        // Routed through the SAME setting as everything else rather than
+        // always winning: a silent win drops another lane's hunks from the
+        // preview, and lossy resolutions are tagged here, not hidden.
+        const mode = conflictResolverMode();
+        const resolution =
+          mode === 'none'
+            ? { unresolved: result.files }
+            : await resolveConflictedTree(
+                workingPath,
+                current,
+                snapshot,
+                result.tree,
+                result.files,
+                mode,
+              ).catch(() => ({ unresolved: result.files }));
+        if ('unresolved' in resolution) {
+          const files = resolution.unresolved.slice(0, 5).join(', ');
+          return {
+            ok: false,
+            code: 'conflict',
+            lane,
+            message: `working-tree edits in ${lane} conflict${
+              files ? `: ${files}` : ''
+            } (checkout untouched)`,
+          };
+        }
+        overlayTree = resolution.tree;
+        resolved.push({
+          lane,
+          lossless: resolution.lossless,
+          lossy: resolution.lossy,
+        });
+      } else {
+        overlayTree = result.tree;
+      }
+      current = (
+        await git(workingPath, [
+          'commit-tree',
+          overlayTree,
+          '-p',
+          current,
+          '-p',
+          snapshot,
+          '-m',
+          `${integrationBranch()}: ${lane} (wip)`,
+        ])
+      ).trim();
+      if (!merged.includes(lane)) {
+        merged.push(lane);
+      }
+    }
+
     // Retire landed lanes while still holding the lock — the applied file
     // is shared with the shell script, so it only changes under the lock
     if (landed.length > 0) {
@@ -348,6 +429,7 @@ export async function rebuildIntegration(
         workingPath,
         APPLIED_FILE,
         lanes.filter((l) => !landed.includes(l)),
+        { ordered: true },
       );
     }
 
@@ -439,6 +521,7 @@ async function rebuildInWorktree(
       workingPath,
       APPLIED_FILE,
       lanes.filter((l) => !landed.includes(l)),
+      { ordered: true },
     );
   }
   return { ok: true, lanes: merged, skipped, landed, resolved: [] };

@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  addAppliedLane,
+  dropAppliedLane,
+  listAppliedLanes,
   pruneDeadLanes,
   readLaneFile,
   writeLaneFile,
@@ -103,5 +106,51 @@ describe('pruneDeadLanes', () => {
     await pruneDeadLanes(scratch.repo);
     expect(await pruneDeadLanes(scratch.repo)).toEqual([]);
     expect(fs.existsSync(stateFile('focus-working.lock'))).toBe(false);
+  });
+});
+
+describe('applied lane order', () => {
+  let scratch: ScratchRepo;
+  beforeEach(() => {
+    scratch = makeRepo();
+  });
+  afterEach(() => {
+    scratch.cleanup();
+  });
+
+  const applied = () => listAppliedLanes(scratch.repo);
+
+  it('keeps the order lanes were included, not alphabetical', async () => {
+    // Merge order follows this file, and the resolver is order-sensitive:
+    // sorted, which lane wins a same-line clash was decided by branch NAME.
+    for (const lane of ['zebra', 'alpha', 'middle']) {
+      await addAppliedLane(scratch.repo, lane);
+    }
+    expect(await applied()).toEqual(['zebra', 'alpha', 'middle']);
+  });
+
+  it('survives a drop from the middle', async () => {
+    for (const lane of ['one', 'two', 'three']) {
+      await addAppliedLane(scratch.repo, lane);
+    }
+    await dropAppliedLane(scratch.repo, 'two');
+    expect(await applied()).toEqual(['one', 'three']);
+  });
+
+  it('re-adding moves a lane to the END — it is newly included', async () => {
+    for (const lane of ['one', 'two']) {
+      await addAppliedLane(scratch.repo, lane);
+    }
+    await dropAppliedLane(scratch.repo, 'one');
+    await addAppliedLane(scratch.repo, 'one');
+    expect(await applied()).toEqual(['two', 'one']);
+  });
+
+  it('does not duplicate an already-applied lane, or move it', async () => {
+    for (const lane of ['one', 'two']) {
+      await addAppliedLane(scratch.repo, lane);
+    }
+    await addAppliedLane(scratch.repo, 'one');
+    expect(await applied()).toEqual(['one', 'two']);
   });
 });
