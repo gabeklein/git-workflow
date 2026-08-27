@@ -33,18 +33,14 @@ import {
   IntegrationController,
   type IntegrationState,
 } from './integrationController';
+import { GroupItem, MessageItem, SectionItem, type TreeNode } from './nodes';
+import { FileItem, FolderItem } from './nodes/files';
 import {
-  ConflictWarningItem,
   CommitItem,
-  FileItem,
-  FolderItem,
-  GroupItem,
-  type IntegrationRowInfo,
-  MessageItem,
-  SectionItem,
-  type TreeNode,
+  ConflictWarningItem,
   WorktreeListItem,
-} from './nodes';
+  type IntegrationRowInfo,
+} from './nodes/worktrees';
 import {
   childrenAtPrefix,
   isPathInside,

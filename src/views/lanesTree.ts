@@ -1,14 +1,8 @@
 import * as vscode from 'vscode';
 import { integrationBaseRef, integrationBranch } from '../git/integration';
-import {
-  BaseDriftItem,
-  BranchItem,
-  GroupItem,
-  IntegrationLaneItem,
-  MessageItem,
-  PreviewItem,
-  type TreeNode,
-} from './nodes';
+import { GroupItem, MessageItem, type TreeNode } from './nodes';
+import { BranchItem } from './nodes/branches';
+import { BaseDriftItem, IntegrationLaneItem, PreviewItem } from './nodes/lanes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';

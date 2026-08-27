@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { IntegrationLaneItem, type TreeNode } from './nodes';
+import type { TreeNode } from './nodes';
+import { IntegrationLaneItem } from './nodes/lanes';
 
 /**
  * Dragging lane rows to say which lane wins.

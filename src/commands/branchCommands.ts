@@ -12,7 +12,7 @@ import {
   type LandedBranch,
 } from '../git/pruneLanded';
 import { createWorktreeForPr } from '../github/remotePrs';
-import type { BranchItem, RemotePrFileItem } from '../views/nodes';
+import type { BranchItem, RemotePrFileItem } from '../views/nodes/branches';
 import type { BranchesTreeProvider } from '../views/branchesTree';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 

@@ -13,7 +13,8 @@ import {
   type RemotePullRequest,
 } from '../github/remotePrs';
 import type { DiscoveredWorktree } from '../discovery/scanner';
-import { BranchItem, MessageItem, RemotePrFileItem, type TreeNode } from './nodes';
+import { MessageItem, type TreeNode } from './nodes';
+import { BranchItem, RemotePrFileItem } from './nodes/branches';
 
 const MAX_ROWS = 50;
 
