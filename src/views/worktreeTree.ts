@@ -20,9 +20,6 @@ import {
 } from '../git/integration';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
-  findPullRequestForBranch,
-  isGithubPrIntegrationEnabled,
-  prCacheKey,
   prHasMergeConflicts,
   resetGithubPrClient,
   type PullRequestInfo,
@@ -30,6 +27,7 @@ import {
 import { BaseStatusTracker } from './baseStatusTracker';
 import { GitActivityHub } from './gitActivityHub';
 import { HotFollowPoll } from './hotFollowPoll';
+import { PullRequestCache } from './pullRequestCache';
 import {
   IntegrationController,
   type IntegrationState,
@@ -89,15 +87,13 @@ export class WorktreeTreeProvider
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
-  /** PR lookup cache keyed by worktreePath\\0branch */
-  private readonly prCache = new Map<string, PullRequestInfo | null>();
-  private prRefreshGeneration = 0;
 
   private selectedPath: string | undefined;
   private readonly selectionDecorations =
     new WorktreeRowDecorationProvider();
 
   private readonly poll: HotFollowPoll;
+  private readonly prs: PullRequestCache;
   private readonly integration: IntegrationController;
   private readonly baseStatus: BaseStatusTracker;
   private readonly activity: GitActivityHub;
@@ -108,6 +104,9 @@ export class WorktreeTreeProvider
   ) {
     this.poll = new HotFollowPoll(output, (reason) =>
       this.softRefreshSelected(reason),
+    );
+    this.prs = new PullRequestCache(output, () =>
+      this._onDidChangeTreeData.fire(),
     );
     this.integration = new IntegrationController({
       output,
@@ -161,7 +160,7 @@ export class WorktreeTreeProvider
           this.poll.restart();
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
-            this.prCache.clear();
+            this.prs.clear();
             void this.refreshPullRequests();
           }
           if (
@@ -334,7 +333,7 @@ export class WorktreeTreeProvider
     try {
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
-      this.prunePrCache();
+      this.prs.prune(this.worktrees);
       await this.integration.refreshState();
       void this.baseStatus.refresh();
       this.output.appendLine(
@@ -344,7 +343,7 @@ export class WorktreeTreeProvider
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Discovery failed: ${message}`);
       this.worktrees = [];
-      this.prCache.clear();
+      this.prs.clear();
     } finally {
       this.loading = false;
       // Paths changed, so the applied-lane badges have to be recomputed even
@@ -372,78 +371,16 @@ export class WorktreeTreeProvider
   /** Cached PR for a worktree row (if looked up). */
   getPullRequest(worktreePath: string): PullRequestInfo | undefined {
     const wt = this.worktrees.find((w) => w.path === worktreePath);
-    if (!wt) return undefined;
-    const key = prCacheKey(wt.path, wt.branch);
-    const hit = this.prCache.get(key);
-    return hit ?? undefined;
+    return wt && this.prs.get(wt.path, wt.branch);
   }
 
   /** Drop PR cache so the next lookup re-queries `gh`. */
   clearPullRequestCache(): void {
-    this.prCache.clear();
+    this.prs.clear();
   }
 
-  /** Re-query GitHub (via `gh`) for PRs associated with each worktree branch. */
-  async refreshPullRequests(): Promise<void> {
-    if (!isGithubPrIntegrationEnabled()) {
-      if (this.prCache.size > 0) {
-        this.prCache.clear();
-        this._onDidChangeTreeData.fire();
-      }
-      return;
-    }
-    if (this.worktrees.length === 0) return;
-    const generation = ++this.prRefreshGeneration;
-    const t0 = Date.now();
-    let found = 0;
-    try {
-      // Bounded concurrency so many worktrees don't spawn a gh storm
-      const queue = this.worktrees.slice();
-      const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
-        while (queue.length > 0) {
-          if (generation !== this.prRefreshGeneration) return;
-          const wt = queue.shift();
-          if (!wt) return;
-          const key = prCacheKey(wt.path, wt.branch);
-          try {
-            const pr = await findPullRequestForBranch(
-              wt.path,
-              wt.branch,
-              wt.detached,
-            );
-            if (generation !== this.prRefreshGeneration) return;
-            this.prCache.set(key, pr ?? null);
-            if (pr) found += 1;
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.output.appendLine(
-              `PR lookup failed for ${wt.branch}: ${message}`,
-            );
-            this.prCache.set(key, null);
-          }
-        }
-      });
-      await Promise.all(workers);
-      if (generation !== this.prRefreshGeneration) return;
-      this.output.appendLine(
-        `GitHub PR lookup: ${found}/${this.worktrees.length} branch(es) have a PR (${Date.now() - t0}ms)`,
-      );
-      this._onDidChangeTreeData.fire();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`GitHub PR lookup failed: ${message}`);
-    }
-  }
-
-  /** Drop PR cache entries for worktrees / branches that no longer exist. */
-  private prunePrCache(): void {
-    if (this.prCache.size === 0) return;
-    const live = new Set(
-      this.worktrees.map((wt) => prCacheKey(wt.path, wt.branch)),
-    );
-    for (const key of [...this.prCache.keys()]) {
-      if (!live.has(key)) this.prCache.delete(key);
-    }
+  refreshPullRequests(): Promise<void> {
+    return this.prs.refresh(this.worktrees);
   }
 
   // ---- hot-follow compare (selected worktree) ------------------------------
@@ -831,8 +768,7 @@ export class WorktreeTreeProvider
     const baseRef = integrationBaseRef();
     const state = this.integration.getState();
     return ((): TreeNode => {
-      const key = prCacheKey(wt.path, wt.branch);
-      const pr = this.prCache.get(key);
+      const pr = this.prs.get(wt.path, wt.branch);
       let integration: IntegrationRowInfo | undefined;
       if (state && !wt.detached && isLaneBranch(wt.branch, baseRef)) {
         integration = {

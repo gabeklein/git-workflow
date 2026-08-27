@@ -271,8 +271,3 @@ export function prThemeIcon(pr: PullRequestInfo): vscode.ThemeIcon {
     new vscode.ThemeColor('charts.green'),
   );
 }
-
-/** Map key for PR cache (path + branch). */
-export function prCacheKey(worktreePath: string, branch: string): string {
-  return `${worktreePath}\0${branch}`;
-}
