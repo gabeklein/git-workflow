@@ -200,6 +200,8 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout
 
+**Focus** comes first: it is what you work in — stage, diff, open files — while Lanes is where you re-target, which happens far less often. (View order is a default; VS Code remembers your own arrangement.)
+
 **Lanes** panel (selector — header shows the checkout count):
 
 ```
