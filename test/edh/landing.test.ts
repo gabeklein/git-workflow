@@ -140,9 +140,7 @@ describe('quick delete of a landed worktree', () => {
   after(() => {
     // The branch ref outlives the checkout by design — clear it either way
     for (const d of [quickPath, path.join(repo, '.worktrees', 'feat-quick2')]) {
-      if (fs.existsSync(d)) {
-        git(repo, ['worktree', 'remove', '--force', d]);
-      }
+      if (fs.existsSync(d)) git(repo, ['worktree', 'remove', '--force', d]);
     }
     for (const b of ['feat/quick', 'feat/quick2']) {
       try {

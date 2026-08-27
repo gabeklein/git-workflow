@@ -264,9 +264,8 @@ async function integrate(
   const lossless: string[] = [];
   for (const [name, sha] of lanes) {
     const step = await mergeOffTree(repo, current, sha);
-    if (step.kind === 'unsupported') {
+    if (step.kind === 'unsupported')
       throw new Error('git < 2.38: merge-tree --write-tree unavailable');
-    }
     let tree: string;
     if (step.kind === 'conflict') {
       const res = await resolveConflictedTree(
@@ -277,9 +276,8 @@ async function integrate(
         step.files,
         mode,
       );
-      if ('unresolved' in res) {
+      if ('unresolved' in res)
         return { failedLane: name, files: res.unresolved };
-      }
       tree = res.tree;
       lossy.push(...res.lossy.map((f) => `${name}:${f}`));
       lossless.push(...res.lossless.map((f) => `${name}:${f}`));
@@ -341,17 +339,14 @@ describe('conflict resolver — petty-conflict matrix', () => {
           const { repo, baseSha, lanes } = build(a);
           const result = await integrate(repo, baseSha, lanes, 'lossless');
           expect(result).toHaveProperty('failedLane');
-          if ('files' in result) {
-            expect(result.files).toContain(file);
-          }
+          if ('files' in result) expect(result.files).toContain(file);
         });
         it('resolves lane-wins under full, tagged lossy', async () => {
           const { repo, baseSha, lanes } = build(a);
           const result = await integrate(repo, baseSha, lanes, 'full');
           expect(result).not.toHaveProperty('failedLane');
-          if ('tip' in result) {
+          if ('tip' in result)
             expect(result.lossy.some((l) => l.endsWith(`:${file}`))).toBe(true);
-          }
         });
       }
       if (a.expect.kind === 'conflict') {

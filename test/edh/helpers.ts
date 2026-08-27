@@ -83,14 +83,11 @@ let api: TestApi | undefined;
 export async function getApi(): Promise<TestApi> {
   if (!api) {
     const ext = vscode.extensions.getExtension('local.git-workflow');
-    if (!ext) {
+    if (!ext)
       throw new Error('extension local.git-workflow is not present in the EDH');
-    }
     const exported = await ext.activate();
     api = exported?.test as TestApi | undefined;
-    if (!api) {
-      throw new Error('test hooks not exported (GW_TEST_HOOKS)');
-    }
+    if (!api) throw new Error('test hooks not exported (GW_TEST_HOOKS)');
   }
   return api;
 }
@@ -133,9 +130,8 @@ export async function poll(
       console.log(`      · ${desc} (${Date.now() - t0}ms)`);
       return;
     }
-    if (Date.now() - t0 > timeoutMs) {
+    if (Date.now() - t0 > timeoutMs)
       throw new Error(`TIMEOUT after ${timeoutMs}ms: ${desc}`);
-    }
     await new Promise((r) => setTimeout(r, 400));
   }
 }
