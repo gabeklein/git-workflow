@@ -41,7 +41,46 @@ export type LandedVia = 'ancestor' | 'content' | 'squash';
  * Ordered cheapest-first, and every probe is skipped the moment an earlier
  * one answers.
  */
+/**
+ * Answers are memoized by (repo, branch sha, base sha).
+ *
+ * Those three fully determine the result — a sha's content never changes —
+ * so an entry can never go stale; a revert or a new base commit is a
+ * different base sha and therefore a different key.
+ *
+ * Worth having because retirement calls this on EVERY rebuild, once per
+ * lane, and the rebuild loop can run several times a second while someone
+ * is typing. Prune calls it once per click and does not care; the tick
+ * very much does. Without this, sharing the probe with retirement turned
+ * one merge-base check per lane into a scan of base history per lane per
+ * refresh — enough to push a rebuild past a 30s CI poll.
+ */
+const memo = new Map<string, LandedVia | undefined>();
+/** Bounded so a long session cannot grow it without limit. */
+const MEMO_MAX = 500;
+
+export function forgetLandedProbe(): void {
+  memo.clear();
+}
+
 export async function landedVia(
+  cwd: string,
+  branchSha: string,
+  baseSha: string,
+): Promise<LandedVia | undefined> {
+  const key = `${cwd}\u0000${branchSha}\u0000${baseSha}`;
+  if (memo.has(key)) {
+    return memo.get(key);
+  }
+  const answer = await probe(cwd, branchSha, baseSha);
+  if (memo.size >= MEMO_MAX) {
+    memo.clear();
+  }
+  memo.set(key, answer);
+  return answer;
+}
+
+async function probe(
   cwd: string,
   branchSha: string,
   baseSha: string,
