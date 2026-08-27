@@ -5,7 +5,7 @@ import {
   planLaneRows,
   type LanesPlanInput,
 } from '../../src/views/lanesPlan';
-import type { DiscoveredWorktree } from '../../src/discovery/scanner';
+import type { DiscoveredWorktree } from '../../src/git/discovery';
 import type { BranchInfo } from '../../src/git/branches';
 
 /**

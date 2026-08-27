@@ -1,12 +1,26 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { git, gitOk } from '../git/exec';
-import { isWorktreeDirty } from '../git/plumbing';
-import { integrationBranch } from '../git/integration';
-import { listWorktreeAdmin, type WorktreeAdminState } from '../git/worktreeAdmin';
-import type { WorktreeInfo } from '../git/worktree';
+import { git, gitOk } from './exec';
+import { isWorktreeDirty } from './plumbing';
+import { integrationBranch } from './integration';
+import { listWorktreeAdmin, type WorktreeAdminState } from './worktreeAdmin';
 
+/** What `git worktree list` knows about a checkout, before we look closer. */
+interface WorktreeInfo {
+  /** Absolute path to the worktree checkout */
+  path: string;
+  /** Display name (directory basename) */
+  name: string;
+  /** Current branch, or detached HEAD short sha */
+  branch: string;
+  /** Whether HEAD is detached */
+  detached: boolean;
+  /** Absolute path to the main worktree (common root), if known */
+  mainWorktreePath?: string;
+}
+
+/** …and what the panels need on top of it. */
 export interface DiscoveredWorktree extends WorktreeInfo {
   /** Workspace folder this worktree belongs to (repo opened in it) */
   workspaceFolder?: vscode.WorkspaceFolder;

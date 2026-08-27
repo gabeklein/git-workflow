@@ -1,18 +1,5 @@
 import { git, gitOk } from './exec';
 
-export interface WorktreeInfo {
-  /** Absolute path to the worktree checkout */
-  path: string;
-  /** Display name (directory basename) */
-  name: string;
-  /** Current branch, or detached HEAD short sha */
-  branch: string;
-  /** Whether HEAD is detached */
-  detached: boolean;
-  /** Absolute path to the main worktree (common root), if known */
-  mainWorktreePath?: string;
-}
-
 /** Well-known integration-branch names used when inferring a compare base. */
 const INTEGRATION_NAMES = [
   'main',

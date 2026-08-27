@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { CommitInfo } from '../../git/compare';
-import type { DiscoveredWorktree } from '../../discovery/scanner';
+import type { DiscoveredWorktree } from '../../git/discovery';
 import {
   formatPrDescription,
   prHasMergeConflicts,

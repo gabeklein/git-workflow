@@ -1,4 +1,4 @@
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import {
   autoRebaseLanes,
   baseStatusFor,
@@ -17,7 +17,7 @@ import {
   inferBaseRef,
   preferRemoteTrackingRef,
   resolveBaseRef,
-} from '../git/worktree';
+} from '../git/baseRef';
 
 interface BaseStatusHost {
   readonly output: { appendLine(value: string): void };

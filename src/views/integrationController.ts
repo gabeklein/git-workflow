@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import { orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';

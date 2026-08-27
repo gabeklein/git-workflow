@@ -4,7 +4,7 @@ import {
   discoverWorktrees,
   isDirectChildOfWatchRoot,
   type DiscoveredWorktree,
-} from '../discovery/scanner';
+} from '../git/discovery';
 import {
   compareWorkingTreeToBase,
   formatFileChangeBreakdown,

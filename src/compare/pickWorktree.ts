@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 
 interface WorktreeQuickPickItem extends vscode.QuickPickItem {
   worktree: DiscoveredWorktree;

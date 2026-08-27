@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import {
   resolveRepoCommonDirs,
   worktreeListFingerprint,
-} from '../discovery/scanner';
+} from '../git/discovery';
 import { GitDirWatcher } from '../git/gitWatcher';
 
 /**

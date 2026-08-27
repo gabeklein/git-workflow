@@ -1,4 +1,4 @@
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import {
   findPullRequestForBranch,
   isGithubPrIntegrationEnabled,

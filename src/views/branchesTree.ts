@@ -12,7 +12,7 @@ import {
   listRemotePrFiles,
   type RemotePullRequest,
 } from '../github/remotePrs';
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import { MessageItem, type TreeNode } from './nodes';
 import { BranchItem, RemotePrFileItem } from './nodes/branches';
 
