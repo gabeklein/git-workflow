@@ -40,7 +40,13 @@ export class GroupItem extends vscode.TreeItem {
 
   constructor(
     label: string,
-    readonly group: 'worktrees' | 'ahead' | 'branches' | 'remote' | 'directory',
+    readonly group:
+      | 'working'
+      | 'local'
+      | 'remote'
+      | 'landed'
+      | 'ahead'
+      | 'directory',
     collapsible: vscode.TreeItemCollapsibleState,
     description?: string,
     opts?: { worktreePath?: string; baseRef?: string },
@@ -51,15 +57,17 @@ export class GroupItem extends vscode.TreeItem {
     this.worktreePath = opts?.worktreePath;
     this.baseRef = opts?.baseRef;
     this.iconPath = new vscode.ThemeIcon(
-      group === 'worktrees'
+      group === 'working'
         ? 'repo'
         : group === 'ahead'
           ? 'git-commit'
-          : group === 'branches'
+          : group === 'local'
             ? 'git-branch'
             : group === 'directory'
               ? 'folder-opened'
-              : 'cloud',
+              : group === 'landed'
+                ? 'check-all'
+                : 'cloud',
     );
   }
 }

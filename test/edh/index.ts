@@ -13,8 +13,8 @@ import { getApi } from './helpers';
 
 const ORDER = [
   'overlay.test.cjs', //     activation, enroll/apply, selection, wip overlay
-  'files.test.cjs', //       Directory section of Changes (cleans up after itself)
-  'focus.test.cjs', //       unified Focus panel: checkouts, groups, no duplicates
+  'files.test.cjs', //       Directory section of Focus (cleans up after itself)
+  'lanes.test.cjs', //       Lanes panel: the ladder, groups, no duplicates
   'landing.test.cjs', //     landed lifecycle, base badges
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase
