@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkoutLabel,
+  orderLaneRows,
   planFocusRows,
   type FocusPlanInput,
 } from '../../src/views/focusPlan';
@@ -159,5 +160,36 @@ describe('checkoutLabel', () => {
 
   it('uses the branch otherwise', () => {
     expect(checkoutLabel(wt('feat/a'))).toBe('feat/a');
+  });
+});
+
+/**
+ * Lanes merge in the order they were included, and that order decides
+ * which lane wins a conflict. Rendering it sorted showed an order the
+ * rebuild does not use — on precisely the question where order matters.
+ */
+describe('orderLaneRows', () => {
+  it('keeps applied lanes in merge order, not alphabetical', () => {
+    expect(orderLaneRows(['zebra', 'alpha'], [])).toEqual(['zebra', 'alpha']);
+  });
+
+  it('sorts the unapplied remainder — those have no position in the chain', () => {
+    expect(orderLaneRows(['zebra'], ['delta', 'beta'])).toEqual([
+      'zebra',
+      'beta',
+      'delta',
+    ]);
+  });
+
+  it('never lists an applied lane twice', () => {
+    expect(orderLaneRows(['a', 'b'], ['b', 'c', 'a'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('dedupes the remainder', () => {
+    expect(orderLaneRows([], ['x', 'x', 'y'])).toEqual(['x', 'y']);
+  });
+
+  it('handles nothing applied', () => {
+    expect(orderLaneRows([], ['c', 'a'])).toEqual(['a', 'c']);
   });
 });

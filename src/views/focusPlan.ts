@@ -105,3 +105,23 @@ export function checkoutLabel(
 ): string {
   return wt.detached ? `Detached (${shortSha ?? wt.branch})` : wt.branch;
 }
+
+/**
+ * Row order for the lanes under Integration: applied lanes first, in the
+ * order they will actually be merged, then the rest as a sorted set.
+ *
+ * Merge order is the order lanes were included, and it decides conflict
+ * outcomes — union inserts land in merge order, and best-effort resolves
+ * same-line clashes toward the incoming lane. Rendering that list sorted
+ * therefore shows an order the rebuild does not use, on exactly the
+ * question where order matters. Unapplied candidates have no position in
+ * the chain, so for them a sorted list is the honest presentation.
+ */
+export function orderLaneRows(
+  applied: string[],
+  others: string[],
+): string[] {
+  const seen = new Set(applied);
+  const rest = [...new Set(others)].filter((l) => !seen.has(l)).sort();
+  return [...applied, ...rest];
+}
