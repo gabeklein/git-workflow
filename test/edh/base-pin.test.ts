@@ -56,10 +56,10 @@ describe('base pin & drift lane', () => {
 
     // Render-level: the drift LANE must actually be painted — a checked
     // checkbox row, not just controller state.
-    const row = api
-      .integrationRows()
-      .find((r) => r.kind === 'integrationBaseDrift');
-    assert.ok(row, 'drift lane row is rendered in the Integration panel');
+    const row = (await api.integrationRows()).find(
+      (r) => r.kind === 'integrationBaseDrift',
+    );
+    assert.ok(row, 'drift lane row is rendered under Preview');
     assert.equal(row!.label, 'main', 'row is labeled with the base branch');
     assert.match(row!.description, /\+\d+ unpushed/, 'row shows +N unpushed');
     assert.equal(row!.checkbox, true, 'row renders a CHECKED checkbox');

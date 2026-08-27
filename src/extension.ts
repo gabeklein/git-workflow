@@ -8,13 +8,11 @@ import { registerFileExplorerCommands } from './commands/fileExplorerCommands';
 import { registerLaneOpsCommands } from './commands/laneOpsCommands';
 import { registerWorktreeCommands } from './commands/worktreeCommands';
 import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
-import { integrationBaseRef } from './git/integration';
 import { createFileBackedLogger } from './log';
 import { BranchesTreeProvider } from './views/branchesTree';
 import { LanesTreeProvider } from './views/lanesTree';
 import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
-import { IntegrationTreeProvider } from './views/integrationTree';
 import { WorktreeTreeProvider } from './views/worktreeTree';
 
 export function activate(context: vscode.ExtensionContext): unknown {
@@ -93,30 +91,11 @@ export function activate(context: vscode.ExtensionContext): unknown {
     treeProvider.onDidChangeWorktrees(updateSplitViewDescriptions),
   );
 
-  const integrationProvider = new IntegrationTreeProvider(treeProvider);
-  context.subscriptions.push(integrationProvider);
-  const integrationView = vscode.window.createTreeView(
-    'worktreeCompare.integration',
-    { treeDataProvider: integrationProvider },
-  );
-  context.subscriptions.push(integrationView);
-
-  // On/off + base + error status live on the panel description
+  // Integration is a group in Lanes now, not a panel of its own — a
+  // preview is one derived branch built from some of your lanes, not a peer
+  // of "your branches". Only the context keys survive.
   const updateIntegrationView = () => {
     const integration = treeProvider.getIntegration();
-    const wipActive =
-      integration &&
-      integration.wip.some((l) => integration.lanes.includes(l));
-    integrationView.description = !integration
-      ? 'off'
-      : integration.error?.code === 'conflict'
-        ? 'lane conflict'
-        : integration.error
-          ? 'rebuild failed'
-          : `→ ${integrationBaseRef()}${wipActive ? ' · +wip' : ''}`;
-    integrationView.message = integration?.error
-      ? integration.error.message
-      : undefined;
     void vscode.commands.executeCommand(
       'setContext',
       'worktreeCompare.integrationOn',
@@ -142,7 +121,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
   // Lane checkboxes: checked = merged into the integration tree
   context.subscriptions.push(
-    integrationView.onDidChangeCheckboxState(async (e) => {
+    treeView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
         if (item.kind === 'integrationBaseDrift') {
           const included = state === vscode.TreeItemCheckboxState.Checked;
@@ -239,8 +218,22 @@ export function activate(context: vscode.ExtensionContext): unknown {
             contextValue: item.contextValue,
           }));
         },
-        integrationRows: () =>
-          integrationProvider.getChildren().map((item) => ({
+        // Reads the lanes THROUGH the Lanes panel now: the rows have to
+        // arrive via the tree that actually renders them, or a preview that
+        // stopped appearing would pass green on its old provider.
+        integrationRows: async () => {
+          const groups = await lanesProvider.getChildren();
+          const preview = groups.find(
+            (n) => n.kind === 'group' && n.group === 'preview',
+          );
+          const rows = preview
+            ? await lanesProvider.getChildren(preview)
+            : [];
+          const previewRow = rows.find((n) => n.kind === 'preview');
+          const lanes = previewRow
+            ? await lanesProvider.getChildren(previewRow)
+            : [];
+          return lanes.map((item) => ({
             kind: (item as { kind?: string }).kind,
             label:
               typeof item.label === 'string'
@@ -256,7 +249,8 @@ export function activate(context: vscode.ExtensionContext): unknown {
                     ? item.checkboxState.state
                     : item.checkboxState) ===
                   vscode.TreeItemCheckboxState.Checked,
-          })),
+          }));
+        },
         logFile: () => log.logFile,
       },
     };

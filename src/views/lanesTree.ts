@@ -1,6 +1,14 @@
 import * as vscode from 'vscode';
-import { integrationBranch } from '../git/integration';
-import { BranchItem, GroupItem, MessageItem, type TreeNode } from './nodes';
+import { integrationBaseRef, integrationBranch } from '../git/integration';
+import {
+  BaseDriftItem,
+  BranchItem,
+  GroupItem,
+  IntegrationLaneItem,
+  MessageItem,
+  PreviewItem,
+  type TreeNode,
+} from './nodes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
@@ -62,6 +70,8 @@ export class LanesTreeProvider
       }
       const plan = this.plan();
       switch (element.group) {
+        case 'preview':
+          return this.previewRows();
         case 'working':
           return plan.working.length > 0
             ? plan.working.map((wt) => this.worktrees.buildCheckoutRow(wt))
@@ -73,6 +83,11 @@ export class LanesTreeProvider
         default:
           return this.branchRows(cwd, plan.remote, plan.hiddenRemote);
       }
+    }
+    // A preview's children are its lanes — drift first, since it is the
+    // base's own unlanded work and merges before everything else.
+    if (element?.kind === 'preview') {
+      return this.laneRows();
     }
     if (element) {
       return [];
@@ -105,7 +120,7 @@ export class LanesTreeProvider
     }
     const group = (
       label: string,
-      key: 'working' | 'local' | 'remote' | 'landed',
+      key: 'preview' | 'working' | 'local' | 'remote' | 'landed',
       count: number,
       open: boolean,
     ) =>
@@ -117,9 +132,16 @@ export class LanesTreeProvider
           : vscode.TreeItemCollapsibleState.Collapsed,
         count > 0 ? String(count) : 'none',
       );
-    const rows = [
+    const rows: TreeNode[] = [
+      // Preview leads: it is what the lanes below are being combined INTO,
+      // and it is where the panel's only derived state lives. Present even
+      // when off, because a hidden group is how a feature goes undiscovered
+      // — the row inside offers to turn it on.
+      group('Preview', 'preview', this.worktrees.getIntegration() ? 1 : 0, true),
       group('Working', 'working', plan.working.length, true),
-      group('Local', 'local', plan.local.length, true),
+      // Closed by default: Local is where branches wait, and the list grows
+      // without bound in a busy repo. Working is what you are doing.
+      group('Local', 'local', plan.local.length, false),
     ];
     // Remote only earns a row when something lives ONLY on the remote — a
     // branch you already have locally is represented by its local row, so
@@ -133,6 +155,102 @@ export class LanesTreeProvider
     if (plan.landed.length > 0) {
       rows.push(group('Landed', 'landed', plan.landed.length, false));
     }
+    return rows;
+  }
+
+  /**
+   * The preview itself. One row today; the group is a list so a second
+   * integration is a row rather than a redesign.
+   */
+  private previewRows(): TreeNode[] {
+    const integration = this.worktrees.getIntegration();
+    if (!integration) {
+      // What the removed panel's welcome content used to say. A group that
+      // vanishes when off is a feature nobody finds.
+      const row = new MessageItem(
+        'Create Integration',
+        'preview lanes merged together',
+        'beaker',
+      );
+      row.command = {
+        command: 'worktreeCompare.enableIntegration',
+        title: 'Enable Integration Mode',
+      };
+      return [row];
+    }
+    const applied = integration.lanes.length;
+    return [
+      new PreviewItem(integration.branch, integrationBaseRef(), {
+        laneCount: applied,
+        wip: integration.wip.some((l) => integration.lanes.includes(l)),
+        error: integration.error,
+        mergePaused: integration.mergePaused,
+      }),
+    ];
+  }
+
+  /**
+   * Lanes of the preview: base drift first (it is the base's own unlanded
+   * work and merges before everything else), then the candidates in merge
+   * order.
+   *
+   * LANDED lanes are dropped here. They retire themselves from the merge
+   * automatically, and with Landed now a group in this same panel, leaving
+   * a `landed`-tagged row under Preview would show the same branch twice in
+   * one tree — the thing the ladder exists to prevent.
+   */
+  private laneRows(): TreeNode[] {
+    const integration = this.worktrees.getIntegration();
+    if (!integration) {
+      return [];
+    }
+    const rows: TreeNode[] = [];
+    if (integration.baseDrift) {
+      rows.push(
+        new BaseDriftItem(
+          integrationBaseRef().replace(/^origin\//, ''),
+          integration.baseDrift,
+        ),
+      );
+    }
+    const branchToPath = new Map(
+      this.worktrees
+        .getWorktrees()
+        .filter((w) => !w.detached)
+        .map((w) => [w.branch, w.path] as const),
+    );
+    const lanes = integration.candidates.filter(
+      (b) => !integration.landed.includes(b),
+    );
+    if (lanes.length === 0) {
+      return rows.length > 0
+        ? rows
+        : [
+            new MessageItem(
+              'No lanes yet',
+              'add a checkout from Working to preview it here',
+            ),
+          ];
+    }
+    rows.push(
+      ...lanes.map(
+        (branch) =>
+          new IntegrationLaneItem(branch, integration.lanes.includes(branch), {
+            conflicted:
+              (integration.error?.code === 'conflict' &&
+                integration.error.lane === branch) ||
+              integration.conflicts.includes(branch),
+            worktreePath: branchToPath.get(branch),
+            wip: integration.wip.includes(branch),
+            landed: false,
+            resolving: integration.resolving.includes(branch),
+            auto: !integration.explicit.includes(branch),
+            autoResolved: integration.autoResolved.find(
+              (r) => r.lane === branch,
+            ),
+          }),
+      ),
+    );
     return rows;
   }
 
