@@ -28,14 +28,28 @@ export async function readLaneFile(cwd: string, file: string): Promise<string[]>
     .filter((l) => l && !l.startsWith('#'));
 }
 
+/**
+ * `ordered` files keep the order they were written in; the rest are sets
+ * and get sorted for a stable diff.
+ *
+ * focus-applied is ordered, and that is load-bearing: lanes merge in file
+ * order, so the order they were INCLUDED is the order they merge. Sorting
+ * it made merge order alphabetical, which sounds harmless until the
+ * conflict resolver fires — union inserts land in merge order, and
+ * best-effort resolves same-line clashes toward the incoming lane. Under a
+ * sort, which lane wins was decided by branch NAME, and renaming a branch
+ * silently changed the preview.
+ */
 export async function writeLaneFile(
   cwd: string,
   file: string,
   lanes: string[],
+  opts: { ordered?: boolean } = {},
 ): Promise<void> {
   const abs = path.join(await commonDir(cwd), file);
-  const unique = [...new Set(lanes.filter(Boolean))].sort();
-  await fs.writeFile(abs, unique.length > 0 ? `${unique.join('\n')}\n` : '');
+  const unique = [...new Set(lanes.filter(Boolean))];
+  const out = opts.ordered ? unique : unique.sort();
+  await fs.writeFile(abs, out.length > 0 ? `${out.join('\n')}\n` : '');
 }
 
 export async function listAppliedLanes(cwd: string): Promise<string[]> {
@@ -46,7 +60,7 @@ export async function addAppliedLane(cwd: string, lane: string): Promise<void> {
   const lanes = await listAppliedLanes(cwd);
   if (!lanes.includes(lane)) {
     lanes.push(lane);
-    await writeLaneFile(cwd, APPLIED_FILE, lanes);
+    await writeLaneFile(cwd, APPLIED_FILE, lanes, { ordered: true });
   }
 }
 
@@ -59,6 +73,7 @@ export async function dropAppliedLane(
     cwd,
     APPLIED_FILE,
     lanes.filter((l) => l !== lane),
+    { ordered: true },
   );
 }
 
@@ -185,7 +200,9 @@ export async function pruneDeadLanes(cwd: string): Promise<string[]> {
       const lanes = await readLaneFile(cwd, file);
       const kept = lanes.filter((l) => !dead.includes(l));
       if (kept.length !== lanes.length) {
-        await writeLaneFile(cwd, file, kept);
+        await writeLaneFile(cwd, file, kept, {
+          ordered: file === APPLIED_FILE,
+        });
       }
     }
   } finally {
