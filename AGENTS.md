@@ -78,9 +78,15 @@ other lanes, and a base match does not.
 
 To opt in, once the work is worth previewing:
 
+```sh
+# works with VS Code closed; installed while integration is on
+"$(git rev-parse --git-common-dir)/gw-lane" add          # current branch
+"$(git rev-parse --git-common-dir)/gw-lane" status       # what is in the preview
+"$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 ```
-Git Workflow: Add to Integration    (worktreeCompare.addToIntegration)
-```
+
+Inside the editor the same thing is **Git Workflow: Add to Integration**
+(`worktreeCompare.addToIntegration`).
 
 Leave it out when the branch is mid-refactor, deliberately broken, or
 exploring something that would clash with other lanes. Being out costs

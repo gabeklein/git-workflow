@@ -19,8 +19,11 @@ import {
   addExcludedLane,
   alignIntegrationBranchName,
   installCommitGuard,
+  installLaneCli,
+  laneCliPath,
   isCommitGuardEnabled,
   uninstallCommitGuard,
+  uninstallLaneCli,
   baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
@@ -551,7 +554,19 @@ export class IntegrationController implements vscode.Disposable {
       return;
     }
     try {
-      if (!workingPath || !isCommitGuardEnabled()) {
+      if (!workingPath) {
+        await uninstallCommitGuard(cwd);
+        await uninstallLaneCli(cwd);
+        return;
+      }
+      // The lane CLI is how anything outside VS Code joins the preview, so
+      // it tracks integration being ON — not the guard's setting.
+      if (await installLaneCli(cwd)) {
+        this.host.output.appendLine(
+          `Lane CLI installed: ${await laneCliPath(cwd)}`,
+        );
+      }
+      if (!isCommitGuardEnabled()) {
         await uninstallCommitGuard(cwd);
         return;
       }
