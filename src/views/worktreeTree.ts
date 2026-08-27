@@ -114,6 +114,7 @@ export class WorktreeTreeProvider
     this.integration = new IntegrationController({
       output,
       getWorktrees: () => this.worktrees,
+      getRepoCwd: () => this.getRepoCwd(),
       getSelectedPath: () => this.selectedPath,
       fireTreeData: () => this._onDidChangeTreeData.fire(),
       refresh: () => this.refresh(),

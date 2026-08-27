@@ -90,6 +90,20 @@ describe('absorb', () => {
       expect(await findStrayCommits(integ, 'origin/main')).toEqual([]);
     });
 
+    it('records where the commit was absorbed from', async () => {
+      strayCommit('trace.txt', 'x\n', 'work that needs a paper trail');
+      const strayTip = git(integ, ['rev-parse', 'HEAD']);
+      await absorbStrayCommits(integ, 'origin/main', checkoutTarget());
+      const body = git(scratch.repo, ['log', '-1', '--format=%B']);
+      // Identical provenance to the off-tree path — the two replays must
+      // not be tellable apart from the commit they leave behind.
+      expect(body).toContain(`(cherry picked from commit ${strayTip})`);
+      expect(body).toContain('Absorbed-from: integration/main');
+      expect(git(scratch.repo, ['log', '-1', '--format=%s'])).toBe(
+        'work that needs a paper trail',
+      );
+    });
+
     it('replays several commits oldest-first', async () => {
       strayCommit('a.txt', 'first\n', 'stray one');
       strayCommit('b.txt', 'second\n', 'stray two');
@@ -151,6 +165,58 @@ describe('absorb', () => {
       expect(
         await absorbStrayCommits(integ, 'origin/main', checkoutTarget()),
       ).toMatchObject({ ok: false, code: 'nothing' });
+    });
+  });
+
+  describe('a busy target', () => {
+    // git takes index.lock for any index write, and the extension is
+    // touching the base checkout constantly — rebuilds, status probes. A
+    // user who hits Absorb in that window used to get a raw
+    // "Unable to create ... index.lock" fatal, reported as a conflict.
+    const lock = () => path.join(scratch.repo, '.git', 'index.lock');
+
+    it('waits for a lock that clears, instead of failing', async () => {
+      strayCommit('patient.txt', 'x\n', 'absorbed after the wait');
+      fs.writeFileSync(lock(), '');
+      setTimeout(() => fs.rmSync(lock(), { force: true }), 250);
+      const result = await absorbStrayCommits(
+        integ,
+        'origin/main',
+        checkoutTarget(),
+      );
+      expect(result).toMatchObject({ ok: true, commits: 1 });
+      expect(read(scratch.repo, 'patient.txt')).toBe('x\n');
+    });
+
+    it('reports a lock that never clears as busy, not as a conflict', async () => {
+      strayCommit('blocked.txt', 'x\n', 'never absorbed');
+      fs.writeFileSync(lock(), '');
+      try {
+        const result = await absorbStrayCommits(
+          integ,
+          'origin/main',
+          checkoutTarget(),
+        );
+        // 'conflict' would send the user hunting for a merge that is not there
+        expect(result).toMatchObject({ ok: false, code: 'busy' });
+      } finally {
+        fs.rmSync(lock(), { force: true });
+      }
+    });
+
+    it('reports a busy target for uncommitted edits too', async () => {
+      fs.writeFileSync(path.join(integ, 'dirty.txt'), 'uncommitted\n');
+      fs.writeFileSync(lock(), '');
+      try {
+        expect(await absorbDirtyEdits(integ, scratch.repo)).toMatchObject({
+          ok: false,
+          code: 'busy',
+        });
+      } finally {
+        fs.rmSync(lock(), { force: true });
+      }
+      // ...and the work is still there to retry with
+      expect(read(integ, 'dirty.txt')).toBe('uncommitted\n');
     });
   });
 
