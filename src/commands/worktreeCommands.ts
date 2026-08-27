@@ -15,12 +15,8 @@ import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
 import { removeWorktree, unlockWorktree } from '../git/worktreeAdmin';
-import type { SectionItem } from '../views/nodes';
-import type {
-  CommitItem,
-  FileItem,
-  WorktreeTreeProvider,
-} from '../views/worktreeTree';
+import type { CommitItem, FileItem, SectionItem } from '../views/nodes';
+import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
 export function registerWorktreeCommands(
   treeProvider: WorktreeTreeProvider,

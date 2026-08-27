@@ -1,8 +1,7 @@
 import { git, gitOk } from '../exec';
-import { gitErrorMessage, isWorktreeDirty } from '../plumbing';
+import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
 import { integrationBranch } from './config';
-import { revParseCommit } from '../plumbing';
 import { mergeOffTree } from './merge';
 import { findStrayCommits, resolveBaseSha } from './status';
 import { snapshotWorktreeCommit } from './engine';

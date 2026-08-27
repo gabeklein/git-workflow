@@ -49,9 +49,6 @@ import {
 import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
 import { WorktreeRowDecorationProvider } from './worktreeDecorations';
 
-export type { TreeNode } from './nodes';
-export { CommitItem, FileItem, WorktreeListItem } from './nodes';
-
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
 interface WorktreeSnapshot {
