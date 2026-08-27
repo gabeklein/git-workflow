@@ -97,7 +97,12 @@ describe('absorbing stray integration work', () => {
     git(working, ['add', '-A']);
     git(working, ['commit', '--no-verify', '-qm', 'agent adds a file on integration']);
 
-    await poll('the rebuild guard trips and the file is NOT moved', 40000, () => {
+    // 60s for the same reason the poll above it is 60s: this waits on the
+    // same watcher-driven tick, so when a .git event is missed the next one
+    // comes from the 30s POLL_FALLBACK_MS. 40s left only 10s for a rebuild
+    // after the worst-case wait, which is enough on a quiet laptop and not
+    // on a loaded CI runner — where it duly failed.
+    await poll('the rebuild guard trips and the file is NOT moved', 60000, () => {
       const error = api.integration()?.error as { code?: string } | undefined;
       return (
         error?.code === 'unique' &&
