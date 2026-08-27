@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { ensureExcludedFromStatus } from '../exclude';
 import { git, GitError, gitOk } from '../exec';
 import { integrationBranch } from './config';
+import { forgetChainCache } from './engine';
 import { ensureIntegrationPushBlocked } from './lanes';
 import { resolveBaseSha } from './status';
 
@@ -120,6 +121,10 @@ export async function switchAwayFromIntegration(
  * by design. Best-effort; the branch may not exist.
  */
 export async function deleteIntegrationBranch(cwd: string): Promise<boolean> {
+  // The memoized chain tip is only reachable through this branch. Once it
+  // is gone gc may prune it, and a stale sha would be a rebuild built on
+  // an object that no longer exists.
+  forgetChainCache();
   return gitOk(cwd, ['branch', '-D', integrationBranch()]);
 }
 

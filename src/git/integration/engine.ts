@@ -128,6 +128,55 @@ async function checkedOutBranch(workingPath: string): Promise<string> {
   ).trim();
 }
 
+/**
+ * The committed chain — base plus every applied lane's tip, merged in
+ * order — memoized per checkout.
+ *
+ * A wip overlay rebuilds on every SAVE in the lane's worktree, and that
+ * used to redo the entire chain each time. Splitting wip out into a final
+ * overlay (#35) left the committed part byte-identical between those
+ * rebuilds, which is what makes caching it correct rather than merely
+ * tempting.
+ *
+ * In memory only: the first rebuild after a reload recomputes, which costs
+ * one rebuild and saves having to invalidate anything on disk.
+ */
+interface ChainCache {
+  key: string;
+  tip: string;
+  merged: string[];
+  landed: string[];
+  resolved: ResolvedLane[];
+}
+
+const chainCache = new Map<string, ChainCache>();
+
+/**
+ * Every input that can change the committed chain's tree: the base, the
+ * resolver mode (it decides how conflicts resolve), and each lane's tip in
+ * ORDER — order is not incidental, it decides which lane wins.
+ */
+function chainKey(
+  baseSha: string,
+  mode: string,
+  tips: [string, string | undefined][],
+): string {
+  return [
+    baseSha,
+    mode,
+    ...tips.map(([lane, sha]) => `${lane}@${sha ?? 'gone'}`),
+  ].join('\n');
+}
+
+/** Drop the memo for a checkout — its objects may no longer be reachable. */
+export function forgetChainCache(workingPath?: string): void {
+  if (workingPath) {
+    chainCache.delete(workingPath);
+  } else {
+    chainCache.clear();
+  }
+}
+
 export async function rebuildIntegration(
   workingPath: string,
   baseRef: string,
@@ -240,95 +289,126 @@ export async function rebuildIntegration(
     // Compute the whole chain off-tree, then apply once
     let current = baseSha;
     const skipped: string[] = [];
-    const merged: string[] = [];
-    const landed: string[] = [];
-    const resolved: ResolvedLane[] = [];
+    let merged: string[] = [];
+    let landed: string[] = [];
+    let resolved: ResolvedLane[] = [];
+
+    const tips: [string, string | undefined][] = [];
     for (const lane of chainLanes) {
-      const laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
-      if (!laneSha) {
-        skipped.push(lane);
-        continue;
-      }
-      // Landed: merging the branch tip adds nothing (strict, precomputed).
-      // Its wip, if any, is still overlaid below — uncommitted edits have
-      // not landed anywhere, so a lane holding them is NOT retired. Doing
-      // so would unapply it, and the next rebuild would drop the overlay
-      // with the row.
-      if (landedSet.has(lane)) {
-        if (!wipLanes.has(lane)) {
-          landed.push(lane);
+      tips.push([lane, await revParseCommit(workingPath, `refs/heads/${lane}`)]);
+    }
+    const key = chainKey(baseSha, conflictResolverMode(), tips);
+    const cached = chainCache.get(workingPath);
+    // Verify the tip still exists: disabling integration deletes the
+    // branch, after which gc can prune a commit nothing references.
+    const reusable =
+      cached?.key === key &&
+      (await gitOk(workingPath, [
+        'rev-parse',
+        '-q',
+        '--verify',
+        `${cached.tip}^{commit}`,
+      ]));
+    if (cached && reusable) {
+      current = cached.tip;
+      merged = cached.merged.slice();
+      landed = cached.landed.slice();
+      resolved = cached.resolved.slice();
+    } else {
+      for (const lane of chainLanes) {
+        const laneSha = await revParseCommit(workingPath, `refs/heads/${lane}`);
+        if (!laneSha) {
+          skipped.push(lane);
+          continue;
         }
-        continue;
-      }
-      // Lane already contained in the chain (e.g. no commits yet): nothing
-      // to merge — and commit-tree would collapse duplicate parents into a
-      // non-merge commit that trips the unique guard.
-      if (
-        laneSha === current ||
-        (await gitOk(workingPath, [
-          'merge-base',
-          '--is-ancestor',
-          laneSha,
-          current,
-        ]))
-      ) {
-        merged.push(lane);
-        continue;
-      }
-      const result = await mergeOffTree(workingPath, current, laneSha);
-      if (result.kind === 'unsupported') {
-        return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
-      }
-      let mergedTree: string;
-      if (result.kind === 'conflict') {
-        // Petty-conflict resolver: lossless rules first (union of
-        // insert-only sides, linewise 3-way), then — in best-effort mode —
-        // lane-wins per file, reported so the UI can tag the row.
-        const mode = conflictResolverMode();
-        const resolution =
-          mode === 'none'
-            ? { unresolved: result.files }
-            : await resolveConflictedTree(
-                workingPath,
-                current,
-                laneSha,
-                result.tree,
-                result.files,
-                mode,
-              ).catch(() => ({ unresolved: result.files }));
-        if ('unresolved' in resolution) {
-          const files = resolution.unresolved.slice(0, 5).join(', ');
-          return {
-            ok: false,
-            code: 'conflict',
+        // Landed: merging the branch tip adds nothing (strict, precomputed).
+        // Its wip, if any, is still overlaid below — uncommitted edits have
+        // not landed anywhere, so a lane holding them is NOT retired. Doing
+        // so would unapply it, and the next rebuild would drop the overlay
+        // with the row.
+        if (landedSet.has(lane)) {
+          if (!wipLanes.has(lane)) {
+            landed.push(lane);
+          }
+          continue;
+        }
+        // Lane already contained in the chain (e.g. no commits yet): nothing
+        // to merge — and commit-tree would collapse duplicate parents into a
+        // non-merge commit that trips the unique guard.
+        if (
+          laneSha === current ||
+          (await gitOk(workingPath, [
+            'merge-base',
+            '--is-ancestor',
+            laneSha,
+            current,
+          ]))
+        ) {
+          merged.push(lane);
+          continue;
+        }
+        const result = await mergeOffTree(workingPath, current, laneSha);
+        if (result.kind === 'unsupported') {
+          return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
+        }
+        let mergedTree: string;
+        if (result.kind === 'conflict') {
+          // Petty-conflict resolver: lossless rules first (union of
+          // insert-only sides, linewise 3-way), then — in best-effort mode —
+          // lane-wins per file, reported so the UI can tag the row.
+          const mode = conflictResolverMode();
+          const resolution =
+            mode === 'none'
+              ? { unresolved: result.files }
+              : await resolveConflictedTree(
+                  workingPath,
+                  current,
+                  laneSha,
+                  result.tree,
+                  result.files,
+                  mode,
+                ).catch(() => ({ unresolved: result.files }));
+          if ('unresolved' in resolution) {
+            const files = resolution.unresolved.slice(0, 5).join(', ');
+            return {
+              ok: false,
+              code: 'conflict',
+              lane,
+              message: `lane ${lane} conflicts${files ? `: ${files}` : ''}${
+                resolution.unresolved.length > 5 ? ', …' : ''
+              } (checkout untouched)`,
+            };
+          }
+          mergedTree = resolution.tree;
+          resolved.push({
             lane,
-            message: `lane ${lane} conflicts${files ? `: ${files}` : ''}${
-              resolution.unresolved.length > 5 ? ', …' : ''
-            } (checkout untouched)`,
-          };
+            lossless: resolution.lossless,
+            lossy: resolution.lossy,
+          });
+        } else {
+          mergedTree = result.tree;
         }
-        mergedTree = resolution.tree;
-        resolved.push({
-          lane,
-          lossless: resolution.lossless,
-          lossy: resolution.lossy,
-        });
-      } else {
-        mergedTree = result.tree;
+        current = (
+          await git(workingPath, [
+            'commit-tree',
+            mergedTree,
+            '-p',
+            current,
+            '-p',
+            laneSha,
+            '-m',
+            `${integrationBranch()}: ${lane}`,
+          ])
+        ).trim();
+        merged.push(lane);
       }
-      current = (
-        await git(workingPath, [
-          'commit-tree',
-          mergedTree,
-          '-p',
-          current,
-          '-p',
-          laneSha,
-          '-m',
-          `${integrationBranch()}: ${lane}`,
-        ])
-      ).trim();
-      merged.push(lane);
+      chainCache.set(workingPath, {
+        key,
+        tip: current,
+        merged: merged.slice(),
+        landed: landed.slice(),
+        resolved: resolved.slice(),
+      });
     }
 
     // Wip overlay, LAST and on top of the finished chain.
