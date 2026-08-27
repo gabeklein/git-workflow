@@ -64,6 +64,54 @@ export async function addAppliedLane(cwd: string, lane: string): Promise<void> {
   }
 }
 
+/**
+ * Move `lane` so it merges immediately before `before` — or last, when
+ * `before` is undefined.
+ *
+ * Order is what decides conflict outcomes: union inserts land in merge
+ * order, and best-effort resolves same-line clashes toward the incoming
+ * lane. So "which lane wins" is a thing the user is entitled to state
+ * directly, and this is how dragging a row states it.
+ *
+ * Taken under the rebuild lock. The file is shared with the shell script
+ * and rewritten by rebuilds retiring landed lanes, so a reorder that read
+ * and wrote unlocked could silently drop a lane that was retired in
+ * between. Re-read inside the lock for the same reason.
+ */
+export async function reorderAppliedLane(
+  cwd: string,
+  lane: string,
+  before?: string,
+): Promise<boolean> {
+  const lock = path.join(await commonDir(cwd), LOCK_DIR);
+  try {
+    await fs.mkdir(lock);
+  } catch {
+    return false; // a rebuild owns the file right now
+  }
+  try {
+    const lanes = await readLaneFile(cwd, APPLIED_FILE);
+    if (!lanes.includes(lane) || lane === before) {
+      return false;
+    }
+    const without = lanes.filter((l) => l !== lane);
+    const at = before ? without.indexOf(before) : -1;
+    // A target that vanished (retired while the drag was in flight) means
+    // "put it last" rather than an error nobody can act on.
+    const next =
+      at < 0
+        ? [...without, lane]
+        : [...without.slice(0, at), lane, ...without.slice(at)];
+    if (next.length === lanes.length && next.every((l, i) => l === lanes[i])) {
+      return false; // no move
+    }
+    await writeLaneFile(cwd, APPLIED_FILE, next, { ordered: true });
+    return true;
+  } finally {
+    await fs.rmdir(lock).catch(() => {});
+  }
+}
+
 export async function dropAppliedLane(
   cwd: string,
   lane: string,

@@ -40,6 +40,7 @@ import {
   isLaneBranch,
   laneNeverDiverged,
   listAppliedLanes,
+  reorderAppliedLane,
   dropExcludedLane,
   listCandidateLanes,
   listExcludedLanes,
@@ -956,6 +957,33 @@ export class IntegrationController implements vscode.Disposable {
       );
     }
     return result;
+  }
+
+  /**
+   * Move a lane in the merge order, then rebuild so the preview reflects
+   * it. A rebuild holding the lock means the reorder did not happen — the
+   * tick that follows it will render the order that actually exists, so
+   * there is nothing to reconcile.
+   */
+  async reorderLane(lane: string, before?: string): Promise<void> {
+    if (!this.integrationPath) {
+      return;
+    }
+    const moved = await reorderAppliedLane(
+      this.integrationPath,
+      lane,
+      before,
+    ).catch(() => false);
+    if (!moved) {
+      this.host.fireTreeData();
+      return;
+    }
+    this.host.output.appendLine(
+      `Lane ${lane} moved ${before ? `before ${before}` : 'last'}`,
+    );
+    await this.refreshState();
+    await this.runRebuild('lane order changed');
+    this.host.fireTreeData();
   }
 
   /** Absorb stray commits the user explicitly approved, then rebuild. */
