@@ -477,13 +477,14 @@ export async function absorbStrayCommits(
 export async function absorbDirtyEdits(
   integrationPath: string,
   targetPath: string,
+  previewBranch = integrationBranch(),
 ): Promise<AbsorbResult> {
   if (!(await isWorktreeDirty(integrationPath))) {
     return { ok: false, code: 'nothing', message: 'nothing to absorb' };
   }
   let snapshot: string | undefined;
   try {
-    snapshot = await snapshotWorktreeCommit(integrationPath, integrationBranch());
+    snapshot = await snapshotWorktreeCommit(integrationPath, previewBranch);
   } catch (err) {
     return { ok: false, code: 'error', message: gitErrorMessage(err) };
   }

@@ -373,6 +373,7 @@ export async function integrationFingerprint(
 export async function findStrayCommits(
   cwd: string,
   baseSha: string,
+  previewBranch = integrationBranch(),
 ): Promise<{ sha: string; subject: string }[]> {
   const out = await git(cwd, [
     'log',
@@ -385,9 +386,9 @@ export async function findStrayCommits(
     baseSha,
     // Belt for a diverged/force-pushed base: anything still on a branch or
     // remote is not lost. (--exclude expires per glob.)
-    `--exclude=${integrationBranch()}`,
+    `--exclude=${previewBranch}`,
     '--branches',
-    `--exclude=*/${integrationBranch()}`,
+    `--exclude=*/${previewBranch}`,
     '--remotes',
   ]).catch(() => '');
   return out

@@ -219,8 +219,10 @@ export async function pruneDeadLanes(cwd: string): Promise<string[]> {
  * so it covers every terminal/agent in the clone, not just the extension.
  */
 
-export async function ensureIntegrationPushBlocked(cwd: string): Promise<void> {
-  const branch = integrationBranch();
+export async function ensureIntegrationPushBlocked(
+  cwd: string,
+  branch = integrationBranch(),
+): Promise<void> {
   const key = `branch.${branch}.pushRemote`;
   let current = '';
   try {

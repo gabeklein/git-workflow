@@ -11,8 +11,8 @@ export async function createIntegrationWorktree(
   repoCwd: string,
   destDir: string,
   baseRef: string,
+  branch = integrationBranch(),
 ): Promise<void> {
-  const branch = integrationBranch();
   await fs.mkdir(path.dirname(destDir), { recursive: true });
   // Repo-local ignore before creation, so status never flashes dirty
   await ensureExcludedFromStatus(destDir).catch(() => undefined);
@@ -47,8 +47,8 @@ export async function currentBranch(cwd: string): Promise<string | undefined> {
 export async function switchToIntegrationBranch(
   checkoutPath: string,
   baseRef: string,
+  branch = integrationBranch(),
 ): Promise<string | undefined> {
-  const branch = integrationBranch();
   const previous = await currentBranch(checkoutPath);
   if (
     await gitOk(checkoutPath, ['rev-parse', '--verify', `refs/heads/${branch}`])
@@ -84,6 +84,7 @@ export async function switchAwayFromIntegration(
   checkoutPath: string,
   returnBranch: string | undefined,
   baseRef: string,
+  previewBranch = integrationBranch(),
 ): Promise<string> {
   if (await gitOk(checkoutPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD'])) {
     await git(checkoutPath, ['merge', '--abort']).catch(() => {});
@@ -91,7 +92,7 @@ export async function switchAwayFromIntegration(
   await git(checkoutPath, ['reset', '--hard']);
   const fallback = baseRef.replace(/^origin\//, '');
   for (const target of [returnBranch, fallback]) {
-    if (!target || target === integrationBranch()) {
+    if (!target || target === previewBranch) {
       continue;
     }
     if (
@@ -120,12 +121,15 @@ export async function switchAwayFromIntegration(
  * Force-delete: the chain's merge commits are reachable from nothing else
  * by design. Best-effort; the branch may not exist.
  */
-export async function deleteIntegrationBranch(cwd: string): Promise<boolean> {
+export async function deleteIntegrationBranch(
+  cwd: string,
+  branch = integrationBranch(),
+): Promise<boolean> {
   // The memoized chain tip is only reachable through this branch. Once it
   // is gone gc may prune it, and a stale sha would be a rebuild built on
   // an object that no longer exists.
   forgetChainCache();
-  return gitOk(cwd, ['branch', '-D', integrationBranch()]);
+  return gitOk(cwd, ['branch', '-D', branch]);
 }
 
 /**
@@ -136,8 +140,8 @@ export async function deleteIntegrationBranch(cwd: string): Promise<boolean> {
  */
 export async function alignIntegrationBranchName(
   checkoutPath: string,
+  target = integrationBranch(),
 ): Promise<{ from: string; to: string } | undefined> {
-  const target = integrationBranch();
   const current = await currentBranch(checkoutPath);
   if (!current || current === target) {
     return undefined;

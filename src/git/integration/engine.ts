@@ -3,10 +3,11 @@ import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
+import type { Integration } from './identity';
 import {
   autoResolveArgs,
   conflictResolverMode,
-  integrationBranch,
+  currentIntegration,
   WIP_SUBJECT,
 } from './config';
 import {
@@ -180,7 +181,11 @@ export function forgetChainCache(workingPath?: string): void {
 export async function rebuildIntegration(
   workingPath: string,
   baseRef: string,
+  /** Which preview this is. Defaults to the configured one; pass it
+   *  explicitly and the engine never consults the workspace setting. */
+  integration: Integration = currentIntegration(),
 ): Promise<RebuildResult> {
+  const previewBranch = integration.branch;
   const common = await commonDir(workingPath);
   const lock = path.join(common, LOCK_DIR);
   try {
@@ -349,7 +354,13 @@ export async function rebuildIntegration(
         }
         const result = await mergeOffTree(workingPath, current, laneSha);
         if (result.kind === 'unsupported') {
-          return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
+          return rebuildInWorktree(
+          workingPath,
+          baseSha,
+          lanes,
+          landedSet,
+          previewBranch,
+        );
         }
         let mergedTree: string;
         if (result.kind === 'conflict') {
@@ -397,7 +408,7 @@ export async function rebuildIntegration(
             '-p',
             laneSha,
             '-m',
-            `${integrationBranch()}: ${lane}`,
+            `${previewBranch}: ${lane}`,
           ])
         ).trim();
         merged.push(lane);
@@ -446,7 +457,13 @@ export async function rebuildIntegration(
         mergeBase: laneSha,
       });
       if (result.kind === 'unsupported') {
-        return rebuildInWorktree(workingPath, baseSha, lanes, landedSet);
+        return rebuildInWorktree(
+          workingPath,
+          baseSha,
+          lanes,
+          landedSet,
+          previewBranch,
+        );
       }
       let overlayTree: string;
       if (result.kind === 'conflict') {
@@ -494,7 +511,7 @@ export async function rebuildIntegration(
           '-p',
           snapshot,
           '-m',
-          `${integrationBranch()}: ${lane} (wip)`,
+          `${previewBranch}: ${lane} (wip)`,
         ])
       ).trim();
       if (!merged.includes(lane)) {
@@ -518,13 +535,13 @@ export async function rebuildIntegration(
     // here rather than on entry is deliberate — the checkout can be switched
     // away at any point while the chain is being computed.
     const branchNow = await checkedOutBranch(workingPath);
-    if (branchNow !== integrationBranch()) {
+    if (branchNow !== previewBranch) {
       return {
         ok: false,
         code: 'moved',
         message: `${workingPath} is on ${
           branchNow || 'a detached HEAD'
-        }, not ${integrationBranch()} — refusing to reset it`,
+        }, not ${previewBranch} — refusing to reset it`,
       };
     }
 
@@ -546,16 +563,17 @@ async function rebuildInWorktree(
   baseSha: string,
   lanes: string[],
   landedSet: Set<string>,
+  previewBranch: string,
 ): Promise<RebuildResult> {
   // Same hazard, and this path resets before doing anything else
   const branchNow = await checkedOutBranch(workingPath);
-  if (branchNow !== integrationBranch()) {
+  if (branchNow !== previewBranch) {
     return {
       ok: false,
       code: 'moved',
       message: `${workingPath} is on ${
         branchNow || 'a detached HEAD'
-      }, not ${integrationBranch()} — refusing to reset it`,
+      }, not ${previewBranch} — refusing to reset it`,
     };
   }
   await git(workingPath, ['reset', '--hard', baseSha]);
@@ -584,7 +602,7 @@ async function rebuildInWorktree(
         '--no-ff',
         ...autoResolveArgs(),
         '-m',
-        `${integrationBranch()}: ${lane}`,
+        `${previewBranch}: ${lane}`,
         lane,
       ]);
       merged.push(lane);
