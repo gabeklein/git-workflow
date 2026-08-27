@@ -155,6 +155,8 @@ Manual flow, from the row's context menu:
 
 Applied integration lanes that conflict with the base are re-probed on every refresh, so the `conflict` badge and **Resolve Conflict with Base…** (which runs the base merge in the lane's own worktree — the same conflict its PR would hit) survive window reloads.
 
+**Catch Up after a squash merge.** When a lane was stacked on a branch that has since been squash-merged, the base carries that work as one new commit while the lane still carries the originals — so `base..HEAD` lists commits whose content is already landed, and replaying them conflicts against work nobody is actually disputing. Catch Up detects this by **content** (the parent branch is usually deleted by then) and rebases with `--onto`, replaying only what has not landed. The probe applies each commit's own delta to the base and asks whether anything would change — the same cherry-pick-semantics merge the absorb path uses — scanning newest-first so it finds the furthest point already in the base. A **merge** cannot skip history that way, so when this is detected the merge is refused with an explanation rather than handing over an unresolvable conflict; rebasing rewrites history, so that stays the user's call.
+
 ## Base ref inference
 
 When you expand a worktree, the compare base is resolved in order:
