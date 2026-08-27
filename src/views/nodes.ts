@@ -23,6 +23,7 @@ export type TreeNode =
   | IntegrationLaneItem
   | WorktreeListItem
   | ConflictWarningItem
+  | PreviewItem
   | CommitItem
   | SectionItem
   | FolderItem
@@ -41,6 +42,7 @@ export class GroupItem extends vscode.TreeItem {
   constructor(
     label: string,
     readonly group:
+      | 'preview'
       | 'working'
       | 'local'
       | 'remote'
@@ -57,7 +59,9 @@ export class GroupItem extends vscode.TreeItem {
     this.worktreePath = opts?.worktreePath;
     this.baseRef = opts?.baseRef;
     this.iconPath = new vscode.ThemeIcon(
-      group === 'working'
+      group === 'preview'
+        ? 'beaker'
+        : group === 'working'
         ? 'repo'
         : group === 'ahead'
           ? 'git-commit'
@@ -553,6 +557,68 @@ export class WorktreeListItem extends vscode.TreeItem {
       title: 'Focus Worktree',
       arguments: [this.worktreePath],
     };
+  }
+}
+
+/**
+ * One integration preview, as a row in Lanes.
+ *
+ * The preview used to be a whole panel, which made it look like a peer of
+ * "your branches" when it is really one derived branch built from some of
+ * them. As a row it sits in the same tree as its lanes, which is also what
+ * makes a SECOND preview cost nothing structurally: the group is a list.
+ *
+ * Its children are the lanes; everything the panel's title menu used to
+ * carry (Rebuild, Change Base, Disable, Absorb) moves to this row's
+ * context menu.
+ */
+export class PreviewItem extends vscode.TreeItem {
+  readonly kind = 'preview' as const;
+
+  constructor(
+    readonly branch: string,
+    readonly baseRef: string,
+    opts: {
+      laneCount: number;
+      wip: boolean;
+      error?: { code?: string; message: string };
+      mergePaused?: boolean;
+    },
+  ) {
+    super(branch, vscode.TreeItemCollapsibleState.Expanded);
+    const flags = [
+      opts.error?.code === 'dirty' ? 'Dirty' : '',
+      opts.mergePaused ? 'MergePaused' : '',
+    ].join('');
+    this.contextValue = `preview${flags}`;
+    const bits = [`→ ${baseRef.replace(/^origin\//, '')}`];
+    bits.push(
+      opts.laneCount === 1 ? '1 lane' : `${opts.laneCount} lanes`,
+    );
+    if (opts.wip) {
+      bits.push('+wip');
+    }
+    // The failure states earn their place ahead of nothing else — a preview
+    // that did not build is the only thing about it worth reading.
+    if (opts.error?.code === 'conflict') {
+      bits.push('lane conflict');
+    } else if (opts.error) {
+      bits.push('rebuild failed');
+    }
+    this.description = bits.join(' · ');
+    this.iconPath = new vscode.ThemeIcon(
+      'beaker',
+      opts.error
+        ? new vscode.ThemeColor('charts.red')
+        : new vscode.ThemeColor('charts.purple'),
+    );
+    this.tooltip = [
+      `${branch} — a preview of ${baseRef} with its applied lanes merged in`,
+      opts.error?.message,
+      'Derived state: every rebuild recreates it, so nothing should be committed here.',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 }
 

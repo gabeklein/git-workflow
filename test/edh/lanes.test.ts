@@ -16,14 +16,15 @@ describe('focus panel', () => {
   const labels = async (group?: 'working' | 'local' | 'remote' | 'landed') =>
     (await api.focusRows(group)).map((r) => r.label);
 
-  it('offers Working and Local, in order, and nothing loose', async () => {
-    await poll('focus panel renders its groups', 30000, async () => {
+  it('offers Preview, Working and Local, in order, and nothing loose', async () => {
+    await poll('lanes panel renders its groups', 30000, async () => {
       await run('worktreeCompare.refresh');
-      return (await api.focusRows()).length >= 2;
+      return (await api.focusRows()).length >= 3;
     });
     const rows = await api.focusRows();
     const groups = rows.filter((r) => r.kind === 'group').map((r) => r.group);
-    assert.deepEqual(groups.slice(0, 2), ['working', 'local']);
+    // Preview leads: it is what the lanes below are combined INTO.
+    assert.deepEqual(groups.slice(0, 3), ['preview', 'working', 'local']);
     assert.ok(
       rows.every((r) => r.kind === 'group'),
       'the root is groups only — every row lives in a section',

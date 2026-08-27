@@ -51,14 +51,21 @@ export interface TestApi {
       contextValue?: string;
     }[]
   >;
-  /** The RENDERED Integration panel rows (what VS Code actually paints). */
-  integrationRows(): {
-    kind?: string;
-    label: string;
-    description: string;
-    contextValue?: string;
-    checkbox?: boolean;
-  }[];
+  /**
+   * The RENDERED lane rows under Preview (what VS Code actually paints).
+   * Async now: they are read through the Lanes tree, group → preview → lanes,
+   * so a preview that stopped rendering fails here instead of passing on a
+   * provider nothing draws.
+   */
+  integrationRows(): Promise<
+    {
+      kind?: string;
+      label: string;
+      description: string;
+      contextValue?: string;
+      checkbox?: boolean;
+    }[]
+  >;
   selectedPath(): string | undefined;
   worktrees(): { path: string; branch: string }[];
   baseStatus(worktreePath: string): {

@@ -207,19 +207,9 @@
         {
           "id": "worktreeCompare.focused",
           "name": "Focus"
-        },
-        {
-          "id": "worktreeCompare.integration",
-          "name": "Integration"
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "worktreeCompare.integration",
-        "contents": "Integration mode is off.\nCombine feature branches onto a base \u2014 without touching the branches.\n[Enable Integration Mode](command:worktreeCompare.enableIntegration)"
-      }
-    ],
     "commands": [
       {
         "command": "worktreeCompare.refresh",
@@ -519,31 +509,6 @@
           "command": "worktreeCompare.refresh",
           "when": "view == worktreeCompare.lanes",
           "group": "navigation@4"
-        },
-        {
-          "command": "worktreeCompare.rebuildIntegration",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
-          "group": "navigation@1"
-        },
-        {
-          "command": "worktreeCompare.changeIntegrationBase",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
-          "group": "1_config@1"
-        },
-        {
-          "command": "worktreeCompare.abortIntegrationMerge",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationMergePaused",
-          "group": "1_config@2"
-        },
-        {
-          "command": "worktreeCompare.absorbIntegrationEdits",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationDirty",
-          "group": "1_config@3"
-        },
-        {
-          "command": "worktreeCompare.disableIntegration",
-          "when": "view == worktreeCompare.integration && worktreeCompare.integrationOn",
-          "group": "9_danger@1"
         }
       ],
       "view/item/context": [
@@ -644,52 +609,52 @@
         },
         {
           "command": "worktreeCompare.branchifyBaseDrift",
-          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
           "group": "inline@1"
         },
         {
           "command": "worktreeCompare.catchUpIntegrationBase",
-          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
           "group": "inline@2"
         },
         {
           "command": "worktreeCompare.branchifyBaseDrift",
-          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
           "group": "1_drift@1"
         },
         {
           "command": "worktreeCompare.catchUpIntegrationBase",
-          "when": "view == worktreeCompare.integration && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
           "group": "1_drift@2"
         },
         {
           "command": "worktreeCompare.resolveLaneConflict",
-          "when": "view == worktreeCompare.integration && viewItem =~ /Conflicted/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Conflicted/",
           "group": "1_resolve@1"
         },
         {
           "command": "worktreeCompare.completeMergeFromBase",
-          "when": "view == worktreeCompare.integration && viewItem =~ /Resolving/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Resolving/",
           "group": "1_resolve@1"
         },
         {
           "command": "worktreeCompare.abortMergeFromBase",
-          "when": "view == worktreeCompare.integration && viewItem =~ /Resolving/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /Resolving/",
           "group": "1_resolve@2"
         },
         {
           "command": "worktreeCompare.removeFromIntegration",
-          "when": "view == worktreeCompare.integration && viewItem =~ /^integrationLane/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^integrationLane/",
           "group": "2_integration@1"
         },
         {
           "command": "worktreeCompare.includeWipInIntegration",
-          "when": "view == worktreeCompare.integration && viewItem =~ /WipOff/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /WipOff/",
           "group": "2_integration@2"
         },
         {
           "command": "worktreeCompare.excludeWipFromIntegration",
-          "when": "view == worktreeCompare.integration && viewItem =~ /WipOn/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /WipOn/",
           "group": "2_integration@2"
         },
         {
@@ -776,6 +741,31 @@
           "command": "worktreeCompare.pruneLandedBranches",
           "when": "view == worktreeCompare.lanes && viewItem == group:landed",
           "group": "inline@1"
+        },
+        {
+          "command": "worktreeCompare.rebuildIntegration",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
+          "group": "1_preview@1"
+        },
+        {
+          "command": "worktreeCompare.changeIntegrationBase",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
+          "group": "1_preview@2"
+        },
+        {
+          "command": "worktreeCompare.abortIntegrationMerge",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
+          "group": "1_preview@3"
+        },
+        {
+          "command": "worktreeCompare.absorbIntegrationEdits",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
+          "group": "1_preview@4"
+        },
+        {
+          "command": "worktreeCompare.disableIntegration",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
+          "group": "1_preview@5"
         }
       ]
     }
