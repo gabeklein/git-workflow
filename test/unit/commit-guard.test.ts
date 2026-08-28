@@ -220,6 +220,72 @@ describe('integration commit guard', () => {
     expect(tryCommit(scratch.repo, 'stray')).toBe(false);
   });
 
+  /**
+   * An in-tree hooksPath (husky's `.husky`, a committed `.githooks`) drags
+   * our files into `git status`. Nobody should have to gitignore files they
+   * did not create, so the installer ignores them repo-locally.
+   */
+  it('keeps its in-tree files out of git status', async () => {
+    const custom = path.join(scratch.repo, '.githooks');
+    git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
+    await installCommitGuard(scratch.repo, 'integration/main');
+    expect(fs.existsSync(path.join(custom, 'pre-commit'))).toBe(true);
+    expect(git(scratch.repo, ['status', '--porcelain']).trim()).toBe('');
+
+    // and the project's own files there stay perfectly visible
+    fs.writeFileSync(path.join(custom, 'commit-msg'), '#!/bin/sh\n');
+    expect(git(scratch.repo, ['status', '--porcelain', '-uall'])).toContain(
+      '.githooks/commit-msg',
+    );
+
+    await uninstallCommitGuard(scratch.repo);
+    const exclude = fs.readFileSync(
+      path.join(scratch.repo, '.git', 'info', 'exclude'),
+      'utf8',
+    );
+    expect(exclude).not.toContain('.githooks');
+  });
+
+  /**
+   * The chain is the last line of a hook we own, so a `test && { }` that
+   * fails becomes the HOOK's exit status — every commit in the repo gets
+   * rejected, silently, because nothing printed. Inert must mean inert.
+   */
+  it('lets commits through when the guard script is missing', async () => {
+    const custom = path.join(scratch.repo, '.githooks');
+    git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
+    await installCommitGuard(scratch.repo, 'integration/main');
+    fs.rmSync(path.join(custom, 'git-workflow-integration-guard'));
+    expect(tryCommit(scratch.repo, 'on-lane')).toBe(true);
+  });
+
+  /**
+   * The guard sits beside the hook, wherever that is. Looking it up at a
+   * computed `.git/hooks` finds nothing under a custom hooksPath.
+   */
+  it('finds its guard under a custom hooksPath and actually refuses', async () => {
+    git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
+    await installCommitGuard(scratch.repo, 'integration/main');
+    expect(tryCommit(scratch.repo, 'unguarded')).toBe(true);
+    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    expect(tryCommit(scratch.repo, 'guarded')).toBe(false);
+  });
+
+  /** A hook written by an older version has to be repairable, not frozen. */
+  it('rewrites a stale chain left by an earlier install', async () => {
+    await installCommitGuard(scratch.repo, 'integration/main');
+    const stale = fs
+      .readFileSync(hook, 'utf8')
+      .replace(/^gw_guard=.*$/m, 'gw_guard="/nope"; [ -x "$gw_guard" ]');
+    fs.writeFileSync(hook, stale);
+    expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+      'updated',
+    );
+    expect(fs.readFileSync(hook, 'utf8')).not.toContain('/nope');
+    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    expect(tryCommit(scratch.repo, 'after-repair')).toBe(false);
+  });
+
   it('uninstall removes our hook and stops refusing', async () => {
     await installCommitGuard(scratch.repo, 'integration/main');
     await uninstallCommitGuard(scratch.repo);
