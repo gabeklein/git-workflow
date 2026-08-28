@@ -235,7 +235,7 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 ## Sidebar layout
 
-**Focus** comes first: it is what you work in — stage, diff, open files — while Lanes is where you re-target, which happens far less often. (View order is a default; VS Code remembers your own arrangement.)
+**Lanes** comes first, because it is the **selector**: you click a row there to choose what Focus shows. Selector above detail is the order every other pair in the sidebar uses — Explorer above Outline, repositories above changes — and it is the order you read in, since picking the lane is the step before working in it. It also keeps the preview row, the panel's most consequential state, from sitting below a Focus panel that grows with the diff. (View order is only a default; VS Code remembers your own arrangement, so an existing window keeps whatever you dragged it into.)
 
 **Lanes** panel (selector — header shows the checkout count):
 
