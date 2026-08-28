@@ -60,6 +60,7 @@ npm run install:local
 | `npm run package` | Production `dist/` only |
 | `npm run vsix` | Production build + `artifacts/*.vsix` |
 | `npm run install:local` | Build → VSIX → editor install → vscode-server mirror |
+| `npm run install:skill` | Installs the agent skill into `~/.claude/skills` (`-- --project [dir]` for one repo) |
 | `npm run test` | Type-check tests, then unit + EDH suites |
 | `npm run test:unit` | Vitest unit tests (`test/unit/*.test.ts`): pure-git logic against scratch repos |
 | `npm run test:edh` | Live EDH suite (`test/edh/*.test.ts`, mocha): sample repo + real VS Code, drives integration commands |
@@ -82,6 +83,36 @@ npm run vsix
 code --install-extension ./artifacts/git-workflow-0.0.1.vsix --force
 # Reload window
 ```
+
+## Agent skill
+
+The rules this extension enforces are not discoverable from the code an agent is
+looking at — a derived branch it must not commit to, lane files it must not
+hand-edit, a headless opt-in it would never guess. They live in
+[`skills/git-workflow/SKILL.md`](skills/git-workflow/SKILL.md), written to be
+read by an agent and self-checking: it opens by establishing how much of itself
+applies, and says plainly to stop reading in a repo that has no worktrees.
+
+**The intended way it spreads is the commit guard.** When the hook refuses a
+commit on the integration branch, the refusal names the skill's URL — that is
+the one moment an agent that does not know this workflow is guaranteed to be
+listening, and it is what stops the message's own `--no-verify` line from being
+the easiest thing to act on. No install command is issued and no tool's config
+path appears in a git hook: the agent fetches a document and decides where its
+own skills live.
+
+Caveat worth knowing: the hook only exists while integration is on. With
+integration off there is no refusal, so nothing nudges — a repo that wants the
+rules regardless should reference the file from its own agent instructions. This
+one does: [`CLAUDE.md`](CLAUDE.md) is a single `@AGENTS.md`, and
+[`AGENTS.md`](AGENTS.md) imports the skill, so it loads before the first edit
+rather than after the first mistake.
+
+`npm run install:skill` copies it to `~/.claude/skills/git-workflow` (or
+`-- --project [dir]` for one repo). That is a convenience for people who have
+already cloned this repo to work on it — nobody clones an extension to install a
+skill, and it is deliberately not part of `install:local`, since writing into
+`~/.claude` is a different decision from installing an extension.
 
 ## Develop (fast iteration)
 

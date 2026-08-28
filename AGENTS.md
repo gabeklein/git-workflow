@@ -1,5 +1,36 @@
 # Agent instructions — git-workflow
 
+This repo develops the Git Workflow extension **and uses it**: there are linked
+worktrees under `.worktrees/`, integration mode may be on, and a `pre-commit`
+hook will refuse a commit made on the derived integration branch. The rules are
+not hypothetical here, so they are imported rather than linked — read them
+before your first edit, not at commit time:
+
+@skills/git-workflow/SKILL.md
+
+The three that cost the most to learn by accident: pick the worktree **before
+you write** (writing into the root checkout moves the base branch every other
+lane is measured against), never commit on the integration branch and never
+`--no-verify` past the guard, and never hand-edit `focus-*` — use `gw-lane`.
+
+## Shipping a feature
+
+A feature is not finished when it works. This extension is increasingly used by
+agents that will never read its source, so shipping one means asking what an
+agent must know to use it, and putting that where it will be found rather than
+where it is easy to write:
+
+- the **skill** (`skills/git-workflow/SKILL.md`) for a rule an agent must
+  follow in any repo;
+- a **refusal or error message** for a rule it will only meet by breaking it —
+  the commit guard is the model: it names the exits, including where to learn
+  the workflow;
+- **README.md** for what the extension does;
+- **AGENTS.md** (here) for what is true only when working *on* the extension.
+
+A change to workflow behavior that updates none of these is unfinished, and it
+is the recurring way features land without being adopted.
+
 ## Testing policy
 
 Every behavior change lands with tests in the same PR. A bug fix adds the
@@ -98,6 +129,17 @@ To opt in, once the work is worth previewing:
 
 Inside the editor the same thing is **Git Workflow: Add to Integration**
 (`worktreeCompare.addToIntegration`).
+
+The full rules are the skill in
+[`skills/git-workflow`](skills/git-workflow/SKILL.md) — **load it before your
+first edit**, not at commit time, since by then the work is already in whatever
+checkout you were standing in. It is the same document the commit guard points
+other repos at, and it self-checks which of its rules apply. This repo is
+usually at its top tier: worktrees under `.worktrees/`, integration sometimes
+on, the guard installed.
+
+When the workflow changes, the skill changes with it — it is what agents in
+other repos will be reading, and a stale copy is worse than none.
 
 Leave it out when the branch is mid-refactor, deliberately broken, or
 exploring something that would clash with other lanes. Being out costs
