@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git } from '../exec';
+import { excludeManagedFiles, unexcludeManagedFiles } from '../exclude';
 import { commonDir } from './lanes';
 
 /**
@@ -38,12 +39,21 @@ const GUARD_SCRIPT = 'git-workflow-integration-guard';
 const SENTINEL = '# git-workflow: integration commit guard';
 
 /**
- * The two lines chained into someone else's hook. Deliberately inert when
- * anything is missing: a repo where the guard script was deleted by hand
- * must still be able to commit, not fail every commit on a dangling call.
+ * The two lines chained into someone else's hook.
+ *
+ * The guard is looked up NEXT TO THE HOOK ITSELF (`dirname $0`) rather than
+ * at a computed `.git/hooks` — the two are the same directory only when
+ * core.hooksPath is unset, and guessing wrong means the chain never finds
+ * the guard it just installed.
+ *
+ * `if/fi` rather than `test && { }`, because the chain is the last line of
+ * a hook we own: a trailing `&&` whose test fails IS the hook's exit
+ * status, so a missing guard would reject every commit in the repo — the
+ * exact opposite of the intent, and silently, since nothing prints. This
+ * has to be inert when anything is missing, not fatal.
  */
 const CHAIN = `${SENTINEL} (remove these 2 lines to stop guarding)
-gw_guard="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/${GUARD_SCRIPT}"; [ -x "$gw_guard" ] && { "$gw_guard" || exit $?; }`;
+gw_guard="$(dirname "$0")/${GUARD_SCRIPT}"; if [ -x "$gw_guard" ]; then "$gw_guard" || exit $?; fi`;
 
 type GuardState = 'ours' | 'chained' | 'foreign' | 'none';
 type GuardInstall =
@@ -108,6 +118,9 @@ async function read(file: string): Promise<string | undefined> {
  * wins over the common dir — writing to `.git/hooks` in a repo that sets it
  * would install a guard git never runs, which is worse than not installing
  * one at all, because it looks installed.
+ *
+ * The cost is that hooksPath can point INSIDE the working tree, where our
+ * files show up as untracked — hence the excludeManagedFiles calls below.
  */
 async function hooksDir(cwd: string): Promise<string> {
   const configured = await git(cwd, ['config', '--get', 'core.hooksPath'])
@@ -137,12 +150,37 @@ function inject(hook: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Our block inside a hook, found by SENTINEL rather than by exact text —
+ * a hook written by an OLDER version has a different second line, and it
+ * still has to be findable to be repaired or removed.
+ */
+function locateChain(hook: string): number {
+  return hook.split('\n').findIndex((l) => l.startsWith(SENTINEL));
+}
+
 function strip(hook: string): string {
-  const [marker] = CHAIN.split('\n');
   const lines = hook.split('\n');
-  const at = lines.findIndex((l) => l === marker);
+  const at = locateChain(hook);
   if (at < 0) return hook;
   lines.splice(at, CHAIN.split('\n').length);
+  return lines.join('\n');
+}
+
+/**
+ * Bring an older CHAIN up to date in place, or undefined if it already is.
+ *
+ * Without this, a hook carrying a superseded chain classifies as 'chained'
+ * and is never rewritten — so a repo that installed the guard before a fix
+ * keeps the broken line forever.
+ */
+function refresh(hook: string): string | undefined {
+  const at = locateChain(hook);
+  if (at < 0) return undefined;
+  const block = CHAIN.split('\n');
+  const lines = hook.split('\n');
+  if (lines.slice(at, at + block.length).join('\n') === CHAIN) return undefined;
+  lines.splice(at, block.length, ...block);
   return lines.join('\n');
 }
 
@@ -181,24 +219,51 @@ export async function installCommitGuard(
   const settled =
     state !== 'none' &&
     state !== 'foreign' &&
+    refresh(existing ?? '') === undefined &&
     (await read(guard)) === REFUSAL &&
     (await read(marker))?.trim() === branch;
-  if (settled) return 'unchanged';
+  if (settled) {
+    // Still reconcile the ignore lines: a guard installed before this
+    // existed is 'settled' but unignored.
+    await excludeManagedFiles(state === 'ours' ? [guard, hook] : [guard]);
+    return 'unchanged';
+  }
 
   await fs.writeFile(marker, `${branch}\n`);
   await fs.writeFile(guard, REFUSAL, { mode: 0o755 });
   // writeFile does not chmod a file that already existed
   await fs.chmod(guard, 0o755);
 
-  if (state === 'chained') return 'updated';
+  // Ignore only what we wrote: a hook that was already there is the
+  // project's file even when we chained into it.
+  const ours = [guard];
+
+  if (state === 'chained') {
+    const repaired = refresh(existing ?? '');
+    if (repaired !== undefined) {
+      await fs.writeFile(hook, repaired);
+      await fs.chmod(hook, 0o755);
+    }
+    // A hook of ours from an older version reads as 'chained' until it is
+    // repaired — once it matches OWN_HOOK again it is ours to ignore.
+    await excludeManagedFiles(
+      (repaired ?? existing) === OWN_HOOK ? [...ours, hook] : ours,
+    );
+    return 'updated';
+  }
   if (state === 'foreign') {
     await fs.writeFile(hook, inject(existing ?? ''));
     await fs.chmod(hook, 0o755);
+    await excludeManagedFiles(ours);
     return 'chained';
   }
-  if (state === 'ours') return 'updated';
+  if (state === 'ours') {
+    await excludeManagedFiles([...ours, hook]);
+    return 'updated';
+  }
   await fs.writeFile(hook, OWN_HOOK, { mode: 0o755 });
   await fs.chmod(hook, 0o755);
+  await excludeManagedFiles([...ours, hook]);
   return 'installed';
 }
 
@@ -219,6 +284,7 @@ export async function uninstallCommitGuard(cwd: string): Promise<void> {
     await fs.writeFile(hook, strip(existing ?? ''));
   }
   await fs.rm(path.join(dir, GUARD_SCRIPT), { force: true });
+  await unexcludeManagedFiles([path.join(dir, GUARD_SCRIPT), hook]);
 }
 
 /** The branch the installed guard is currently refusing commits on, if any. */
