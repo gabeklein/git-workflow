@@ -1,7 +1,17 @@
 import * as vscode from 'vscode';
 import { listBranches, type BranchInfo } from '../git/branches';
 import type { FileChange } from '../git/compare';
-import { previewBaseRef, previewBranch } from '../git/preview';
+import {
+  isAutoRemoveLandedEnabled,
+  isPruneRemoteRefsEnabled,
+  previewBaseRef,
+  previewBranch,
+} from '../git/preview';
+import { hasOrigin, pruneTrackingRefs } from '../git/remotePrune';
+import {
+  sweepLandedWorktrees,
+  type LandedBlocker,
+} from '../git/landedWorktrees';
 import { findLandedBranches } from '../git/pruneLanded';
 import {
   isGithubPrIntegrationEnabled,
@@ -14,9 +24,15 @@ import {
 } from '../github/remotePrs';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { MessageItem, type TreeNode } from './nodes';
+import { isPathInside } from './paths';
 import { BranchItem, RemotePrFileItem } from './nodes/branches';
 
 const MAX_ROWS = 50;
+/**
+ * Least time between remote prunes. A refresh is cheap and can fire in
+ * bursts; asking origin what it still has is neither.
+ */
+const PRUNE_THROTTLE_MS = 60_000;
 
 /**
  * Branches panel: every branch of the repo — local, remote, and PR-only
@@ -44,7 +60,20 @@ export class BranchesTreeProvider
    * list changes and far too expensive to run while drawing rows.
    */
   private landed = new Set<string>();
+  /**
+   * Landed branches whose checkout is STILL ON DISK, by checkout path,
+   * with the reason the sweep left it there. Drives the `landed · …` badge
+   * on the Working row — the thing that makes reclaimable disk visible.
+   */
+  private landedCheckouts = new Map<
+    string,
+    { branch: string; blocker: LandedBlocker }
+  >();
+  /** Guard: one sweep at a time, since a removal re-enters through .git. */
+  private sweeping = false;
+  private lastPruneAt = 0;
   private prsByHead = new Map<string, RemotePullRequest>();
+  private worktrees: DiscoveredWorktree[] = [];
   private worktreeByBranch = new Map<string, string>();
   private loading = false;
   private error: string | undefined;
@@ -76,10 +105,25 @@ export class BranchesTreeProvider
 
   /** Sync from discovery so rows show/focus their worktrees. */
   setWorktrees(worktrees: DiscoveredWorktree[]): void {
+    this.worktrees = worktrees;
     this.worktreeByBranch = new Map(
       worktrees.filter((w) => !w.detached).map((w) => [w.branch, w.path]),
     );
     this._onDidChangeTreeData.fire();
+    // A checkout may have just appeared, or become clean, without the
+    // branch list changing at all — so the sweep runs on discovery too and
+    // not only when the landed answer moves.
+    void this.sweepLanded();
+  }
+
+  /**
+   * The landed checkout at `path`, if its folder is still there. Undefined
+   * for an ordinary checkout, which is every row that has work left in it.
+   */
+  getLandedCheckout(
+    path: string,
+  ): { branch: string; blocker: LandedBlocker } | undefined {
+    return this.landedCheckouts.get(path);
   }
 
   /** Branch list as loaded, newest first (for-each-ref --sort=-committerdate). */
@@ -117,6 +161,7 @@ export class BranchesTreeProvider
   refresh(): void {
     void this.loadBranches();
     void this.loadPrs();
+    void this.prunePhantomRemotes();
   }
 
   /** Cheap git-only reload — called on .git activity. */
@@ -296,9 +341,76 @@ export class BranchesTreeProvider
         this.landed = next;
         this._onDidChangeTreeData.fire();
       }
+      // Even when the set is unchanged: a checkout that was dirty last tick
+      // may be clean now, and the badge has to follow.
+      void this.sweepLanded();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Landed scan failed: ${message}`);
+    }
+  }
+
+  /**
+   * Drop remote-tracking refs for branches origin no longer has.
+   *
+   * On the full refresh only — it is the one that already goes to the
+   * network for PRs — and throttled, because a refresh can fire several
+   * times in a row while nothing about the remote has changed.
+   */
+  private async prunePhantomRemotes(): Promise<void> {
+    const cwd = this.getRepoCwd();
+    if (!cwd || !isPruneRemoteRefsEnabled()) return;
+    const now = Date.now();
+    if (now - this.lastPruneAt < PRUNE_THROTTLE_MS) return;
+    this.lastPruneAt = now;
+    try {
+      if (!(await hasOrigin(cwd))) return;
+      const pruned = await pruneTrackingRefs(cwd);
+      if (pruned.length === 0) return;
+      this.output.appendLine(
+        `Pruned ${pruned.length} stale remote-tracking ref(s): ${pruned.join(', ')}`,
+      );
+      // The Remote group is built from those refs, so the rows only go
+      // away once the list is read again.
+      this.refreshLocal();
+    } catch (err) {
+      // Offline is not an event: the refs stay, the rows stay, and the next
+      // refresh tries again.
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Remote prune skipped: ${message}`);
+    }
+  }
+
+  /**
+   * Clear the checkouts of landed branches, and remember the ones that
+   * could not be cleared so their rows can say so.
+   *
+   * Runs off the landed probe rather than on a timer: a checkout becomes
+   * reclaimable at the moment its branch is confirmed in the base, and
+   * that answer already arrives here.
+   */
+  private async sweepLanded(): Promise<void> {
+    if (this.sweeping || this.landed.size === 0) return;
+    this.sweeping = true;
+    try {
+      const before = describeBlocked(this.landedCheckouts);
+      const result = await sweepLandedWorktrees(this.worktrees, this.landed, {
+        remove: isAutoRemoveLandedEnabled(),
+        // The one non-git fact: a folder somebody has a file open from is
+        // not idle, whatever git says about it.
+        isOpen: (dir) => hasOpenEditorIn(dir),
+        log: (line) => this.output.appendLine(line),
+      });
+      this.landedCheckouts = result.blocked;
+      // Removals reach discovery through the .git watcher; only the badge
+      // set is ours to announce.
+      if (describeBlocked(result.blocked) !== before)
+        this._onDidChangeTreeData.fire();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.output.appendLine(`Landed checkout sweep failed: ${message}`);
+    } finally {
+      this.sweeping = false;
     }
   }
 
@@ -308,4 +420,25 @@ export class BranchesTreeProvider
     }
     this._onDidChangeTreeData.dispose();
   }
+}
+
+/** Stable summary of the badge set, to fire the event only on a change. */
+function describeBlocked(
+  blocked: ReadonlyMap<string, { branch: string; blocker: LandedBlocker }>,
+): string {
+  return [...blocked.entries()]
+    .map(([p, b]) => `${p}\0${b.blocker}`)
+    .sort()
+    .join('\n');
+}
+
+/** Is any open editor showing a file inside `dir`? */
+function hasOpenEditorIn(dir: string): boolean {
+  return vscode.window.tabGroups.all.some((group) =>
+    group.tabs.some((tab) => {
+      const input = tab.input as { uri?: vscode.Uri } | undefined;
+      const fsPath = input?.uri?.fsPath;
+      return Boolean(fsPath && isPathInside(fsPath, dir));
+    }),
+  );
 }

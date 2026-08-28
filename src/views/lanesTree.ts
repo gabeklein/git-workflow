@@ -63,7 +63,12 @@ export class LanesTreeProvider
       switch (element.group) {
         case 'working':
           return plan.working.length > 0
-            ? plan.working.map((wt) => this.worktrees.buildCheckoutRow(wt))
+            ? plan.working.map((wt) =>
+                this.worktrees.buildCheckoutRow(
+                  wt,
+                  this.branches.getLandedCheckout(wt.path),
+                ),
+              )
             : [new MessageItem('No checkouts')];
         case 'landed':
           return this.landedRows(cwd, plan.landed);
@@ -227,27 +232,26 @@ export class LanesTreeProvider
   }
 
   /**
-   * Landed rows. A landed branch that still has a checkout renders as the
-   * checkout — so the folder is visible and removable — while one that is
-   * only a ref renders as a branch. Either way the row is the handle for
-   * getting rid of it.
+   * Landed rows: refs whose work is in the base and which have no checkout
+   * left. A landed branch that still has a folder is a Working row instead
+   * — badged with why the folder is still there — because "there is disk to
+   * reclaim" is the fact this used to hide.
    */
   private landedRows(cwd: string, landed: LandedLane[]): TreeNode[] {
     if (landed.length === 0) return [new MessageItem('None')];
-    return landed.map((lane) =>
-      lane.worktree
-        ? this.worktrees.buildCheckoutRow(lane.worktree, true)
-        : new BranchItem(
-            cwd,
-            lane.branch,
-            true,
-            false,
-            // No date: under Landed, "3 hours ago" is when it merged, which
-            // reads as activity on something that is finished.
-            '',
-            undefined,
-            this.branches.getPullRequestFor(lane.branch),
-          ),
+    return landed.map(
+      (lane) =>
+        new BranchItem(
+          cwd,
+          lane.branch,
+          true,
+          false,
+          // No date: under Landed, "3 hours ago" is when it merged, which
+          // reads as activity on something that is finished.
+          '',
+          undefined,
+          this.branches.getPullRequestFor(lane.branch),
+        ),
     );
   }
 

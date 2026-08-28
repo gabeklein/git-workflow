@@ -90,17 +90,17 @@ There are two layers — pick by what the code needs, not by convenience:
   in isolation fails for reasons unrelated to the code under test.
   Regressions in the skipped tail are CI's job, not the edit loop's.
 - `npm test` = test typechecks + unit + EDH.
-- **A fresh worktree has no `node_modules`.** The install lives once at the
-  repo root; worktrees reach it with an untracked symlink, which is the
-  first thing to make when tests cannot find `vitest`:
+- **A fresh worktree has no `node_modules`.** Either works: `npm install`
+  inside the lane, or reach the root's install with an untracked symlink,
+  which is what makes tests runnable without a second copy:
 
   ```sh
   ln -s ../../node_modules node_modules   # from inside .worktrees/<lane>
   ```
 
-  It is deliberately not tracked. `../../node_modules` is right from a
-  worktree and wrong from the repo root, so committing it replaces the one
-  real install with a link into the parent directory.
+  Never track it. `../../node_modules` is right from a worktree and wrong
+  from the repo root, so committing it replaces the one real install with a
+  link into the parent directory (#51 removed exactly that).
 
 ## Git & PRs
 

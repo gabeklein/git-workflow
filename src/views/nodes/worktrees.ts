@@ -7,9 +7,25 @@ import {
   prThemeIcon,
   type PullRequestInfo,
 } from '../../github/pr';
+import {
+  describeBlocker,
+  explainBlocker,
+  type LandedBlocker,
+} from '../../git/landedWorktrees';
 import { worktreeResourceUri } from '../worktreeDecorations';
 
 /** How a worktree row relates to the preview overlay (focus/working). */
+/**
+ * A checkout whose branch has landed — the folder is still on disk, and
+ * `blocker` is why the landed sweep left it there (`off` when automatic
+ * removal is simply switched off). Present ONLY for landed checkouts, so
+ * its presence is what the row renders on.
+ */
+export interface LandedRowInfo {
+  branch: string;
+  blocker: LandedBlocker;
+}
+
 export interface PreviewRowInfo {
   role: 'lane';
   /** Branch is in the applied set */
@@ -37,13 +53,16 @@ export class WorktreeListItem extends vscode.TreeItem {
       baseRef: string;
     },
     /**
-     * Rendered under Landed. The group and the icon already say the work
-     * is done, so the row drops what would only repeat them — and drops
-     * "behind the base", which after a squash merge is both inevitable and
-     * unactionable: the branch is behind by the very commit that landed it.
+     * Set when the branch has LANDED and this folder is still on disk.
+     *
+     * The row then leads with that: it is the only fact about the checkout
+     * worth acting on, and it replaces "behind the base", which after a
+     * squash merge is both inevitable and unactionable — the branch is
+     * behind by the very commit that landed it.
      */
-    landed = false,
+    landedInfo?: LandedRowInfo,
   ) {
+    const landed = Boolean(landedInfo);
     const branchLabel =
       worktree.branch + (worktree.detached ? ' (detached)' : '');
     // TreeItems cannot be font-bold; selected rows use blue decoration tint + badge
@@ -64,7 +83,12 @@ export class WorktreeListItem extends vscode.TreeItem {
       // Candidates are managed under the Preview row; here only add/remove
       flags.push(preview.candidate ? 'LaneCandidate' : 'LaneAddable');
     }
-    if (baseStatus?.rebasing) {
+    // Landed replaces the base-status flags for the same reason it replaces
+    // their description text — and it gives the menu something to hang a
+    // prominent Delete Worktree on.
+    if (landedInfo) {
+      flags.push('Landed');
+    } else if (baseStatus?.rebasing) {
       flags.push('Rebasing');
     } else if (baseStatus?.merging) {
       flags.push('MergingBase');
@@ -116,9 +140,12 @@ export class WorktreeListItem extends vscode.TreeItem {
     }
 
     // Selection is shown via blue decoration tint only (no "selected" label)
-    if (landed) {
-      // Nothing here applies to a landed branch: it is behind because it
-      // landed, and catching it up is not a thing anyone wants to do.
+    if (landedInfo) {
+      // Why the folder is still here, which is the only actionable fact
+      // left about it. Nothing else applies to a landed branch: it is
+      // behind because it landed, and catching it up is not a thing
+      // anyone wants to do.
+      bits.push(describeBlocker(landedInfo.blocker));
     } else if (baseStatus?.rebasing) {
       bits.push('rebasing');
     } else if (baseStatus?.merging) {
@@ -151,6 +178,9 @@ export class WorktreeListItem extends vscode.TreeItem {
         : undefined,
       preview?.role === 'lane' && preview.applied
         ? 'Applied to the preview'
+        : undefined,
+      landedInfo
+        ? explainBlocker(landedInfo.blocker, landedInfo.branch)
         : undefined,
       baseStatus?.rebasing
         ? 'A rebase is paused here — resolve the conflicts, then Continue Rebase (or Abort Rebase).'

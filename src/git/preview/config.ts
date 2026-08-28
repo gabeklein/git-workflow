@@ -77,6 +77,38 @@ export function isQuickDeleteLandedEnabled(): boolean {
     .get<boolean>('quickDeleteLandedWorktrees', true);
 }
 
+/**
+ * Whether the checkout of a landed branch is removed as soon as it is
+ * provably empty of anything else — clean, unlocked, no ignored files, no
+ * paused merge, nothing open in an editor. The branch REF is never touched
+ * (that is Prune Landed Branches), so this only ever gives back a folder
+ * `git worktree add` would recreate.
+ *
+ * Off keeps every folder and still badges the row `landed · on disk`: the
+ * visibility is the bug being fixed, and it is not what the switch is for.
+ */
+/**
+ * Whether stale remote-tracking refs are pruned in the background.
+ *
+ * Nothing else in git removes them: every fetch here is a targeted
+ * refspec and `git pull` does not prune, so a branch deleted on the remote
+ * — what a merged PR does by default — leaves `origin/<name>` behind
+ * forever and the Remote group lists a branch that does not exist.
+ * Pruning drops only the cache entry, and the next fetch restores it if
+ * the branch is real.
+ */
+export function isPruneRemoteRefsEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<boolean>('pruneRemoteRefs', true);
+}
+
+export function isAutoRemoveLandedEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<boolean>('autoRemoveLandedWorktrees', true);
+}
+
 export function isPreviewAutoRebuildEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')

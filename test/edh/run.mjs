@@ -87,6 +87,16 @@ function buildFixture() {
     path.join(repo, '.git', 'info', 'exclude'),
     '/.worktrees/\n',
   );
+
+  // The landed sweep is OFF for the suite at large, and ON only in the
+  // scenario that is about it. Otherwise it does its job on the fixture's
+  // own landed lanes — feat/b is deliberately landed by landing.test.ts —
+  // and removes folders that every later scenario still expects to exist.
+  mkdirSync(path.join(repo, '.vscode'), { recursive: true });
+  writeFileSync(
+    path.join(repo, '.vscode', 'settings.json'),
+    `${JSON.stringify({ 'worktreeCompare.autoRemoveLandedWorktrees': false }, null, 2)}\n`,
+  );
   return { root, repo };
 }
 

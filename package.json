@@ -174,6 +174,16 @@
           "default": true,
           "description": "Delete a landed worktree without the confirmation modal. Only applies when the branch's commits are already contained in its base AND the checkout is clean, unlocked, attached, and holds no ignored files \u2014 `git worktree remove` deletes ignored files (a local .env, build output) without complaint, and the dirty probe cannot see them. Off = every delete is confirmed."
         },
+        "worktreeCompare.autoRemoveLandedWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remove the checkout of a landed branch as soon as it holds nothing of its own \u2014 clean, unlocked, no ignored files, no paused rebase/merge, nothing open in an editor. The branch REF is never deleted (that is Prune Landed Branches), so this only gives back a folder `git worktree add` recreates. Off keeps every folder and still badges the row `landed \u00b7 on disk`: seeing that the disk is reclaimable is not what this switches off."
+        },
+        "worktreeCompare.pruneRemoteRefs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prune remote-tracking refs for branches origin no longer has, on the full refresh (throttled to once a minute). Nothing else in git removes them \u2014 fetches here are targeted refspecs and `git pull` does not prune \u2014 so a branch deleted on the remote, which is what merging a PR does by default, otherwise shows under Remote forever. Pruning drops only the cache entry; the next fetch restores it if the branch is real."
+        },
         "worktreeCompare.previewAutoRebuild": {
           "type": "boolean",
           "default": true,

@@ -5,6 +5,7 @@
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import {
   applied,
   getApi,
@@ -122,6 +123,90 @@ describe('base badges', () => {
  * fallback flow (dirty, locked, ignored files) does, and stays out of the
  * EDH by design.
  */
+/**
+ * The landed sweep: a checkout whose branch is in the base is disk with
+ * nothing on it, so it goes on its own — and one that cannot go says why,
+ * from under Working, where "there is a folder" is what the group means.
+ */
+describe('landed checkouts clear themselves', () => {
+  const sweptPath = path.join(repo, '.worktrees', 'feat-swept');
+  const heldPath = path.join(repo, '.worktrees', 'feat-held');
+  let api: TestApi;
+  const config = () => vscode.workspace.getConfiguration('worktreeCompare');
+
+  before(async () => {
+    api = await getApi();
+    // The fixture turns the sweep off (it would clear the suite's own
+    // landed lanes); this is the scenario it belongs to, so switch it on.
+    await config().update(
+      'autoRemoveLandedWorktrees',
+      true,
+      vscode.ConfigurationTarget.Workspace,
+    );
+  });
+
+  /** Landed by CONTENT: an empty commit leaves the base tree unchanged. */
+  const makeLanded = (branch: string, dir: string) => {
+    git(repo, ['worktree', 'add', '-q', dir, '-b', branch, 'origin/main']);
+    git(dir, ['commit', '-q', '--allow-empty', '-m', `${branch}: no-op work`]);
+  };
+
+  after(async () => {
+    // Off again before the next scenario inherits it
+    await config().update(
+      'autoRemoveLandedWorktrees',
+      false,
+      vscode.ConfigurationTarget.Workspace,
+    );
+    for (const d of [sweptPath, heldPath]) {
+      if (fs.existsSync(d)) git(repo, ['worktree', 'remove', '--force', d]);
+    }
+    for (const b of ['feat/swept', 'feat/held']) {
+      try {
+        git(repo, ['branch', '-D', b]);
+      } catch {
+        // the sweep may already have taken the checkout; the ref is ours
+      }
+    }
+  });
+
+  it('removes the folder with nobody asking, and keeps the ref', async () => {
+    makeLanded('feat/swept', sweptPath);
+    await poll('the landed checkout is swept away', 60000, async () => {
+      await run('worktreeCompare.refresh');
+      return !fs.existsSync(sweptPath);
+    });
+    assert.ok(
+      git(repo, ['rev-parse', '-q', '--verify', 'refs/heads/feat/swept']),
+      'the branch ref is kept — refs are Prune Landed Branches business',
+    );
+  });
+
+  it('keeps a dirty one, under Working, saying why', async () => {
+    makeLanded('feat/held', heldPath);
+    fs.writeFileSync(path.join(heldPath, 'unfinished.txt'), 'mid-thought\n');
+    const row = async () =>
+      (await api.focusRows('working')).find((r) => r.label === 'feat/held');
+    await poll('the held checkout says it landed and why', 60000, async () => {
+      await run('worktreeCompare.refresh');
+      return Boolean((await row())?.description?.includes('landed'));
+    });
+    const held = await row();
+    assert.ok(held, 'it stays under Working — the folder is still there');
+    assert.match(
+      held?.description ?? '',
+      /landed · uncommitted changes/,
+      'the row names the blocker, not just the landing',
+    );
+    assert.ok(fs.existsSync(heldPath), 'and nothing was removed');
+    // It is NOT also a Landed row: one branch, one row.
+    assert.ok(
+      !(await api.focusRows('landed')).some((r) => r.label === 'feat/held'),
+      'a checkout on disk is a Working row, never a Landed ref row',
+    );
+  });
+});
+
 describe('quick delete of a landed worktree', () => {
   const quickPath = path.join(repo, '.worktrees', 'feat-quick');
   let api: TestApi;

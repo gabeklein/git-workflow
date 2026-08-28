@@ -16,15 +16,21 @@ import type { BranchInfo } from '../git/branches';
  *   Remote   no local ref at all
  *
  * Evaluation runs top-down and first match wins, so a branch appears in
- * exactly one group. Note that Landed is evaluated FIRST and displayed
- * LAST: a landed branch that still has a checkout has to reach the Landed
- * group, or the cleanup affordance that group exists for never sees it.
+ * exactly one group.
+ *
+ * WORKING WINS OVER LANDED, and that is deliberate. A landed branch that
+ * still has a checkout used to be shown under Landed, where it was
+ * indistinguishable from a branch that is only a ref — so a folder still
+ * sitting on disk was invisible, which is how they accumulated. Working
+ * means exactly one thing now: there is a folder. Landed checkouts appear
+ * there, badged with why they are still around, and the landed sweep
+ * (landedWorktrees.ts) removes the ones that hold nothing of their own —
+ * so a row under Working with a `landed · …` badge is precisely the set
+ * that needs a human.
  */
 
 export interface LandedLane {
   branch: string;
-  /** Present when the landed branch still has a checkout to clean up. */
-  worktree?: DiscoveredWorktree;
 }
 
 interface LanesPlan {
@@ -34,7 +40,7 @@ interface LanesPlan {
   local: BranchInfo[];
   /** Branches that exist only on the remote. */
   remote: BranchInfo[];
-  /** Done: merged into the base, ready to prune. Displayed last. */
+  /** Done: in the base, ref only, ready to prune. Displayed last. */
   landed: LandedLane[];
   /** Rows beyond the cap, reported rather than silently dropped. */
   hiddenLocal: number;
@@ -81,13 +87,10 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
     (wt) => wt.path !== input.previewPath,
   );
 
-  // Rung 1, evaluated first: anything landed leaves the ladder here, even
-  // when it still has a checkout. A detached checkout has no branch and so
-  // can never be landed.
-  const landedCheckouts = listed.filter(
-    (wt) => !wt.detached && landedNames.has(wt.branch),
-  );
-  const checkouts = listed.filter((wt) => !landedCheckouts.includes(wt));
+  // Every checkout is a Working row, landed or not: the folder is the fact
+  // this group reports, and hiding a landed one under Landed is what made
+  // stale folders invisible. The row carries a `landed · …` badge instead.
+  const checkouts = listed;
   const ordered = checkouts.slice().sort((a, b) => {
     // Root first, always: it is the anchor the others were cut from.
     const rootA = a.isRootCheckout || a.isMainWorktree ? 1 : 0;
@@ -110,20 +113,16 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
       !landedNames.has(b.name),
   );
 
-  // Landed branches with no checkout of their own, newest first like the
-  // rest; the ones that DO have a checkout carry it, so the row can offer
-  // to remove the folder as well as the ref.
-  const landedRows: LandedLane[] = [
-    ...landedCheckouts.map((wt) => ({ branch: wt.branch, worktree: wt })),
-    ...input.branches
-      .filter(
-        (b) =>
-          landedNames.has(b.name) &&
-          b.hasLocalRef &&
-          !landedCheckouts.some((wt) => wt.branch === b.name),
-      )
-      .map((b) => ({ branch: b.name })),
-  ];
+  // Landed branches with no checkout of their own — the ones with a
+  // checkout are Working rows, so this group is refs waiting to be pruned.
+  const landedRows: LandedLane[] = input.branches
+    .filter(
+      (b) =>
+        landedNames.has(b.name) &&
+        b.hasLocalRef &&
+        !claimed.has(b.name),
+    )
+    .map((b) => ({ branch: b.name }));
 
   // listBranches already sorts by committerdate desc, so slicing preserves
   // recency without a second sort.
