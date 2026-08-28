@@ -212,11 +212,13 @@
         {
           "id": "worktreeCompare.lanes",
           "name": "Lanes",
-          "contextualTitle": "Lanes"
+          "contextualTitle": "Lanes",
+          "initialSize": 1
         },
         {
           "id": "worktreeCompare.focused",
-          "name": "Focus"
+          "name": "Focus",
+          "initialSize": 3
         }
       ]
     },

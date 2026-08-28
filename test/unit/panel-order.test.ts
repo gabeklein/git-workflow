@@ -16,18 +16,41 @@ import * as path from 'node:path';
  * Selector above detail, which is also the order the two are used in.
  */
 describe('sidebar panel order', () => {
-  const views = (
+  const contributes = (
     JSON.parse(
       fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'),
     ) as {
-      contributes: { views: Record<string, { id: string }[]> };
+      contributes: {
+        views: Record<string, { id: string; initialSize?: number }[]>;
+        viewsContainers: Record<string, { id: string }[]>;
+      };
     }
-  ).contributes.views.worktreeCompare;
+  ).contributes;
+  const views = contributes.views.worktreeCompare;
+  const containers = contributes.viewsContainers;
 
   it('declares Lanes above Focus', () => {
     expect(views.map((v) => v.id)).toEqual([
       'worktreeCompare.lanes',
       'worktreeCompare.focused',
+    ]);
+  });
+
+  /**
+   * `initialSize` behaves like CSS `flex` — a relative weight, height in
+   * the sidebar — so 1 and 3 is a quarter to Lanes and three quarters to
+   * Focus. Lanes is a list of rows and stops growing; Focus holds the diff
+   * and uses everything it is given.
+   *
+   * VS Code honours it only when the same extension owns both the view and
+   * its container, which is why the container assertion is here too: move
+   * a view into somebody else's container and the split silently stops
+   * applying, with no error anywhere.
+   */
+  it('gives Focus three quarters of the height on first show', () => {
+    expect(views.map((v) => v.initialSize)).toEqual([1, 3]);
+    expect(containers.activitybar.map((c) => c.id)).toEqual([
+      'worktreeCompare',
     ]);
   });
 });
