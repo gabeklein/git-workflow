@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { previewBaseRef, previewBranch } from '../git/preview';
 import { GroupItem, MessageItem, type TreeNode } from './nodes';
 import { BranchItem } from './nodes/branches';
-import { BaseDriftItem, PreviewLaneItem, PreviewItem } from './nodes/lanes';
+import { BaseDriftItem, PreviewItem, PreviewLaneItem } from './nodes/lanes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';

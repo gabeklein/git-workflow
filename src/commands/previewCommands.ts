@@ -83,7 +83,7 @@ export function registerPreviewCommands(
           );
           treeProvider.refresh();
           void vscode.window.showInformationMessage(
-            'Git Workflow: preview mode on — add worktrees via their context menu, then check lanes under Preview',
+            'Git Workflow: preview mode on — add worktrees via their context menu, then check the lanes under the preview row',
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
