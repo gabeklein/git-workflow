@@ -44,6 +44,18 @@ describe('discoverWorktrees', () => {
     expect(found[0]!.path).toBe(repo);
   });
 
+  it('lists the root even when it is the preview checkout', async () => {
+    // Discovery reports folders; the VIEW decides what is a lane. With
+    // preview on, the root holds preview/main and lanesPlan filters it out
+    // by path — which is what lets this module stop consulting the preview
+    // setting at all (it used to, only to keep the root visible).
+    const { repo } = open();
+    git(repo, ['checkout', '-q', '-b', 'preview/main']);
+    const found = await discoverWorktrees();
+    expect(found.map((w) => w.branch)).toEqual(['preview/main']);
+    expect(found[0]?.isRootCheckout).toBe(true);
+  });
+
   it('lists the root first, ahead of linked worktrees', async () => {
     const { root, repo } = open();
     addBranch(repo, 'feat/linked', 'b.txt', 'b\n');
