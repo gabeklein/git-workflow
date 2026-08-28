@@ -1,5 +1,5 @@
 /**
- * What the rest of the extension may use from the integration subsystem.
+ * What the rest of the extension may use from the preview subsystem.
  *
  * Ten modules live behind this: the config it reads, the lane files it
  * keeps, the off-tree merge, the rebuild engine, the branch lifecycle,
@@ -18,11 +18,11 @@
 export {
   autoRebaseLanes,
   catchUpStrategy,
-  integrationBaseRef,
-  integrationBranch,
+  previewBaseRef,
+  previewBranch,
   isCommitGuardEnabled,
-  isIntegrationAbsorbEnabled,
-  isIntegrationAutoRebuildEnabled,
+  isPreviewAbsorbEnabled,
+  isPreviewAutoRebuildEnabled,
   isLaneBranch,
   isQuickDeleteLandedEnabled,
 } from './config';
@@ -36,7 +36,7 @@ export {
   dropAppliedLane,
   dropCandidateLane,
   dropExcludedLane,
-  ensureIntegrationPushBlocked,
+  ensurePreviewPushBlocked,
   listAppliedLanes,
   listCandidateLanes,
   listExcludedLanes,
@@ -51,11 +51,11 @@ export {
 // status
 export {
   baseStatusFor,
-  fetchIntegrationBase,
+  fetchPreviewBase,
   findLandedLanes,
   findStaleLandedLanes,
   findStrayCommits,
-  integrationFingerprint,
+  previewFingerprint,
   laneNeverDiverged,
   resolveBaseSha,
 } from './status';
@@ -64,17 +64,17 @@ export {
 export {
   type RebuildResult,
   type ResolvedLane,
-  abortIntegrationMerge,
-  rebuildIntegration,
+  abortPreviewMerge,
+  rebuildPreview,
 } from './engine';
 
 // lifecycle
 export {
-  alignIntegrationBranchName,
-  createIntegrationWorktree,
-  deleteIntegrationBranch,
-  switchAwayFromIntegration,
-  switchToIntegrationBranch,
+  alignPreviewBranchName,
+  createPreviewWorktree,
+  deletePreviewBranch,
+  switchAwayFromPreview,
+  switchToPreviewBranch,
 } from './lifecycle';
 
 // absorb

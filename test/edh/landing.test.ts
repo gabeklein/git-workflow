@@ -32,8 +32,8 @@ describe('landed lifecycle', () => {
     git(landing, ['fetch', '-q', 'origin']);
     git(landing, ['merge', '-q', '--no-ff', '-m', 'Merge PR feat/a', 'origin/feat/a']);
     git(landing, ['push', '-q']);
-    await run('worktreeCompare.rebuildIntegration');
-    await run('worktreeCompare.applyToIntegration', { worktreePath: laneA });
+    await run('worktreeCompare.rebuildPreview');
+    await run('worktreeCompare.applyToPreview', { worktreePath: laneA });
     await poll('true-merged lane retires instead of merging', 20000, () => {
       const tree = git(working, ['rev-parse', 'HEAD^{tree}']);
       const base = git(repo, ['rev-parse', 'origin/main^{tree}']);
@@ -44,7 +44,7 @@ describe('landed lifecycle', () => {
       'retired lane stays listed as a candidate',
     );
     await poll('view state: lane shows landed', 15000, () =>
-      (api.integration()?.landed ?? []).includes('feat/a'),
+      (api.preview()?.landed ?? []).includes('feat/a'),
     );
   });
 
@@ -54,8 +54,8 @@ describe('landed lifecycle', () => {
     git(landing, ['commit', '-qm', 'feat b (squash #2)']);
     squashSha = git(landing, ['rev-parse', 'HEAD']);
     git(landing, ['push', '-q']);
-    await run('worktreeCompare.rebuildIntegration');
-    await run('worktreeCompare.applyToIntegration', { worktreePath: laneB });
+    await run('worktreeCompare.rebuildPreview');
+    await run('worktreeCompare.applyToPreview', { worktreePath: laneB });
     await poll('squash-landed lane retires by content', 20000, () =>
       !applied().includes('feat/b') &&
       fs.existsSync(path.join(working, 'b.txt')),
@@ -65,11 +65,11 @@ describe('landed lifecycle', () => {
   it('re-applies a reverted squash as a real merge (revert-safety)', async () => {
     git(landing, ['revert', '--no-edit', squashSha]);
     git(landing, ['push', '-q']);
-    await run('worktreeCompare.rebuildIntegration');
-    await poll('revert reaches the integration tree', 20000, () =>
+    await run('worktreeCompare.rebuildPreview');
+    await poll('revert reaches the preview tree', 20000, () =>
       !fs.existsSync(path.join(working, 'b.txt')),
     );
-    await run('worktreeCompare.applyToIntegration', { worktreePath: laneB });
+    await run('worktreeCompare.applyToPreview', { worktreePath: laneB });
     await poll('reverted lane re-applies as a real merge', 20000, () =>
       applied().includes('feat/b') &&
       fs.existsSync(path.join(working, 'b.txt')),
@@ -88,7 +88,7 @@ describe('base badges', () => {
     git(landing, ['add', 'news.txt']);
     git(landing, ['commit', '-qm', 'base advances']);
     git(landing, ['push', '-q']);
-    await run('worktreeCompare.rebuildIntegration');
+    await run('worktreeCompare.rebuildPreview');
     await api.refreshBaseStatuses();
     await poll('view state: lane shows behind-base badge', 15000, async () => {
       await api.refreshBaseStatuses();
@@ -106,7 +106,7 @@ describe('base badges', () => {
     fs.writeFileSync(path.join(laneA, 'a.txt'), 'lane insists\n');
     git(laneA, ['add', 'a.txt']);
     git(laneA, ['commit', '-qm', 'lane edits a.txt']);
-    await run('worktreeCompare.rebuildIntegration');
+    await run('worktreeCompare.rebuildPreview');
     // 30s: this depends on the manual rebuild's base fetch having landed,
     // which can queue behind an in-flight rebuild (observed flaking at 15s)
     await poll('view state: lane shows conflicts-with-base badge', 30000, async () => {

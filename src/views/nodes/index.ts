@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { BranchItem, RemotePrFileItem } from './branches';
 import type { FileItem, FolderItem } from './files';
-import type { BaseDriftItem, IntegrationLaneItem, PreviewItem } from './lanes';
+import type { BaseDriftItem, PreviewLaneItem, PreviewItem } from './lanes';
 import type {
   CommitItem,
   ConflictWarningItem,
@@ -20,7 +20,7 @@ import type {
 export type TreeNode =
   | GroupItem
   | BaseDriftItem
-  | IntegrationLaneItem
+  | PreviewLaneItem
   | WorktreeListItem
   | ConflictWarningItem
   | PreviewItem

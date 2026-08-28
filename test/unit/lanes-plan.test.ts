@@ -106,12 +106,12 @@ describe('planLaneRows', () => {
     expect(result.remote.map((b) => b.name)).toEqual(['feat/remote']);
   });
 
-  it('keeps the integration branch out of the list entirely', () => {
+  it('keeps the preview branch out of the list entirely', () => {
     const result = plan({
-      worktrees: [wt('integration/main', { path: '/repo/working' })],
-      branches: [br('integration/main', 300), br('feat/a', 200)],
-      integrationBranch: 'integration/main',
-      integrationPath: '/repo/working',
+      worktrees: [wt('preview/main', { path: '/repo/working' })],
+      branches: [br('preview/main', 300), br('feat/a', 200)],
+      previewBranch: 'preview/main',
+      previewPath: '/repo/working',
     });
     expect(result.working).toEqual([]);
     expect(result.local.map((b) => b.name)).toEqual(['feat/a']);

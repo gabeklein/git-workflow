@@ -1,7 +1,7 @@
 import { git, gitOk } from '../exec';
 import { landedVia } from '../landedProbe';
 import { revParseCommit } from '../plumbing';
-import { integrationBaseRef, integrationBranch, WIP_SUBJECT } from './config';
+import { previewBaseRef, WIP_SUBJECT } from './config';
 import { mergeOffTree } from './merge';
 import { listAppliedLanes, listExcludedLanes, readBasePin } from './lanes';
 
@@ -13,12 +13,12 @@ export async function resolveBaseSha(
   const sha = (ref: string) => revParseCommit(cwd, ref);
   const remote = await sha(`origin/${name}`);
 
-  // Base pin (integration base only): the base FOLLOWS origin when that
+  // Base pin (preview base only): the base FOLLOWS origin when that
   // is a descendant of the pin — published movement is always legit —
   // and otherwise holds the pin, so commits made directly on the local
   // base branch never silently retarget the preview. Drift is surfaced
-  // on the Integration panel with Convert-to-Branch / Catch Up exits.
-  if (name === integrationBaseRef().replace(/^origin\//, '')) {
+  // on the Preview panel with Convert-to-Branch / Catch Up exits.
+  if (name === previewBaseRef().replace(/^origin\//, '')) {
     const pin = await readBasePin(cwd);
     if (pin && (await sha(pin))) {
       if (
@@ -45,7 +45,7 @@ export async function resolveBaseSha(
 }
 
 /** Best-effort `git fetch origin <base>` so origin/<base> tracks reality. */
-export async function fetchIntegrationBase(
+export async function fetchPreviewBase(
   cwd: string,
   baseRef: string,
 ): Promise<boolean> {
@@ -290,7 +290,7 @@ interface BaseStatus {
 
 /**
  * How a branch relates to the base — no working-tree access. The conflict
- * probe is STRICT (independent of integrationAutoResolve): the badge must
+ * probe is STRICT (independent of previewAutoResolve): the badge must
  * reflect what a real `git rebase`/`git merge` would hit.
  */
 export async function baseStatusFor(
@@ -335,7 +335,7 @@ export async function baseStatusFor(
   return { behind, ahead, conflicts, refSha, baseSha };
 }
 
-export async function integrationFingerprint(
+export async function previewFingerprint(
   cwd: string,
   baseRef: string,
 ): Promise<string> {
@@ -354,7 +354,7 @@ export async function integrationFingerprint(
         : ((await revParseCommit(cwd, `refs/heads/${baseName}`)) ?? 'none')
     }`,
   );
-  // Work committed directly on the integration checkout blocks the rebuild
+  // Work committed directly on the preview checkout blocks the rebuild
   // but moves none of the refs above, so without this the tick would never
   // notice it and the absorb rescue would wait for an unrelated trigger.
   // A count is enough to fire on, and it is STABLE: after a rebuild the
@@ -382,7 +382,7 @@ export async function integrationFingerprint(
 }
 
 /**
- * Commits made DIRECTLY on the integration checkout — work that exists on
+ * Commits made DIRECTLY on the preview checkout — work that exists on
  * no other branch and would be destroyed by the next `reset --hard`.
  *
  * They sit on HEAD's first-parent line as non-merges; lane content always
@@ -396,7 +396,7 @@ export async function integrationFingerprint(
 export async function findStrayCommits(
   cwd: string,
   baseSha: string,
-  previewBranch = integrationBranch(),
+  previewBranch: string,
 ): Promise<{ sha: string; subject: string }[]> {
   const out = await git(cwd, [
     'log',

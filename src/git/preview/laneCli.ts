@@ -13,7 +13,7 @@ import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
  * opt-in means the preview simply stays empty.
  *
  * Installed into the git COMMON dir alongside the state it edits, on the
- * same lifecycle as the commit guard: written when integration goes on,
+ * same lifecycle as the commit guard: written when preview goes on,
  * removed when it goes off. That keeps it untracked, per-repo, refreshed
  * on every enable, and — unlike a path inside the extension install
  * directory — at an address that survives the extension updating.
@@ -29,13 +29,13 @@ const SENTINEL = '# git-workflow: lane CLI';
 const SCRIPT = `#!/bin/sh
 ${SENTINEL}
 #
-# Join or leave the integration preview, without VS Code.
+# Join or leave the preview preview, without VS Code.
 #
 #   gw-lane status           what is applied, and what could be
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
-# Managed by the Git Workflow extension: rewritten when integration is
+# Managed by the Git Workflow extension: rewritten when preview is
 # enabled, removed when it is disabled.
 
 set -e
@@ -59,7 +59,7 @@ take_lock() {
     n=$((n + 1))
     sleep 0.2
   done
-  echo "integration is busy (lock held) — try again in a moment" >&2
+  echo "preview is busy (lock held) — try again in a moment" >&2
   exit 1
 }
 drop_lock() { rmdir "$lock" 2>/dev/null || true; }

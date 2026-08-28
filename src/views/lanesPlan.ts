@@ -46,10 +46,10 @@ export interface LanesPlanInput {
   branches: BranchInfo[];
   /** Branch names with an open PR — kept visible in the remote group. */
   prHeads?: ReadonlySet<string>;
-  /** The derived integration branch, which is never a row of its own here. */
-  integrationBranch?: string;
-  /** Checkout the integration branch occupies, if any. */
-  integrationPath?: string;
+  /** The derived preview branch, which is never a row of its own here. */
+  previewBranch?: string;
+  /** Checkout the preview branch occupies, if any. */
+  previewPath?: string;
   /**
    * Branches whose work is CONFIRMED in the base. Confirmed, not merely
    * absent from the remote: a remote branch deleted without merging looks
@@ -74,11 +74,11 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
   const limit = input.limit ?? DEFAULT_LIMIT;
   const dates = new Map(input.branches.map((b) => [b.name, b.committerDate]));
 
-  // The integration checkout is derived state, not someone's work — it is
+  // The preview checkout is derived state, not someone's work — it is
   // the panel's subject, not a row in its list.
   const landedNames = input.landed ?? new Set<string>();
   const listed = input.worktrees.filter(
-    (wt) => wt.path !== input.integrationPath,
+    (wt) => wt.path !== input.previewPath,
   );
 
   // Rung 1, evaluated first: anything landed leaves the ladder here, even
@@ -106,7 +106,7 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
   const rest = input.branches.filter(
     (b) =>
       !claimed.has(b.name) &&
-      b.name !== input.integrationBranch &&
+      b.name !== input.previewBranch &&
       !landedNames.has(b.name),
   );
 

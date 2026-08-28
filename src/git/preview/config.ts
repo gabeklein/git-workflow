@@ -1,50 +1,50 @@
 import * as vscode from 'vscode';
-import type { Integration } from './identity';
+import type { Preview } from './identity';
 
 /**
  * Subject prefix of the ephemeral wip snapshot commits rebuilds overlay.
  * Shared so the stray-commit scan can tell an extension-made snapshot
- * apart from work a person actually committed on the integration branch.
+ * apart from work a person actually committed on the preview branch.
  */
 export const WIP_SUBJECT = 'wip(gw):';
 
 /**
- * The configured integration for this workspace.
+ * The configured preview for this workspace.
  *
  * The one place the setting is read. Below the view layer nothing consults
  * it — see identity.ts for why — so this exists to be resolved once and
  * passed down.
  */
-export function currentIntegration(): Integration {
-  return { branch: integrationBranch(), baseRef: integrationBaseRef() };
+export function currentPreview(): Preview {
+  return { branch: previewBranch(), baseRef: previewBaseRef() };
 }
 
-export function integrationBranch(): string {
+export function previewBranch(): string {
   const template =
     vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<string>('integrationBranch', 'integration/{base}')
-      .trim() || 'integration/{base}';
+      .get<string>('previewBranch', 'preview/{base}')
+      .trim() || 'preview/{base}';
   // {base} → short base name (origin/main → main)
   return template.replace(
     '{base}',
-    integrationBaseRef().replace(/^origin\//, ''),
+    previewBaseRef().replace(/^origin\//, ''),
   );
 }
 
 /**
- * Whether work committed directly on the integration checkout is moved to
+ * Whether work committed directly on the preview checkout is moved to
  * the base automatically. Off leaves the rebuild refusing (the commits are
  * still safe) until Absorb is run by hand.
  */
-export function isIntegrationAbsorbEnabled(): boolean {
+export function isPreviewAbsorbEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<boolean>('integrationAbsorbStrays', true);
+    .get<boolean>('previewAbsorbStrays', true);
 }
 
 /**
- * Whether a pre-commit hook refuses commits made on the integration branch.
+ * Whether a pre-commit hook refuses commits made on the preview branch.
  * The branch is derived — rebuilds recreate it — so a commit there has no
  * home, and absorb (the rescue) can only ever aim at the base, which is the
  * wrong destination when the work belonged to a lane. Off leaves the older
@@ -53,7 +53,7 @@ export function isIntegrationAbsorbEnabled(): boolean {
 export function isCommitGuardEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<boolean>('integrationCommitGuard', true);
+    .get<boolean>('previewCommitGuard', true);
 }
 
 /**
@@ -67,20 +67,20 @@ export function isQuickDeleteLandedEnabled(): boolean {
     .get<boolean>('quickDeleteLandedWorktrees', true);
 }
 
-export function isIntegrationAutoRebuildEnabled(): boolean {
+export function isPreviewAutoRebuildEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<boolean>('integrationAutoRebuild', true);
+    .get<boolean>('previewAutoRebuild', true);
 }
 
 /**
- * Base ref for integration rebuilds: integrationBaseRef when set,
- * else defaultBaseRef. Kept separate so changing the integration base
+ * Base ref for preview rebuilds: previewBaseRef when set,
+ * else defaultBaseRef. Kept separate so changing the preview base
  * (header context menu) does not affect compare-base fallbacks.
  */
-export function integrationBaseRef(): string {
+export function previewBaseRef(): string {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
-  const dedicated = config.get<string>('integrationBaseRef', '').trim();
+  const dedicated = config.get<string>('previewBaseRef', '').trim();
   return dedicated || config.get<string>('defaultBaseRef', 'main');
 }
 
@@ -91,15 +91,15 @@ type AutoResolveMode = 'off' | 'whitespace' | 'best-effort';
  * the same file always merge — git does that by default. Beyond that:
  * 'whitespace' also resolves formatting-only clashes plus everything the
  * LOSSLESS resolver can prove safe (union of insert-only sides, linewise
- * 3-way); 'best-effort' (default — integration is a preview of unlanded
+ * 3-way); 'best-effort' (default — preview is a preview of unlanded
  * work) additionally resolves remaining text clashes toward the incoming
  * lane, TAGGED on the lane row so dropped hunks are never silent.
  * 'lane-wins' is accepted as a legacy alias for 'best-effort'.
  */
-function integrationAutoResolve(): AutoResolveMode {
+function previewAutoResolve(): AutoResolveMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
-    .get<string>('integrationAutoResolve', 'best-effort');
+    .get<string>('previewAutoResolve', 'best-effort');
   if (v === 'off' || v === 'whitespace') return v;
   return 'best-effort';
 }
@@ -108,14 +108,14 @@ export function autoResolveArgs(): string[] {
   // Never -X theirs here: silent hunk-dropping during the merge would
   // bypass the resolver's lossless rules AND its lossy tagging. The
   // theirs fallback lives in resolveConflictedTree, per file, reported.
-  return integrationAutoResolve() === 'off'
+  return previewAutoResolve() === 'off'
     ? []
     : ['-X', 'ignore-space-change'];
 }
 
 /** What the per-file conflict resolver may do after a conflicted merge. */
 export function conflictResolverMode(): 'none' | 'lossless' | 'full' {
-  switch (integrationAutoResolve()) {
+  switch (previewAutoResolve()) {
     case 'off':
       return 'none';
     case 'whitespace':
@@ -157,19 +157,15 @@ export function autoRebaseLanes(): AutoRebaseMode {
 }
 
 /** Branches that must never be applied as a lane. */
-export function isLaneBranch(
-  branch: string,
-  baseRef: string,
-  /** The preview branch is not a lane. Defaults to the configured one so
-   *  existing callers keep working; pass it explicitly once there can be
-   *  more than one. */
-  previewBranch = integrationBranch(),
-): boolean {
+export function isLaneBranch(branch: string, baseRef: string): boolean {
   if (!branch || branch === 'HEAD' || branch === 'unknown') return false;
   const blocked = new Set([
     'main',
     'master',
-    previewBranch,
+    // The preview branch is never a lane. Read here rather than passed:
+    // this module is where the setting lives, and there is exactly one
+    // preview to ask about.
+    previewBranch(),
     baseRef.replace(/^origin\//, ''),
   ]);
   return !blocked.has(branch) && !branch.startsWith('gitbutler/');

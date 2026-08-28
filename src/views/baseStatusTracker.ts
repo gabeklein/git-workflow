@@ -4,7 +4,7 @@ import {
   baseStatusFor,
   catchUpStrategy,
   isLaneBranch,
-} from '../git/integration';
+} from '../git/preview';
 import {
   abortBaseMerge,
   abortLaneRebase,
@@ -22,9 +22,9 @@ import {
 interface BaseStatusHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
-  /** Rows the Worktree panel shows (integration checkout excluded). */
+  /** Rows the Worktree panel shows (preview checkout excluded). */
   listedWorktrees(): DiscoveredWorktree[];
-  /** Inference fallback (integration base while integration is on). */
+  /** Inference fallback (preview base while preview is on). */
   fallbackBaseRef(): string;
   fireTreeData(): void;
 }
@@ -108,8 +108,8 @@ export class BaseStatusTracker {
 
   /**
    * Override ?? GENUINE inference (branch config / reflog / upstream) —
-   * never the configured fallback, which equals the integration base while
-   * integration is on. undefined = no evidence; auto flows (membership
+   * never the configured fallback, which equals the preview base while
+   * preview is on. undefined = no evidence; auto flows (membership
    * derivation in particular) must not enroll on a guess.
    */
   async genuineBaseFor(worktreePath: string): Promise<string | undefined> {

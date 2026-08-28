@@ -6,7 +6,7 @@ import {
   installLaneCli,
   laneCliPath,
   uninstallLaneCli,
-} from '../../src/git/integration/laneCli';
+} from '../../src/git/preview/laneCli';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**

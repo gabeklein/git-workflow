@@ -2,16 +2,16 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ensureExcludedFromStatus } from '../exclude';
 import { git, GitError, gitOk } from '../exec';
-import { integrationBranch } from './config';
+import { previewBranch } from './config';
 import { forgetChainCache } from './engine';
-import { ensureIntegrationPushBlocked } from './lanes';
+import { ensurePreviewPushBlocked } from './lanes';
 import { resolveBaseSha } from './status';
 
-export async function createIntegrationWorktree(
+export async function createPreviewWorktree(
   repoCwd: string,
   destDir: string,
   baseRef: string,
-  branch = integrationBranch(),
+  branch = previewBranch(),
 ): Promise<void> {
   await fs.mkdir(path.dirname(destDir), { recursive: true });
   // Repo-local ignore before creation, so status never flashes dirty
@@ -23,7 +23,7 @@ export async function createIntegrationWorktree(
     if (!baseSha) throw new Error(`base ref ${baseRef} does not resolve`);
     await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
   }
-  await ensureIntegrationPushBlocked(repoCwd);
+  await ensurePreviewPushBlocked(repoCwd);
 }
 
 async function currentBranch(cwd: string): Promise<string | undefined> {
@@ -39,13 +39,13 @@ async function currentBranch(cwd: string): Promise<string | undefined> {
 
 /**
  * Enable the overlay on an existing checkout (usually the workspace root):
- * switch it to the integration branch. Requires a clean tree — the caller
+ * switch it to the preview branch. Requires a clean tree — the caller
  * checks and reports. Returns the branch that was checked out before.
  */
-export async function switchToIntegrationBranch(
+export async function switchToPreviewBranch(
   checkoutPath: string,
   baseRef: string,
-  branch = integrationBranch(),
+  branch = previewBranch(),
 ): Promise<string | undefined> {
   const previous = await currentBranch(checkoutPath);
   if (
@@ -57,30 +57,30 @@ export async function switchToIntegrationBranch(
       const stderr = err instanceof GitError ? err.stderr : '';
       if (stderr.includes('already used by worktree')) {
         throw new Error(
-          `${branch} is already checked out in another worktree — integration mode is on there`,
+          `${branch} is already checked out in another worktree — preview mode is on there`,
         );
       }
       throw err;
     }
-    await ensureIntegrationPushBlocked(checkoutPath);
+    await ensurePreviewPushBlocked(checkoutPath);
     return previous;
   }
   const baseSha = await resolveBaseSha(checkoutPath, baseRef);
   if (!baseSha) throw new Error(`base ref ${baseRef} does not resolve`);
   await git(checkoutPath, ['switch', '-c', branch, baseSha]);
-  await ensureIntegrationPushBlocked(checkoutPath);
+  await ensurePreviewPushBlocked(checkoutPath);
   return previous;
 }
 
 /**
- * Disable on a checkout that must stay: leave the integration branch.
+ * Disable on a checkout that must stay: leave the preview branch.
  * The tree is derived, so any local state is discarded first.
  */
-export async function switchAwayFromIntegration(
+export async function switchAwayFromPreview(
   checkoutPath: string,
   returnBranch: string | undefined,
   baseRef: string,
-  previewBranch = integrationBranch(),
+  previewBranch: string,
 ): Promise<string> {
   if (await gitOk(checkoutPath, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']))
     await git(checkoutPath, ['merge', '--abort']).catch(() => {});
@@ -108,14 +108,14 @@ export async function switchAwayFromIntegration(
 }
 
 /**
- * Delete the integration branch (disable cleanup). The branch is derived
+ * Delete the preview branch (disable cleanup). The branch is derived
  * state — lane lists persist separately, so re-enabling loses nothing.
  * Force-delete: the chain's merge commits are reachable from nothing else
  * by design. Best-effort; the branch may not exist.
  */
-export async function deleteIntegrationBranch(
+export async function deletePreviewBranch(
   cwd: string,
-  branch = integrationBranch(),
+  branch = previewBranch(),
 ): Promise<boolean> {
   // The memoized chain tip is only reachable through this branch. Once it
   // is gone gc may prune it, and a stale sha would be a rebuild built on
@@ -126,13 +126,13 @@ export async function deleteIntegrationBranch(
 
 /**
  * After the base changes, the templated branch name may change too
- * (integration/main → integration/staging). Rename the checkout's current
+ * (preview/main → preview/staging). Rename the checkout's current
  * branch to match; `git branch -m` carries branch.* config (pushRemote)
  * along. Returns the rename performed, if any.
  */
-export async function alignIntegrationBranchName(
+export async function alignPreviewBranchName(
   checkoutPath: string,
-  target = integrationBranch(),
+  target = previewBranch(),
 ): Promise<{ from: string; to: string } | undefined> {
   const current = await currentBranch(checkoutPath);
   if (!current || current === target) return undefined;

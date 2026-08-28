@@ -2,18 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   baseName,
   stateFile,
-  type Integration,
-} from '../../src/git/integration/identity';
+  type Preview,
+} from '../../src/git/preview/identity';
 
 /**
- * The identity a second integration will need. The interesting property is
+ * The identity a second preview will need. The interesting property is
  * the default one keeping the FLAT state-file names — those are a protocol
  * shared with agent-focus's focus-working.sh, and prefixing them would
  * break that interop silently.
  */
-describe('integration identity', () => {
-  const preview: Integration = {
-    branch: 'integration/main',
+describe('preview identity', () => {
+  const preview: Preview = {
+    branch: 'preview/main',
     baseRef: 'origin/main',
   };
 
@@ -25,15 +25,15 @@ describe('integration identity', () => {
     );
   });
 
-  it('leaves the default integration on the flat protocol names', () => {
+  it('leaves the default preview on the flat protocol names', () => {
     // focus-working.sh reads these exact paths
     expect(stateFile(preview, 'focus-applied')).toBe('focus-applied');
     expect(stateFile(preview, 'focus-working.lock')).toBe('focus-working.lock');
   });
 
-  it('keys additional integrations without touching the first', () => {
-    const staging: Integration = {
-      branch: 'integration/staging',
+  it('keys additional previews without touching the first', () => {
+    const staging: Preview = {
+      branch: 'preview/staging',
       baseRef: 'origin/staging',
       stateKey: 'focus-staging',
     };

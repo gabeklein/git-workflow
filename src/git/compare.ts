@@ -20,7 +20,7 @@ export interface FileChange {
 
 export interface CompareResult {
   /**
-   * Integration tip the user cares about (e.g. origin/main).
+   * Preview tip the user cares about (e.g. origin/main).
    * Diffs/logs use {@link compareRef} (merge-base with HEAD by default).
    */
   baseRef: string;
@@ -31,7 +31,7 @@ export interface CompareResult {
   compareRef: string;
   /** Short sha of compareRef (fork / pin point) */
   baseHead: string;
-  /** Short sha of the integration tip (baseRef) */
+  /** Short sha of the preview tip (baseRef) */
   baseTipHead: string;
   /**
    * True when compare point is the tip itself (not an older merge-base).
@@ -40,7 +40,7 @@ export interface CompareResult {
   compareIsTip: boolean;
   ahead: number;
   /**
-   * Commits on the integration tip that are not in HEAD.
+   * Commits on the preview tip that are not in HEAD.
    * Informational only — does not mean "must rebase"; conflicts come from GitHub.
    */
   tipBehind: number;
@@ -129,7 +129,7 @@ export function formatFileChangeBreakdown(files: FileChange[]): string | undefin
 }
 
 /**
- * Compare working tree to an integration tip.
+ * Compare working tree to an preview tip.
  *
  * By default pins the compare point to merge-base(HEAD, baseTipRef) — the
  * newest commit on that lineage that is still an ancestor of the worktree.
@@ -166,7 +166,7 @@ export async function compareWorkingTreeToBase(
   ]);
   const compareIsTip = baseHead === baseTipHead;
 
-  // tipBehind: commits on integration tip not in HEAD (main moved forward)
+  // tipBehind: commits on preview tip not in HEAD (main moved forward)
   let tipBehind = 0;
   try {
     const tipBehindOut = (

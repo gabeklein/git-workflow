@@ -29,7 +29,7 @@ describe('activation', () => {
   });
 });
 
-describe('integration basics', () => {
+describe('preview basics', () => {
   let api: TestApi;
   before(async () => {
     api = await getApi();
@@ -37,31 +37,31 @@ describe('integration basics', () => {
 
   it('enrolls a lane as a candidate and blocks pushes on the branch', async () => {
     // Discovery warm-up: keep nudging until the provider knows the lane
-    await poll('lane feat/a becomes an integration candidate', 30000, async () => {
-      await run('worktreeCompare.addToIntegration', { worktreePath: laneA });
+    await poll('lane feat/a becomes an preview candidate', 30000, async () => {
+      await run('worktreeCompare.addToPreview', { worktreePath: laneA });
       return readLanes('focus-candidates').includes('feat/a');
     });
     assert.equal(
-      git(repo, ['config', 'branch.integration/main.pushRemote']),
+      git(repo, ['config', 'branch.preview/main.pushRemote']),
       'no_push',
-      'push-block config was applied to the integration branch',
+      'push-block config was applied to the preview branch',
     );
   });
 
-  it('applies the lane into a clean integration checkout', async () => {
-    await run('worktreeCompare.applyToIntegration', { worktreePath: laneA });
-    await poll('integration checkout contains a.txt after apply', 20000, () =>
+  it('applies the lane into a clean preview checkout', async () => {
+    await run('worktreeCompare.applyToPreview', { worktreePath: laneA });
+    await poll('preview checkout contains a.txt after apply', 20000, () =>
       fs.existsSync(path.join(working, 'a.txt')),
     );
     assert.ok(applied().includes('feat/a'), 'feat/a is applied');
     assert.equal(
       git(working, ['status', '--porcelain']).length,
       0,
-      'integration checkout is clean after rebuild',
+      'preview checkout is clean after rebuild',
     );
     assert.ok(
-      api.integration()?.lanes.includes('feat/a'),
-      'view state: integration panel shows feat/a applied',
+      api.preview()?.lanes.includes('feat/a'),
+      'view state: preview panel shows feat/a applied',
     );
   });
 });
@@ -90,8 +90,8 @@ describe('wip overlay', () => {
   it('overlays uncommitted lane edits as an ephemeral snapshot', async () => {
     laneTipBefore = git(repo, ['rev-parse', 'feat/a']);
     fs.writeFileSync(path.join(laneA, 'wip.txt'), 'uncommitted v1\n');
-    await run('worktreeCompare.includeWipInIntegration', { branch: 'feat/a' });
-    await poll('integration checkout contains uncommitted wip.txt', 20000, () =>
+    await run('worktreeCompare.includeWipInPreview', { branch: 'feat/a' });
+    await poll('preview checkout contains uncommitted wip.txt', 20000, () =>
       fs.existsSync(path.join(working, 'wip.txt')),
     );
     assert.equal(
@@ -107,7 +107,7 @@ describe('wip overlay', () => {
       git(working, ['log', '--format=%s', 'HEAD', '-4']).includes(
         'wip(gw): feat/a',
       ),
-      'integration chain contains the ephemeral wip snapshot commit',
+      'preview chain contains the ephemeral wip snapshot commit',
     );
   });
 
@@ -126,7 +126,7 @@ describe('wip overlay', () => {
     assert.ok(await vscode.workspace.applyEdit(we), 'workspace edit applied');
     assert.ok(doc.isDirty, 'document is dirty after edit');
     assert.ok(await doc.save(), 'document saved (fires onDidSaveTextDocument)');
-    await poll('save in the lane re-rebuilds the integration tree', 30000, () =>
+    await poll('save in the lane re-rebuilds the preview tree', 30000, () =>
       fs
         .readFileSync(path.join(working, 'wip.txt'), 'utf8')
         .includes('uncommitted v2'),
@@ -134,13 +134,13 @@ describe('wip overlay', () => {
   });
 
   it('exclude drops the wip overlay; hide resets to base', async () => {
-    await run('worktreeCompare.excludeWipFromIntegration', { branch: 'feat/a' });
-    await poll('wip.txt leaves the integration tree on exclude', 20000, () =>
+    await run('worktreeCompare.excludeWipFromPreview', { branch: 'feat/a' });
+    await poll('wip.txt leaves the preview tree on exclude', 20000, () =>
       !fs.existsSync(path.join(working, 'wip.txt')),
     );
 
-    await run('worktreeCompare.hideFromIntegration', { worktreePath: laneA });
-    await poll('integration checkout resets to base on hide', 20000, () => {
+    await run('worktreeCompare.hideFromPreview', { worktreePath: laneA });
+    await poll('preview checkout resets to base on hide', 20000, () => {
       const head = git(working, ['rev-parse', 'HEAD']);
       const main = git(repo, ['rev-parse', 'main']);
       return head === main && !fs.existsSync(path.join(working, 'a.txt'));

@@ -36,7 +36,7 @@ function getMode(): GithubPrMode {
   return v === 'off' ? 'off' : 'auto';
 }
 
-/** Whether PR integration is enabled in settings. */
+/** Whether PR preview is enabled in settings. */
 export function isGithubPrIntegrationEnabled(): boolean {
   return getMode() !== 'off';
 }

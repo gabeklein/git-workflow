@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { git } from '../git/exec';
-import { catchUpStrategy, integrationBaseRef } from '../git/integration';
+import { catchUpStrategy, previewBaseRef } from '../git/preview';
 import {
   abortBaseMerge,
   abortLaneRebase,
@@ -189,9 +189,9 @@ export function registerLaneOpsCommands(
           );
           return;
         }
-        // Integration lane rows resolve against the INTEGRATION base —
+        // Preview lane rows resolve against the PREVIEW base —
         // that is the conflict the lane badge reported.
-        await runMerge(wt, integrationBaseRef());
+        await runMerge(wt, previewBaseRef());
       },
     ),
     vscode.commands.registerCommand(

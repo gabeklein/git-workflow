@@ -17,7 +17,7 @@ export const working = path.join(repo, '.worktrees', 'working');
 
 /** View-state hooks exported by activate() under GW_TEST_HOOKS. */
 export interface TestApi {
-  integration(): {
+  preview(): {
     lanes: string[];
     candidates: string[];
     landed: string[];
@@ -57,7 +57,7 @@ export interface TestApi {
    * so a preview that stopped rendering fails here instead of passing on a
    * provider nothing draws.
    */
-  integrationRows(): Promise<
+  previewRows(): Promise<
     {
       kind?: string;
       label: string;

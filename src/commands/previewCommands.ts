@@ -5,14 +5,14 @@ import { pickBaseRef } from '../compare/pickBaseRef';
 import { git, gitOk } from '../git/exec';
 import {
   clearBasePin,
-  createIntegrationWorktree,
-  deleteIntegrationBranch,
-  integrationBaseRef,
-  integrationBranch,
-  switchAwayFromIntegration,
-  switchToIntegrationBranch,
+  createPreviewWorktree,
+  deletePreviewBranch,
+  previewBaseRef,
+  previewBranch,
+  switchAwayFromPreview,
+  switchToPreviewBranch,
   type RebuildResult,
-} from '../git/integration';
+} from '../git/preview';
 import {
   createWorktreeForBranch,
   suggestWorktreePath,
@@ -21,21 +21,21 @@ import { isWorktreeDirty } from '../git/plumbing';
 import { listWorktreeAdmin, removeWorktree } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
-/** Branch the root checkout was on before enabling integration on it. */
-const INTEGRATION_RETURN_KEY = 'worktreeCompare.integrationReturnBranch';
+/** Branch the root checkout was on before enabling preview on it. */
+const PREVIEW_RETURN_KEY = 'worktreeCompare.previewReturnBranch';
 
-export function registerIntegrationCommands(
+export function registerPreviewCommands(
   context: vscode.ExtensionContext,
   treeProvider: WorktreeTreeProvider,
   log: { appendLine(value: string): void },
 ): vscode.Disposable[] {
   return [
     vscode.commands.registerCommand(
-      'worktreeCompare.enableIntegration',
+      'worktreeCompare.enablePreview',
       async () => {
-        if (treeProvider.getIntegration()) {
+        if (treeProvider.getPreview()) {
           void vscode.window.showInformationMessage(
-            'Git Workflow: integration mode is already on',
+            'Git Workflow: preview mode is already on',
           );
           return;
         }
@@ -46,8 +46,8 @@ export function registerIntegrationCommands(
           );
           return;
         }
-        const branch = integrationBranch();
-        const baseRef = integrationBaseRef();
+        const branch = previewBranch();
+        const baseRef = previewBaseRef();
         const workspaceRoot =
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
 
@@ -57,7 +57,7 @@ export function registerIntegrationCommands(
               label: 'Use this checkout',
               description: `switch ${path.basename(workspaceRoot)} to ${branch}`,
               detail:
-                'The workspace root becomes the integration surface — checked lanes appear right here.',
+                'The workspace root becomes the preview surface — checked lanes appear right here.',
               id: 'main' as const,
             },
             {
@@ -67,7 +67,7 @@ export function registerIntegrationCommands(
               id: 'worktree' as const,
             },
           ],
-          { placeHolder: 'Enable integration mode' },
+          { placeHolder: 'Enable preview mode' },
         );
         if (!mode) return;
 
@@ -82,16 +82,16 @@ export function registerIntegrationCommands(
               );
               return;
             }
-            const previous = await switchToIntegrationBranch(
+            const previous = await switchToPreviewBranch(
               workspaceRoot,
               baseRef,
             );
             await context.workspaceState.update(
-              INTEGRATION_RETURN_KEY,
+              PREVIEW_RETURN_KEY,
               previous,
             );
             log.appendLine(
-              `Integration mode on: ${workspaceRoot} switched ${previous ?? '(detached)'} → ${branch}`,
+              `Preview mode on: ${workspaceRoot} switched ${previous ?? '(detached)'} → ${branch}`,
             );
           } else {
             const suggested = suggestWorktreePath(workspaceRoot, 'working');
@@ -103,40 +103,40 @@ export function registerIntegrationCommands(
                 v.trim() ? undefined : 'Destination path is required',
             });
             if (!dest?.trim()) return;
-            await createIntegrationWorktree(repoCwd, dest.trim(), baseRef);
-            log.appendLine(`Integration worktree created at ${dest.trim()}`);
+            await createPreviewWorktree(repoCwd, dest.trim(), baseRef);
+            log.appendLine(`Preview worktree created at ${dest.trim()}`);
           }
           treeProvider.refresh();
           void vscode.window.showInformationMessage(
-            'Git Workflow: integration mode on — add worktrees via their context menu, then check lanes under Integration',
+            'Git Workflow: preview mode on — add worktrees via their context menu, then check lanes under Preview',
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Enable integration failed: ${message}`);
+          log.appendLine(`Enable preview failed: ${message}`);
           void vscode.window.showErrorMessage(
-            `Git Workflow: could not enable integration — ${message}`,
+            `Git Workflow: could not enable preview — ${message}`,
           );
         }
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.disableIntegration',
+      'worktreeCompare.disablePreview',
       async () => {
-        const integration = treeProvider.getIntegration();
-        if (!integration) return;
-        const wt = treeProvider.getWorktree(integration.path);
+        const preview = treeProvider.getPreview();
+        if (!preview) return;
+        const wt = treeProvider.getWorktree(preview.path);
         const onMainCheckout = Boolean(
           wt?.isRootCheckout || wt?.isMainWorktree,
         );
         const confirm = await vscode.window.showWarningMessage(
           [
-            'Disable integration mode?',
+            'Disable preview mode?',
             '',
             onMainCheckout
-              ? `This switches ${integration.path} off ${integration.branch} (back to your previous branch), discarding derived state.`
-              : `This removes the ${integration.branch} worktree at:\n${integration.path}`,
+              ? `This switches ${preview.path} off ${preview.branch} (back to your previous branch), discarding derived state.`
+              : `This removes the ${preview.branch} worktree at:\n${preview.path}`,
             '',
-            `The ${integration.branch} branch is deleted (it is derived state). The lane list is kept — enabling again restores the same lanes.`,
+            `The ${preview.branch} branch is deleted (it is derived state). The lane list is kept — enabling again restores the same lanes.`,
           ].join('\n'),
           { modal: true },
           'Disable',
@@ -144,79 +144,80 @@ export function registerIntegrationCommands(
         if (confirm !== 'Disable') return;
         try {
           if (onMainCheckout) {
-            const baseRef = integrationBaseRef();
-            const returned = await switchAwayFromIntegration(
-              integration.path,
-              context.workspaceState.get<string>(INTEGRATION_RETURN_KEY),
+            const baseRef = previewBaseRef();
+            const returned = await switchAwayFromPreview(
+              preview.path,
+              context.workspaceState.get<string>(PREVIEW_RETURN_KEY),
               baseRef,
+              preview.branch,
             );
             await context.workspaceState.update(
-              INTEGRATION_RETURN_KEY,
+              PREVIEW_RETURN_KEY,
               undefined,
             );
             log.appendLine(
-              `Integration mode off: ${integration.path} switched back to ${returned}`,
+              `Preview mode off: ${preview.path} switched back to ${returned}`,
             );
           } else {
-            // Integration tree contents are always derived — force is safe
-            const result = await removeWorktree(integration.path, {
+            // Preview tree contents are always derived — force is safe
+            const result = await removeWorktree(preview.path, {
               force: true,
             });
             if (!result.ok) throw new Error(result.message);
             log.appendLine(
-              `Integration worktree removed: ${integration.path}`,
+              `Preview worktree removed: ${preview.path}`,
             );
           }
           // Branch is derived state — delete so nothing straggles.
           // (Best-effort; cwd must be a surviving checkout.)
           const repoCwd = treeProvider.getRepoCwd();
           const cwd = onMainCheckout
-            ? integration.path
-            : repoCwd !== integration.path
+            ? preview.path
+            : repoCwd !== preview.path
               ? repoCwd
               : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (cwd && (await deleteIntegrationBranch(cwd)))
-            log.appendLine(`Integration branch deleted: ${integration.branch}`);
+          if (cwd && (await deletePreviewBranch(cwd)))
+            log.appendLine(`Preview branch deleted: ${preview.branch}`);
           if (cwd) await clearBasePin(cwd).catch(() => {});
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Disable integration failed: ${message}`);
+          log.appendLine(`Disable preview failed: ${message}`);
           void vscode.window.showErrorMessage(
-            `Git Workflow: could not disable integration — ${message}`,
+            `Git Workflow: could not disable preview — ${message}`,
           );
           return;
         }
         treeProvider.refresh();
         void vscode.window.setStatusBarMessage(
-          'Git Workflow: integration mode off',
+          'Git Workflow: preview mode off',
           3000,
         );
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.changeIntegrationBase',
+      'worktreeCompare.changePreviewBase',
       async () => {
-        const integration = treeProvider.getIntegration();
-        if (!integration) return;
+        const preview = treeProvider.getPreview();
+        if (!preview) return;
         try {
           const picked = await pickBaseRef(
-            integration.path,
-            integrationBaseRef(),
+            preview.path,
+            previewBaseRef(),
           );
           if (!picked) return;
-          // Workspace-scoped: the integration base is a property of this repo
+          // Workspace-scoped: the preview base is a property of this repo
           await vscode.workspace
             .getConfiguration('worktreeCompare')
             .update(
-              'integrationBaseRef',
+              'previewBaseRef',
               picked,
               vscode.ConfigurationTarget.Workspace,
             );
-          log.appendLine(`Integration base → ${picked}`);
+          log.appendLine(`Preview base → ${picked}`);
           // The config-change handler triggers the rebuild
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Change integration base failed: ${message}`);
+          log.appendLine(`Change preview base failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not change base — ${message}`,
           );
@@ -224,10 +225,10 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.catchUpIntegrationBase',
+      'worktreeCompare.catchUpPreviewBase',
       async () => {
-        const result = await treeProvider.catchUpIntegrationBase();
-        reportIntegrationResult(result, 'integration base caught up');
+        const result = await treeProvider.catchUpPreviewBase();
+        reportPreviewResult(result, 'preview base caught up');
       },
     ),
     vscode.commands.registerCommand(
@@ -235,16 +236,16 @@ export function registerIntegrationCommands(
       // nameArg: menus pass nothing (prompt); tests/automation may pass
       // the branch name directly.
       async (nameArg?: unknown) => {
-        const integration = treeProvider.getIntegration();
-        const drift = integration?.baseDrift;
-        if (!integration || !drift) return;
-        const baseName = integrationBaseRef().replace(/^origin\//, '');
+        const preview = treeProvider.getPreview();
+        const drift = preview?.baseDrift;
+        if (!preview || !drift) return;
+        const baseName = previewBaseRef().replace(/^origin\//, '');
         // The base branch may be checked out (often a clean root that the
         // Worktrees list hides) — resolve its checkout from git itself,
         // because moving the ref under a live checkout must reset there.
         let baseCheckoutPath: string | undefined;
         try {
-          const admin = await listWorktreeAdmin(integration.path);
+          const admin = await listWorktreeAdmin(preview.path);
           baseCheckoutPath = [...admin.values()].find(
             (s) => !s.detached && s.branch === baseName,
           )?.path;
@@ -284,7 +285,7 @@ export function registerIntegrationCommands(
         const branch = name.trim();
         try {
           if (
-            await gitOk(integration.path, [
+            await gitOk(preview.path, [
               'show-ref',
               '--verify',
               '--quiet',
@@ -293,13 +294,13 @@ export function registerIntegrationCommands(
           ) {
             throw new Error(`branch ${branch} already exists`);
           }
-          await git(integration.path, ['branch', branch, drift.sha]);
+          await git(preview.path, ['branch', branch, drift.sha]);
           // Record where the branch forked: created from a raw sha, its
           // reflog says 'Created from <sha>' and inference would resolve
           // the base to its own tip (0 ahead, empty diff). This config key
           // is inference's first stop; genuineBaseFor reads it too, so the
-          // branch also auto-enrolls as an integration member by base.
-          await git(integration.path, [
+          // branch also auto-enrolls as an preview member by base.
+          await git(preview.path, [
             'config',
             `branch.${branch}.vscode-merge-base`,
             baseName,
@@ -308,7 +309,7 @@ export function registerIntegrationCommands(
             // --keep refuses rather than clobber local file changes
             await git(baseCheckoutPath, ['reset', '--keep', drift.resetTo]);
           } else {
-            await git(integration.path, [
+            await git(preview.path, [
               'update-ref',
               `refs/heads/${baseName}`,
               drift.resetTo,
@@ -318,8 +319,8 @@ export function registerIntegrationCommands(
           log.appendLine(
             `Base drift → ${branch}: ${drift.ahead} commit(s) moved off ${baseName} (${baseName} back at ${drift.resetTo.slice(0, 10)})`,
           );
-          const result = await treeProvider.applyToIntegration(branch);
-          reportIntegrationResult(
+          const result = await treeProvider.applyToPreview(branch);
+          reportPreviewResult(
             result,
             `moved ${drift.ahead} commit(s) to ${branch}`,
           );
@@ -369,7 +370,7 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.addToIntegration',
+      'worktreeCompare.addToPreview',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
@@ -377,8 +378,8 @@ export function registerIntegrationCommands(
         try {
           // Adding means "put it in the preview": applied immediately —
           // the checkbox is for taking a lane OUT, not for finishing an add
-          const result = await treeProvider.applyToIntegration(wt.branch);
-          reportIntegrationResult(result, `added ${wt.branch} to the preview`);
+          const result = await treeProvider.applyToPreview(wt.branch);
+          reportPreviewResult(result, `added ${wt.branch} to the preview`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void vscode.window.showErrorMessage(`Git Workflow: ${message}`);
@@ -386,23 +387,23 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.includeWipInIntegration',
+      'worktreeCompare.includeWipInPreview',
       async (item?: { branch?: string }) => {
         if (!item?.branch) return;
         const result = await treeProvider.setLaneWip(item.branch, true);
-        reportIntegrationResult(result, `wip on for ${item.branch}`);
+        reportPreviewResult(result, `wip on for ${item.branch}`);
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.excludeWipFromIntegration',
+      'worktreeCompare.excludeWipFromPreview',
       async (item?: { branch?: string }) => {
         if (!item?.branch) return;
         const result = await treeProvider.setLaneWip(item.branch, false);
-        reportIntegrationResult(result, `wip off for ${item.branch}`);
+        reportPreviewResult(result, `wip off for ${item.branch}`);
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.removeFromIntegration',
+      'worktreeCompare.removeFromPreview',
       async (item?: { branch?: string; worktreePath?: string }) => {
         const branch =
           item?.branch ??
@@ -410,47 +411,47 @@ export function registerIntegrationCommands(
             ? treeProvider.getWorktree(item.worktreePath)?.branch
             : undefined);
         if (!branch) return;
-        const result = await treeProvider.removeIntegrationCandidate(branch);
-        reportIntegrationResult(result, `removed ${branch}`);
+        const result = await treeProvider.removePreviewCandidate(branch);
+        reportPreviewResult(result, `removed ${branch}`);
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.applyToIntegration',
+      'worktreeCompare.applyToPreview',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
         if (!wt) return;
-        const result = await treeProvider.applyToIntegration(wt.branch);
-        reportIntegrationResult(result, `applied ${wt.branch}`);
+        const result = await treeProvider.applyToPreview(wt.branch);
+        reportPreviewResult(result, `applied ${wt.branch}`);
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.hideFromIntegration',
+      'worktreeCompare.hideFromPreview',
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
         if (!wt) return;
-        const result = await treeProvider.hideFromIntegration(wt.branch);
-        reportIntegrationResult(result, `hid ${wt.branch}`);
+        const result = await treeProvider.hideFromPreview(wt.branch);
+        reportPreviewResult(result, `hid ${wt.branch}`);
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.rebuildIntegration',
+      'worktreeCompare.rebuildPreview',
       async () => {
-        if (!treeProvider.getIntegration()) {
+        if (!treeProvider.getPreview()) {
           void vscode.window.showInformationMessage(
-            'Git Workflow: no integration worktree — check out the integration branch (default focus/working) in a worktree first',
+            'Git Workflow: no preview worktree — check out the preview branch (default focus/working) in a worktree first',
           );
           return;
         }
-        const result = await treeProvider.runIntegrationRebuild('manual');
-        reportIntegrationResult(result, 'integration rebuilt');
+        const result = await treeProvider.runPreviewRebuild('manual');
+        reportPreviewResult(result, 'preview rebuilt');
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.absorbIntegrationCommits',
+      'worktreeCompare.absorbPreviewCommits',
       async () => {
-        const result = await treeProvider.absorbIntegrationCommits();
+        const result = await treeProvider.absorbPreviewCommits();
         if (!result) return;
         if (result.ok) {
           void vscode.window.showInformationMessage(
@@ -458,7 +459,7 @@ export function registerIntegrationCommands(
           );
           return;
         }
-        log.appendLine(`Absorb integration commits failed: ${result.message}`);
+        log.appendLine(`Absorb preview commits failed: ${result.message}`);
         void vscode.window.showErrorMessage(
           result.code === 'conflict'
             ? `Git Workflow: those commits clash with the base${
@@ -469,44 +470,44 @@ export function registerIntegrationCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.absorbIntegrationEdits',
+      'worktreeCompare.absorbPreviewEdits',
       async () => {
-        const result = await treeProvider.absorbIntegrationEdits();
+        const result = await treeProvider.absorbPreviewEdits();
         if (result.ok) {
           void vscode.window.showInformationMessage(
-            `Git Workflow: moved the integration checkout's uncommitted edits onto ${path.basename(result.target)} — review and commit them there.`,
+            `Git Workflow: moved the preview checkout's uncommitted edits onto ${path.basename(result.target)} — review and commit them there.`,
           );
           return;
         }
         if (result.code === 'nothing') {
           void vscode.window.setStatusBarMessage(
-            'Git Workflow: integration checkout is clean — nothing to absorb',
+            'Git Workflow: preview checkout is clean — nothing to absorb',
             3000,
           );
           return;
         }
-        log.appendLine(`Absorb integration edits failed: ${result.message}`);
+        log.appendLine(`Absorb preview edits failed: ${result.message}`);
         void vscode.window.showErrorMessage(
           result.code === 'conflict'
             ? `Git Workflow: those edits clash with the base${
                 result.files?.length ? ` in ${result.files.join(', ')}` : ''
-              } — they were left in the integration checkout. Move them onto the lane they belong to instead.`
+              } — they were left in the preview checkout. Move them onto the lane they belong to instead.`
             : `Git Workflow: could not absorb — ${result.message}`,
         );
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.abortIntegrationMerge',
+      'worktreeCompare.abortPreviewMerge',
       async () => {
         try {
-          await treeProvider.abortIntegrationMerge();
+          await treeProvider.abortPreviewMerge();
           void vscode.window.setStatusBarMessage(
-            'Git Workflow: integration merge aborted',
+            'Git Workflow: preview merge aborted',
             3000,
           );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Abort integration merge failed: ${message}`);
+          log.appendLine(`Abort preview merge failed: ${message}`);
           void vscode.window.showErrorMessage(
             `Git Workflow: could not abort merge — ${message}`,
           );
@@ -516,7 +517,7 @@ export function registerIntegrationCommands(
   ];
 }
 
-export function reportIntegrationResult(
+export function reportPreviewResult(
   result: RebuildResult,
   successMessage: string,
 ): void {
@@ -531,18 +532,18 @@ export function reportIntegrationResult(
   }
   if (result.code === 'busy') {
     void vscode.window.setStatusBarMessage(
-      'Git Workflow: integration rebuild already running',
+      'Git Workflow: preview rebuild already running',
       3000,
     );
     return;
   }
   if (result.code === 'conflict') {
     void vscode.window.showWarningMessage(
-      `Git Workflow: lane ${result.lane ?? ''} conflicts — resolve in the integration worktree or run Abort Integration Merge. ${result.message}`,
+      `Git Workflow: lane ${result.lane ?? ''} conflicts — resolve in the preview worktree or run Abort Preview Merge. ${result.message}`,
     );
     return;
   }
   void vscode.window.showErrorMessage(
-    `Git Workflow: integration rebuild failed — ${result.message}`,
+    `Git Workflow: preview rebuild failed — ${result.message}`,
   );
 }

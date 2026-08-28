@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   mergeOffTree,
   resolveConflictedTree,
-} from '../../src/git/integration/merge';
+} from '../../src/git/preview/merge';
 import { git } from './helpers';
 
 const BASE_FILES: Record<string, string> = {

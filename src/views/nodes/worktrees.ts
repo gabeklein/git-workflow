@@ -9,12 +9,12 @@ import {
 } from '../../github/pr';
 import { worktreeResourceUri } from '../worktreeDecorations';
 
-/** How a worktree row relates to the integration overlay (focus/working). */
-export interface IntegrationRowInfo {
+/** How a worktree row relates to the preview overlay (focus/working). */
+export interface PreviewRowInfo {
   role: 'lane';
   /** Branch is in the applied set */
   applied?: boolean;
-  /** Branch is offered under the Integration row */
+  /** Branch is offered under the Preview row */
   candidate?: boolean;
 }
 
@@ -28,7 +28,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     worktree: DiscoveredWorktree,
     selected: boolean,
     pullRequest?: PullRequestInfo,
-    integration?: IntegrationRowInfo,
+    preview?: PreviewRowInfo,
     baseStatus?: {
       behind: number;
       conflicts: boolean;
@@ -60,9 +60,9 @@ export class WorktreeListItem extends vscode.TreeItem {
     const removable =
       !worktree.isRootCheckout && worktree.isMainWorktree !== true;
     if (removable) flags.push('Removable');
-    if (integration?.role === 'lane') {
-      // Candidates are managed under the Integration row; here only add/remove
-      flags.push(integration.candidate ? 'LaneCandidate' : 'LaneAddable');
+    if (preview?.role === 'lane') {
+      // Candidates are managed under the Preview row; here only add/remove
+      flags.push(preview.candidate ? 'LaneCandidate' : 'LaneAddable');
     }
     if (baseStatus?.rebasing) {
       flags.push('Rebasing');
@@ -149,8 +149,8 @@ export class WorktreeListItem extends vscode.TreeItem {
           ? `Locked: ${worktree.lockReason}`
           : 'Locked (git worktree lock)'
         : undefined,
-      integration?.role === 'lane' && integration.applied
-        ? 'Applied to the integration worktree'
+      preview?.role === 'lane' && preview.applied
+        ? 'Applied to the preview worktree'
         : undefined,
       baseStatus?.rebasing
         ? 'A rebase is paused here — resolve the conflicts, then Continue Rebase (or Abort Rebase).'
@@ -183,7 +183,7 @@ export class WorktreeListItem extends vscode.TreeItem {
 
 /**
  * Warning when GitHub reports the linked PR has merge conflicts.
- * (We no longer warn merely because the integration tip moved ahead.)
+ * (We no longer warn merely because the preview tip moved ahead.)
  */
 export class ConflictWarningItem extends vscode.TreeItem {
   readonly kind = 'conflictWarning' as const;

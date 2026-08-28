@@ -60,7 +60,7 @@ export async function mergeOffTree(
 }
 
 /**
- * Rebuild the integration checkout: compute base + `--no-ff`-style merge
+ * Rebuild the preview checkout: compute base + `--no-ff`-style merge
  * of each applied lane off-tree, then apply the result with one
  * `reset --hard`. Refuses when the checkout is dirty or carries commits
  * that belong to no lane. A conflicting lane fails the rebuild WITHOUT
@@ -137,7 +137,7 @@ export async function resolveConflictedTree(
         unresolved.push(file);
         continue;
       }
-      // Executable bit follows the integration side
+      // Executable bit follows the preview side
       let fileMode = '100644';
       try {
         const ls = await git(cwd, ['ls-tree', ours, '--', file]);

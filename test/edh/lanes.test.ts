@@ -147,15 +147,15 @@ describe('focus panel', () => {
     }
   });
 
-  it('keeps the integration branch out of every group', async () => {
+  it('keeps the preview branch out of every group', async () => {
     const everything = [
       ...(await labels('working')),
       ...(await labels('local')),
       ...(await labels('remote')),
     ];
     assert.ok(
-      !everything.some((l) => l.startsWith('integration/')),
-      'the integration branch is the panel subject, not a row',
+      !everything.some((l) => l.startsWith('preview/')),
+      'the preview branch is the panel subject, not a row',
     );
   });
 });

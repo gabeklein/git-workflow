@@ -8,7 +8,7 @@ import {
   listAppliedLanes,
   listCandidateLanes,
   reorderLane,
-} from '../../src/git/integration/lanes';
+} from '../../src/git/preview/lanes';
 import { makeRepo, type ScratchRepo } from './helpers';
 
 /**

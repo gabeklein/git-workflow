@@ -1,5 +1,5 @@
 /**
- * The frozen integration base + the drift LANE: commits made directly on
+ * The frozen preview base + the drift LANE: commits made directly on
  * the local base branch never retarget the preview (the pin holds) — they
  * ride along as a checkable lane instead, included by default. Uncheck
  * persists; branchify / catch-up / push are the three ways the segment
@@ -28,7 +28,7 @@ describe('base pin & drift lane', () => {
     api = await getApi();
   });
 
-  const drift = () => api.integration()?.baseDrift;
+  const drift = () => api.preview()?.baseDrift;
   const pin = () => {
     try {
       return fs
@@ -56,8 +56,8 @@ describe('base pin & drift lane', () => {
 
     // Render-level: the drift LANE must actually be painted — a checked
     // checkbox row, not just controller state.
-    const row = (await api.integrationRows()).find(
-      (r) => r.kind === 'integrationBaseDrift',
+    const row = (await api.previewRows()).find(
+      (r) => r.kind === 'previewBaseDrift',
     );
     assert.ok(row, 'drift lane row is rendered under Preview');
     assert.equal(row!.label, 'main', 'row is labeled with the base branch');
@@ -127,7 +127,7 @@ describe('base pin & drift lane', () => {
       return (drift()?.ahead ?? 0) >= 1;
     });
     const mainSha = git(repo, ['rev-parse', 'main']);
-    await run('worktreeCompare.catchUpIntegrationBase');
+    await run('worktreeCompare.catchUpPreviewBase');
     await poll('catch-up rebases the preview onto the new base', 30000, () => {
       try {
         git(working, ['merge-base', '--is-ancestor', mainSha, 'HEAD']);
@@ -158,7 +158,7 @@ describe('base pin & drift lane', () => {
   });
 
   it('pin initialization surfaces PRE-EXISTING drift instead of swallowing it', async () => {
-    // Commits made on main BEFORE integration first pins (fresh install,
+    // Commits made on main BEFORE preview first pins (fresh install,
     // re-enable) must show as drift too: init pins at the published tip,
     // never the drifted local descendant.
     fs.rmSync(path.join(repo, '.git', 'focus-base'));

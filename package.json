@@ -100,17 +100,17 @@
           ],
           "description": "Optional GitHub integration: PR badges on worktrees and branches, and Open/Copy PR actions. Requires authenticated `gh` on PATH."
         },
-        "worktreeCompare.integrationBranch": {
+        "worktreeCompare.previewBranch": {
           "type": "string",
-          "default": "integration/{base}",
-          "description": "Branch name of the integration overlay; {base} expands to the short base name (integration/main). Checking this branch out opts in: that checkout is rebuilt as the base plus a merge of each applied lane. Set to focus/working for interop with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
+          "default": "preview/{base}",
+          "description": "Branch name of the preview overlay; {base} expands to the short base name (preview/main). Checking this branch out opts in: that checkout is rebuilt as the base plus a merge of each applied lane. Set to focus/working for interop with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
         },
-        "worktreeCompare.integrationBaseRef": {
+        "worktreeCompare.previewBaseRef": {
           "type": "string",
           "default": "",
-          "description": "Base ref integration rebuilds start from (origin/\u2026 preferred when it resolves). Empty = use defaultBaseRef. Change via the Integration row's context menu."
+          "description": "Base ref preview rebuilds start from (origin/\u2026 preferred when it resolves). Empty = use defaultBaseRef. Change via the Preview row's context menu."
         },
-        "worktreeCompare.integrationAutoResolve": {
+        "worktreeCompare.previewAutoResolve": {
           "type": "string",
           "enum": [
             "off",
@@ -123,7 +123,7 @@
             "Also resolve whitespace-only clashes plus everything provably LOSSLESS: union when both lanes only inserted lines (changelog appends, import lists) and linewise 3-way for adjacent-line edits.",
             "Everything 'whitespace' does, and remaining text clashes resolve toward the incoming lane \u2014 the rebuild never fails on content, and any lane where a hunk was dropped is TAGGED 'auto-resolved' with the files listed. ('lane-wins' is accepted as a legacy alias.)"
           ],
-          "description": "How far integration rebuilds may auto-resolve merge clashes between lanes. The integration tree is a derived, best-effort preview of unlanded work \u2014 lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
+          "description": "How far preview rebuilds may auto-resolve merge clashes between lanes. The preview tree is a derived, best-effort preview of unlanded work \u2014 lossless resolutions are silent, lossy ones are tagged on the lane row, and structural conflicts (edit vs delete) still fail honestly."
         },
         "worktreeCompare.catchUpStrategy": {
           "type": "string",
@@ -153,31 +153,31 @@
           ],
           "description": "Keep feature worktrees caught up with the base automatically when it is safe. A conflicting attempt aborts cleanly and marks the row 'conflicts with <base>'. Off by default: moving your branch is a side effect you opt into."
         },
-        "worktreeCompare.integrationFetchIntervalMs": {
+        "worktreeCompare.previewFetchIntervalMs": {
           "type": "number",
           "default": 300000,
           "minimum": 0,
-          "description": "While integration mode is on, `git fetch origin <base>` this often (ms) so the integration tree tracks where PRs actually land; a moved tip triggers an auto-rebuild and landed lanes retire. 0 = never fetch automatically (manual Rebuild still fetches first)."
+          "description": "While preview mode is on, `git fetch origin <base>` this often (ms) so the preview tree tracks where PRs actually land; a moved tip triggers an auto-rebuild and landed lanes retire. 0 = never fetch automatically (manual Rebuild still fetches first)."
         },
-        "worktreeCompare.integrationAbsorbStrays": {
+        "worktreeCompare.previewAbsorbStrays": {
           "type": "boolean",
           "default": true,
-          "description": "When work is committed directly on the integration checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The integration tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first \u2014 an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
+          "description": "When work is committed directly on the preview checkout, move it onto the base branch's worktree automatically (it then shows as unpushed base work). The preview tree is derived and gets reset on every rebuild, so those commits would otherwise deadlock the preview. Commits that ADD files while lanes are applied always ask first \u2014 an added file has no diff context, so unlike an edit it applies to the base cleanly even when its contents depend on lane code. Off = the rebuild keeps refusing until Absorb is run by hand. Uncommitted edits are never absorbed automatically."
         },
-        "worktreeCompare.integrationCommitGuard": {
+        "worktreeCompare.previewCommitGuard": {
           "type": "boolean",
           "default": true,
-          "description": "Install a pre-commit hook that refuses commits made while the integration branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
+          "description": "Install a pre-commit hook that refuses commits made while the preview branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
         },
         "worktreeCompare.quickDeleteLandedWorktrees": {
           "type": "boolean",
           "default": true,
           "description": "Delete a landed worktree without the confirmation modal. Only applies when the branch's commits are already contained in its base AND the checkout is clean, unlocked, attached, and holds no ignored files \u2014 `git worktree remove` deletes ignored files (a local .env, build output) without complaint, and the dirty probe cannot see them. Off = every delete is confirmed."
         },
-        "worktreeCompare.integrationAutoRebuild": {
+        "worktreeCompare.previewAutoRebuild": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically rebuild the integration worktree when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Integration command or external hooks."
+          "description": "Automatically rebuild the preview worktree when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Preview command or external hooks."
         },
         "worktreeCompare.remotePrLimit": {
           "type": "number",
@@ -333,71 +333,71 @@
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.applyToIntegration",
-        "title": "Apply to Integration",
+        "command": "worktreeCompare.applyToPreview",
+        "title": "Apply to Preview",
         "icon": "$(combine)",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.hideFromIntegration",
-        "title": "Hide from Integration",
+        "command": "worktreeCompare.hideFromPreview",
+        "title": "Hide from Preview",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.rebuildIntegration",
-        "title": "Rebuild Integration Worktree",
+        "command": "worktreeCompare.rebuildPreview",
+        "title": "Rebuild Preview Worktree",
         "icon": "$(sync)",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.abortIntegrationMerge",
-        "title": "Abort Integration Merge",
+        "command": "worktreeCompare.abortPreviewMerge",
+        "title": "Abort Preview Merge",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.absorbIntegrationCommits",
-        "title": "Absorb Integration Commits\u2026",
+        "command": "worktreeCompare.absorbPreviewCommits",
+        "title": "Absorb Preview Commits\u2026",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.absorbIntegrationEdits",
-        "title": "Absorb Integration Edits\u2026",
+        "command": "worktreeCompare.absorbPreviewEdits",
+        "title": "Absorb Preview Edits\u2026",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.enableIntegration",
-        "title": "Enable Integration Mode\u2026",
+        "command": "worktreeCompare.enablePreview",
+        "title": "Enable Preview Mode\u2026",
         "icon": "$(combine)",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.addToIntegration",
-        "title": "Add to Integration",
+        "command": "worktreeCompare.addToPreview",
+        "title": "Add to Preview",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.removeFromIntegration",
-        "title": "Remove from Integration",
+        "command": "worktreeCompare.removeFromPreview",
+        "title": "Remove from Preview",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.includeWipInIntegration",
+        "command": "worktreeCompare.includeWipInPreview",
         "title": "Include Working-Tree Edits",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.excludeWipFromIntegration",
+        "command": "worktreeCompare.excludeWipFromPreview",
         "title": "Exclude Working-Tree Edits",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.disableIntegration",
-        "title": "Disable Integration Mode\u2026",
+        "command": "worktreeCompare.disablePreview",
+        "title": "Disable Preview Mode\u2026",
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.changeIntegrationBase",
-        "title": "Change Integration Base\u2026",
+        "command": "worktreeCompare.changePreviewBase",
+        "title": "Change Preview Base\u2026",
         "icon": "$(git-compare)",
         "category": "Git Workflow"
       },
@@ -448,8 +448,8 @@
         "category": "Git Workflow"
       },
       {
-        "command": "worktreeCompare.catchUpIntegrationBase",
-        "title": "Catch Up Integration Base",
+        "command": "worktreeCompare.catchUpPreviewBase",
+        "title": "Catch Up Preview Base",
         "icon": "$(arrow-up)",
         "category": "Git Workflow"
       },
@@ -598,33 +598,33 @@
           "group": "1_base@2"
         },
         {
-          "command": "worktreeCompare.addToIntegration",
+          "command": "worktreeCompare.addToPreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /LaneAddable/",
-          "group": "2_integration@1"
+          "group": "2_preview@1"
         },
         {
-          "command": "worktreeCompare.removeFromIntegration",
+          "command": "worktreeCompare.removeFromPreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /LaneCandidate/",
-          "group": "2_integration@1"
+          "group": "2_preview@1"
         },
         {
           "command": "worktreeCompare.branchifyBaseDrift",
-          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == previewBaseDrift",
           "group": "inline@1"
         },
         {
-          "command": "worktreeCompare.catchUpIntegrationBase",
-          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
+          "command": "worktreeCompare.catchUpPreviewBase",
+          "when": "view == worktreeCompare.lanes && viewItem == previewBaseDrift",
           "group": "inline@2"
         },
         {
           "command": "worktreeCompare.branchifyBaseDrift",
-          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
+          "when": "view == worktreeCompare.lanes && viewItem == previewBaseDrift",
           "group": "1_drift@1"
         },
         {
-          "command": "worktreeCompare.catchUpIntegrationBase",
-          "when": "view == worktreeCompare.lanes && viewItem == integrationBaseDrift",
+          "command": "worktreeCompare.catchUpPreviewBase",
+          "when": "view == worktreeCompare.lanes && viewItem == previewBaseDrift",
           "group": "1_drift@2"
         },
         {
@@ -643,19 +643,19 @@
           "group": "1_resolve@2"
         },
         {
-          "command": "worktreeCompare.removeFromIntegration",
-          "when": "view == worktreeCompare.lanes && viewItem =~ /^integrationLane/",
-          "group": "2_integration@1"
+          "command": "worktreeCompare.removeFromPreview",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^previewLane/",
+          "group": "2_preview@1"
         },
         {
-          "command": "worktreeCompare.includeWipInIntegration",
+          "command": "worktreeCompare.includeWipInPreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /WipOff/",
-          "group": "2_integration@2"
+          "group": "2_preview@2"
         },
         {
-          "command": "worktreeCompare.excludeWipFromIntegration",
+          "command": "worktreeCompare.excludeWipFromPreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /WipOn/",
-          "group": "2_integration@2"
+          "group": "2_preview@2"
         },
         {
           "command": "worktreeCompare.deleteWorktree",
@@ -743,27 +743,27 @@
           "group": "inline@1"
         },
         {
-          "command": "worktreeCompare.rebuildIntegration",
+          "command": "worktreeCompare.rebuildPreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
           "group": "1_preview@1"
         },
         {
-          "command": "worktreeCompare.changeIntegrationBase",
+          "command": "worktreeCompare.changePreviewBase",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
           "group": "1_preview@2"
         },
         {
-          "command": "worktreeCompare.abortIntegrationMerge",
+          "command": "worktreeCompare.abortPreviewMerge",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
           "group": "1_preview@3"
         },
         {
-          "command": "worktreeCompare.absorbIntegrationEdits",
+          "command": "worktreeCompare.absorbPreviewEdits",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
           "group": "1_preview@4"
         },
         {
-          "command": "worktreeCompare.disableIntegration",
+          "command": "worktreeCompare.disablePreview",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^preview/",
           "group": "1_preview@5"
         }

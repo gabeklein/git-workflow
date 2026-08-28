@@ -1,15 +1,14 @@
 import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
-import { integrationBranch } from './config';
 import { mergeOffTree } from './merge';
 import { findStrayCommits, resolveBaseSha } from './status';
 import { snapshotWorktreeCommit } from './engine';
 
 /**
- * Absorbing stray work out of the integration checkout.
+ * Absorbing stray work out of the preview checkout.
  *
- * The integration tree is DERIVED — base plus merged lanes — so anything
+ * The preview tree is DERIVED — base plus merged lanes — so anything
  * written there is destined for a `reset --hard`. The rebuild guards
  * refuse rather than destroy it, which protects the work but deadlocks the
  * preview: nothing ever gets it out. Absorbing is that missing exit.
@@ -20,7 +19,7 @@ import { snapshotWorktreeCommit } from './engine';
  * edit sits in a file a lane also touched. Uncommitted strays get the same
  * treatment via an ephemeral snapshot commit.
  *
- * Copy first, clean second: the integration checkout is only reset once
+ * Copy first, clean second: the preview checkout is only reset once
  * the target has the work. A conflict aborts, reports, and leaves both
  * sides exactly as they were.
  */
@@ -28,7 +27,7 @@ import { snapshotWorktreeCommit } from './engine';
 /**
  * Where absorbed work goes. A checkout is preferred when the base has one:
  * the replay is a cherry-pick, so its working tree and index end up
- * consistent with the moved branch. With integration enabled by switching
+ * consistent with the moved branch. With preview enabled by switching
  * a checkout IN PLACE the base has no worktree at all, and the replay has
  * to happen against the ref itself.
  */
@@ -80,7 +79,7 @@ export async function checkoutForBranch(
 
 /**
  * Paths a commit touches, against its first parent — which for both a
- * stray commit and a wip snapshot is the merged integration tree, so this
+ * stray commit and a wip snapshot is the merged preview tree, so this
  * is exactly the set the transplant will write.
  */
 async function pathsInCommit(cwd: string, sha: string): Promise<string[]> {
@@ -373,8 +372,8 @@ async function replay(
 }
 
 /**
- * Move commits made directly on the integration branch onto the branch
- * checked out at `targetPath`, then rewind the integration checkout to the
+ * Move commits made directly on the preview branch onto the branch
+ * checked out at `targetPath`, then rewind the preview checkout to the
  * base so the next rebuild is unblocked.
  *
  * The rewind is safe only because the replay already succeeded — and it is
@@ -382,11 +381,12 @@ async function replay(
  * originals stay on HEAD's first-parent line and the guard fires forever.
  */
 export async function absorbStrayCommits(
-  integrationPath: string,
+  previewPath: string,
   baseRef: string,
   target: AbsorbTarget,
+  previewBranch: string,
 ): Promise<AbsorbResult> {
-  const baseSha = await resolveBaseSha(integrationPath, baseRef);
+  const baseSha = await resolveBaseSha(previewPath, baseRef);
   if (!baseSha) {
     return {
       ok: false,
@@ -394,7 +394,7 @@ export async function absorbStrayCommits(
       message: `base ref ${baseRef} does not resolve`,
     };
   }
-  const strays = await findStrayCommits(integrationPath, baseSha);
+  const strays = await findStrayCommits(previewPath, baseSha, previewBranch);
   if (strays.length === 0) {
     return {
       ok: false,
@@ -405,15 +405,15 @@ export async function absorbStrayCommits(
   const shas = strays.map((c) => c.sha);
   // Recorded on every absorbed commit. Read from HEAD rather than from
   // config so the trailer names the branch the work was ACTUALLY on, even
-  // if the integration branch has since been renamed out from under it.
+  // if the preview branch has since been renamed out from under it.
   const sourceBranch =
-    (await git(integrationPath, ['symbolic-ref', '--short', 'HEAD']).catch(
+    (await git(previewPath, ['symbolic-ref', '--short', 'HEAD']).catch(
       () => '',
-    )).trim() || 'the integration checkout';
+    )).trim() || 'the preview checkout';
   if (target.kind === 'checkout') {
     const incoming = (
       await Promise.all(
-        strays.map((c) => pathsInCommit(integrationPath, c.sha)),
+        strays.map((c) => pathsInCommit(previewPath, c.sha)),
       )
     ).flat();
     const clash = await clashingPaths(target.path, incoming);
@@ -431,7 +431,7 @@ export async function absorbStrayCommits(
   const replayed =
     target.kind === 'checkout'
       ? await replay(target.path, shas, sourceBranch)
-      : await replayOntoRef(integrationPath, target.branch, shas, sourceBranch);
+      : await replayOntoRef(previewPath, target.branch, shas, sourceBranch);
   if (!replayed.ok) {
     return {
       ok: false,
@@ -441,7 +441,7 @@ export async function absorbStrayCommits(
     };
   }
   try {
-    await git(integrationPath, ['reset', '--hard', baseSha]);
+    await git(previewPath, ['reset', '--hard', baseSha]);
   } catch (err) {
     return { ok: false, code: 'error', message: gitErrorMessage(err) };
   }
@@ -454,30 +454,30 @@ export async function absorbStrayCommits(
 }
 
 /**
- * Move UNCOMMITTED edits out of the integration checkout and onto the
+ * Move UNCOMMITTED edits out of the preview checkout and onto the
  * branch at `targetPath`, where they arrive uncommitted too — the work was
  * never committed, and absorbing must not decide that it is finished.
  *
  * Never call this on a checkout an agent may still be writing to: it
- * restores the integration tree, so a half-written change would be moved
+ * restores the preview tree, so a half-written change would be moved
  * out from under whoever is making it.
  */
 export async function absorbDirtyEdits(
-  integrationPath: string,
+  previewPath: string,
   targetPath: string,
-  previewBranch = integrationBranch(),
+  previewBranch: string,
 ): Promise<AbsorbResult> {
-  if (!(await isWorktreeDirty(integrationPath)))
+  if (!(await isWorktreeDirty(previewPath)))
     return { ok: false, code: 'nothing', message: 'nothing to absorb' };
   let snapshot: string | undefined;
   try {
-    snapshot = await snapshotWorktreeCommit(integrationPath, previewBranch);
+    snapshot = await snapshotWorktreeCommit(previewPath, previewBranch);
   } catch (err) {
     return { ok: false, code: 'error', message: gitErrorMessage(err) };
   }
   if (!snapshot)
     return { ok: false, code: 'nothing', message: 'nothing to absorb' };
-  const incoming = await pathsInCommit(integrationPath, snapshot);
+  const incoming = await pathsInCommit(previewPath, snapshot);
   const clash = await clashingPaths(targetPath, incoming);
   if (clash.length > 0) {
     return {
@@ -516,8 +516,8 @@ export async function absorbDirtyEdits(
   try {
     // The snapshot holds everything `add -A` saw, so the restore has to
     // cover untracked files too or they would be absorbed AND left behind.
-    await git(integrationPath, ['reset', '-q', '--hard', 'HEAD']);
-    await git(integrationPath, ['clean', '-qfd']);
+    await git(previewPath, ['reset', '-q', '--hard', 'HEAD']);
+    await git(previewPath, ['clean', '-qfd']);
   } catch (err) {
     return { ok: false, code: 'error', message: gitErrorMessage(err) };
   }

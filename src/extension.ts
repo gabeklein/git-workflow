@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import { registerBranchCommands } from './commands/branchCommands';
 import {
-  registerIntegrationCommands,
-  reportIntegrationResult,
-} from './commands/integrationCommands';
+  registerPreviewCommands,
+  reportPreviewResult,
+} from './commands/previewCommands';
 import { registerFileExplorerCommands } from './commands/fileExplorerCommands';
 import { registerLaneOpsCommands } from './commands/laneOpsCommands';
 import { registerWorktreeCommands } from './commands/worktreeCommands';
@@ -84,8 +84,8 @@ export function activate(context: vscode.ExtensionContext): unknown {
   // Panel descriptions: worktree count / which worktree the Changes show
   const updateSplitViewDescriptions = () => {
     const worktrees = treeProvider.getWorktrees();
-    const integrationPath = treeProvider.getIntegration()?.path;
-    const listed = worktrees.filter((w) => w.path !== integrationPath).length;
+    const previewPath = treeProvider.getPreview()?.path;
+    const listed = worktrees.filter((w) => w.path !== previewPath).length;
     treeView.description =
       listed > 0 ? `${listed} worktree${listed === 1 ? '' : 's'}` : undefined;
     const selected = treeProvider.getSelected();
@@ -98,42 +98,42 @@ export function activate(context: vscode.ExtensionContext): unknown {
     treeProvider.onDidChangeWorktrees(updateSplitViewDescriptions),
   );
 
-  // Integration is a group in Lanes now, not a panel of its own — a
+  // Preview is a group in Lanes now, not a panel of its own — a
   // preview is one derived branch built from some of your lanes, not a peer
   // of "your branches". Only the context keys survive.
-  const updateIntegrationView = () => {
-    const integration = treeProvider.getIntegration();
+  const updatePreviewView = () => {
+    const preview = treeProvider.getPreview();
     void vscode.commands.executeCommand(
       'setContext',
-      'worktreeCompare.integrationOn',
-      Boolean(integration),
+      'worktreeCompare.previewOn',
+      Boolean(preview),
     );
     void vscode.commands.executeCommand(
       'setContext',
-      'worktreeCompare.integrationMergePaused',
-      Boolean(integration?.mergePaused),
+      'worktreeCompare.previewMergePaused',
+      Boolean(preview?.mergePaused),
     );
     // Absorb is only offered while the checkout actually holds stray edits
     void vscode.commands.executeCommand(
       'setContext',
-      'worktreeCompare.integrationDirty',
-      integration?.error?.code === 'dirty',
+      'worktreeCompare.previewDirty',
+      preview?.error?.code === 'dirty',
     );
   };
-  updateIntegrationView();
+  updatePreviewView();
   context.subscriptions.push(
-    treeProvider.onDidChangeWorktrees(updateIntegrationView),
-    treeProvider.onDidChangeTreeData(updateIntegrationView),
+    treeProvider.onDidChangeWorktrees(updatePreviewView),
+    treeProvider.onDidChangeTreeData(updatePreviewView),
   );
 
-  // Lane checkboxes: checked = merged into the integration tree
+  // Lane checkboxes: checked = merged into the preview tree
   context.subscriptions.push(
     treeView.onDidChangeCheckboxState(async (e) => {
       for (const [item, state] of e.items) {
-        if (item.kind === 'integrationBaseDrift') {
+        if (item.kind === 'previewBaseDrift') {
           const included = state === vscode.TreeItemCheckboxState.Checked;
           const result = await treeProvider.setBaseDriftIncluded(included);
-          reportIntegrationResult(
+          reportPreviewResult(
             result,
             included
               ? `${item.baseName} unpushed work included`
@@ -141,12 +141,12 @@ export function activate(context: vscode.ExtensionContext): unknown {
           );
           continue;
         }
-        if (item.kind !== 'integrationLane') continue;
+        if (item.kind !== 'previewLane') continue;
         const result =
           state === vscode.TreeItemCheckboxState.Checked
-            ? await treeProvider.applyToIntegration(item.branch)
-            : await treeProvider.hideFromIntegration(item.branch);
-        reportIntegrationResult(
+            ? await treeProvider.applyToPreview(item.branch)
+            : await treeProvider.hideFromPreview(item.branch);
+        reportPreviewResult(
           result,
           state === vscode.TreeItemCheckboxState.Checked
             ? `applied ${item.branch}`
@@ -158,27 +158,27 @@ export function activate(context: vscode.ExtensionContext): unknown {
 
   context.subscriptions.push(
     ...registerWorktreeCommands(treeProvider, log),
-    ...registerIntegrationCommands(context, treeProvider, log),
+    ...registerPreviewCommands(context, treeProvider, log),
     ...registerBranchCommands(treeProvider, branchesProvider, log),
     ...registerLaneOpsCommands(treeProvider, log),
     ...registerFileExplorerCommands(treeProvider, filesProvider, log),
   );
 
   // Read-only view-state hooks for the EDH test suite: assertions on what
-  // the panels SHOW (badges, selection, integration state), which git-level
+  // the panels SHOW (badges, selection, preview state), which git-level
   // checks can't reach. Gated — absent in normal sessions.
   if (process.env.GW_TEST_HOOKS === '1') {
     return {
       test: {
         worktrees: () => treeProvider.getWorktrees(),
         selectedPath: () => treeProvider.getSelectedPath(),
-        integration: () => treeProvider.getIntegration(),
+        preview: () => treeProvider.getPreview(),
         baseStatus: (worktreePath: string) =>
           treeProvider.getBaseStatus(worktreePath),
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
         setBaseDriftIncluded: (included: boolean) =>
           treeProvider.setBaseDriftIncluded(included),
-        // RENDERED Integration rows — the exact TreeItems VS Code paints
+        // RENDERED Preview rows — the exact TreeItems VS Code paints
         // (state hooks alone let "state right, row missing" bugs pass)
         // Through the CHANGES provider, not the files one: routing around
         // the panel would let "section missing from Changes" pass green.
@@ -226,7 +226,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
         // Reads the lanes THROUGH the Lanes panel now: the rows have to
         // arrive via the tree that actually renders them, or a preview that
         // stopped appearing would pass green on its old provider.
-        integrationRows: async () => {
+        previewRows: async () => {
           const groups = await lanesProvider.getChildren();
           const preview = groups.find(
             (n) => n.kind === 'group' && n.group === 'preview',

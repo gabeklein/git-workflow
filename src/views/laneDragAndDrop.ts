@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { TreeNode } from './nodes';
-import { IntegrationLaneItem } from './nodes/lanes';
+import { PreviewLaneItem } from './nodes/lanes';
 
 /**
  * Dragging lane rows to say which lane wins.
@@ -19,7 +19,7 @@ import { IntegrationLaneItem } from './nodes/lanes';
 /**
  * Within-tree drags carry the VIEW ID, lowercased, by VS Code convention —
  * so this has to track the view the lanes are actually rendered in. It said
- * `...integration` until that panel became the Preview group of Lanes; a
+ * `...preview` until that panel became the Preview group of Lanes; a
  * stale value here does not fail loudly, it just means nothing can be
  * dropped.
  */
@@ -44,8 +44,8 @@ export class LaneDragAndDropController
   ): void {
     const lanes = source
       .filter(
-        (n): n is IntegrationLaneItem =>
-          n instanceof IntegrationLaneItem && n.applied,
+        (n): n is PreviewLaneItem =>
+          n instanceof PreviewLaneItem && n.applied,
       )
       .map((n) => n.branch);
     if (lanes.length === 0) return;
@@ -78,7 +78,7 @@ export class LaneDragAndDropController
     // Dropped on a lane → land before it. Dropped on empty space or on any
     // other row → last, which is the only unambiguous reading.
     const before =
-      target instanceof IntegrationLaneItem && target.applied
+      target instanceof PreviewLaneItem && target.applied
         ? target.branch
         : undefined;
     for (const lane of lanes) {

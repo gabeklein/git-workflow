@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from './exec';
 import { isWorktreeDirty } from './plumbing';
-import { integrationBranch } from './integration/config';
+import { previewBranch } from './preview/config';
 import { listWorktreeAdmin, type WorktreeAdminState } from './worktreeAdmin';
 
 /** What `git worktree list` knows about a checkout, before we look closer. */
@@ -180,10 +180,10 @@ export async function discoverWorktrees(
       try {
         let dirty: boolean | undefined;
         // Root / main checkouts are gated by includeRootCheckout — except on
-        // the integration branch (integration mode must stay visible)
-        const isIntegration =
-          !admin.detached && branch === integrationBranch();
-        if ((isRootCheckout || admin.isMain) && !isIntegration) {
+        // the preview branch (preview mode must stay visible)
+        const isPreview =
+          !admin.detached && branch === previewBranch();
+        if ((isRootCheckout || admin.isMain) && !isPreview) {
           if (rootMode === 'never') continue;
           dirty = await isWorktreeDirty(normalized);
           if (rootMode === 'dirty' && !dirty) {

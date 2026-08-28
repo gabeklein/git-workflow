@@ -1,5 +1,5 @@
 /**
- * How lanes join and leave Integration on their own: auto-membership by
+ * How lanes join and leave Preview on their own: auto-membership by
  * matching base (with a persistent Remove exit), and the opt-in
  * auto-rebase of unpushed lanes.
  */
@@ -26,10 +26,10 @@ describe('auto membership', () => {
     api = await getApi();
   });
 
-  const candidates = () => api.integration()?.candidates ?? [];
-  const appliedInView = () => api.integration()?.lanes ?? [];
+  const candidates = () => api.preview()?.candidates ?? [];
+  const appliedInView = () => api.preview()?.lanes ?? [];
 
-  it('auto-enrolls a lane based on the integration base; stacked lanes stay out', async () => {
+  it('auto-enrolls a lane based on the preview base; stacked lanes stay out', async () => {
     // A fresh worktree based on main should enroll with NO add command;
     // a lane stacked on feat/c (its base is its parent branch) must not.
     git(repo, ['branch', 'feat/c']);
@@ -64,7 +64,7 @@ describe('auto membership', () => {
       'nothing was persisted to focus-applied',
     );
     assert.ok(
-      !(api.integration()?.landed ?? []).includes('feat/c'),
+      !(api.preview()?.landed ?? []).includes('feat/c'),
       'an empty lane is not "landed" — it has nothing to retire',
     );
   });
@@ -104,7 +104,7 @@ describe('auto membership', () => {
   });
 
   it('Remove is a real exit: the exclusion persists across refreshes', async () => {
-    await run('worktreeCompare.removeFromIntegration', { branch: 'feat/c' });
+    await run('worktreeCompare.removeFromPreview', { branch: 'feat/c' });
     await poll('removed auto member disappears', 20000, () =>
       !candidates().includes('feat/c'),
     );
@@ -120,8 +120,8 @@ describe('auto membership', () => {
     );
   });
 
-  it('Add to Integration is the way back — it clears the exclusion', async () => {
-    await run('worktreeCompare.addToIntegration', {
+  it('Add to Preview is the way back — it clears the exclusion', async () => {
+    await run('worktreeCompare.addToPreview', {
       worktreePath: path.join(repo, '.worktrees', 'feat-c'),
     });
     await poll('re-added member returns', 20000, () =>

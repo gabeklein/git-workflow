@@ -1,8 +1,8 @@
 # Agent instructions — git-workflow
 
 This repo develops the Git Workflow extension **and uses it**: there are linked
-worktrees under `.worktrees/`, integration mode may be on, and a `pre-commit`
-hook will refuse a commit made on the derived integration branch. The rules are
+worktrees under `.worktrees/`, preview mode may be on, and a `pre-commit`
+hook will refuse a commit made on the derived preview branch. The rules are
 not hypothetical here, so they are imported rather than linked — read them
 before your first edit, not at commit time:
 
@@ -10,7 +10,7 @@ before your first edit, not at commit time:
 
 The three that cost the most to learn by accident: pick the worktree **before
 you write** (writing into the root checkout moves the base branch every other
-lane is measured against), never commit on the integration branch and never
+lane is measured against), never commit on the preview branch and never
 `--no-verify` past the guard, and never hand-edit `focus-*` — use `gw-lane`.
 
 ## Shipping a feature
@@ -105,14 +105,14 @@ There are two layers — pick by what the code needs, not by convenience:
 - Do not add AI attribution trailers (`Co-authored-by`, sign-offs) to
   commits.
 
-## Working in a repo with integration on
+## Working in a repo with preview on
 
-The **integration** branch (default `integration/{base}`) is a derived
+The **preview** branch (default `preview/{base}`) is a derived
 preview: the base with each applied lane merged on top, rebuilt with
 `reset --hard`. It is not a place work can live — commit on a real
 branch instead. A `pre-commit` hook refuses commits made there.
 
-A worktree you create off the integration base becomes a **candidate**
+A worktree you create off the preview base becomes a **candidate**
 automatically: it shows as an unchecked row, and nothing of yours is
 merged into anyone's preview. Joining is deliberate, and it is yours to
 decide — you know whether your work is ready to be seen next to the
@@ -121,21 +121,21 @@ other lanes, and a base match does not.
 To opt in, once the work is worth previewing:
 
 ```sh
-# works with VS Code closed; installed while integration is on
+# works with VS Code closed; installed while preview is on
 "$(git rev-parse --git-common-dir)/gw-lane" add          # current branch
 "$(git rev-parse --git-common-dir)/gw-lane" status       # what is in the preview
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 ```
 
-Inside the editor the same thing is **Git Workflow: Add to Integration**
-(`worktreeCompare.addToIntegration`).
+Inside the editor the same thing is **Git Workflow: Add to Preview**
+(`worktreeCompare.addToPreview`).
 
 The full rules are the skill in
 [`skills/git-workflow`](skills/git-workflow/SKILL.md) — **load it before your
 first edit**, not at commit time, since by then the work is already in whatever
 checkout you were standing in. It is the same document the commit guard points
 other repos at, and it self-checks which of its rules apply. This repo is
-usually at its top tier: worktrees under `.worktrees/`, integration sometimes
+usually at its top tier: worktrees under `.worktrees/`, preview sometimes
 on, the guard installed.
 
 When the workflow changes, the skill changes with it — it is what agents in

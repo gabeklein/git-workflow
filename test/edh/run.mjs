@@ -30,7 +30,7 @@ function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
 
-/** Sample project: main + one feature lane (worktree) + integration checkout. */
+/** Sample project: main + one feature lane (worktree) + preview checkout. */
 function buildFixture() {
   // realpath: on macOS tmpdir() is /var/…, a symlink to /private/var/… —
   // git reports realpaths, and the extension compares paths literally
@@ -74,14 +74,14 @@ function buildFixture() {
   git(landing, ['config', 'user.email', 'edh@test']);
   git(landing, ['config', 'user.name', 'edh']);
 
-  // Integration checkout on the default branch name (integration/main)
+  // Preview checkout on the default branch name (preview/main)
   git(repo, [
     'worktree',
     'add',
     '-q',
     '.worktrees/working',
     '-b',
-    'integration/main',
+    'preview/main',
     'main',
   ]);
 
