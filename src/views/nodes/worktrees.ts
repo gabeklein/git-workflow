@@ -38,6 +38,7 @@ export interface PreviewRowInfo {
 export class WorktreeListItem extends vscode.TreeItem {
   readonly kind = 'worktreeList' as const;
   readonly worktreePath: string;
+  readonly branch: string;
   readonly pullRequest?: PullRequestInfo;
 
   constructor(
@@ -68,6 +69,7 @@ export class WorktreeListItem extends vscode.TreeItem {
     // TreeItems cannot be font-bold; selected rows use blue decoration tint + badge
     super(branchLabel, vscode.TreeItemCollapsibleState.None);
     this.worktreePath = worktree.path;
+    this.branch = worktree.branch;
     this.pullRequest = pullRequest;
     // Enables FileDecoration (blue tint + ●) for the selected row
     this.resourceUri = worktreeResourceUri(worktree.path);

@@ -496,6 +496,11 @@
         "command": "worktreeCompare.copyPath",
         "title": "Copy Path",
         "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.copyBranchName",
+        "title": "Copy Branch Name",
+        "category": "Git Workflow"
       }
     ],
     "menus": {
@@ -745,6 +750,21 @@
         {
           "command": "worktreeCompare.copyPath",
           "when": "view == worktreeCompare.focused && viewItem =~ /^explorer(File|Folder)$/",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "worktreeCompare.copyBranchName",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^worktreeListItem/",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "worktreeCompare.copyBranchName",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^branch/",
+          "group": "1_copy@1"
+        },
+        {
+          "command": "worktreeCompare.copyBranchName",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^integrationLane/",
           "group": "1_copy@1"
         },
         {
