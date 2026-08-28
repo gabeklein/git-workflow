@@ -151,7 +151,7 @@ Staleness is measured against the *lane's own* base, not `main` by habit — rea
 - A lane stacked on a squash-merged branch conflicts against work nobody
   disputes: rebase `--onto` to replay only what has not landed.
 
-## 7. Deleting branches
+## 7. Deleting branches, and the folders they leave
 
 `git branch -d` judges merged by ancestry, so it refuses squash-merged branches;
 `-D` deletes unmerged work just as happily. **Never reach for `-D` to clean up.**
@@ -159,6 +159,20 @@ Staleness is measured against the *lane's own* base, not `main` by habit — rea
 reproducing the squash it landed as) and is revert-aware — ask for it. Without
 the extension the reasoning holds but the tool does not: say a branch *looks*
 landed and let the user decide.
+
+The CHECKOUT is a separate question, and with the extension running it answers
+itself: a landed lane's worktree is removed as soon as it holds nothing of its
+own, keeping the ref. A row still under **Working** reading `landed · …` is one
+it could not clear — uncommitted changes, ignored files, a paused merge, a lock,
+a file open in an editor — so resolve the named thing rather than forcing the
+removal. Never `rm -rf` a worktree (§3); `git worktree remove` it, and let a
+dirty one alone until whoever owns those changes has dealt with them.
+
+**A landed lane's remote branch is usually gone**, deleted by the merge. That
+does NOT delete your `origin/<name>` tracking ref — nothing prunes it unless
+`fetch.prune` is set or something asks — so a branch listed as remote-only may
+not exist. `git remote prune origin` (or `git fetch --prune`) is how you find
+out; do it before telling anyone a branch is still published.
 
 ## 8. Preview conflicts, and what to tell the user  *(preview on)*
 

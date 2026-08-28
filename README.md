@@ -147,6 +147,8 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.catchUpStrategy` | `auto` | How **Catch Up with Base** works: `auto` (rebase unpushed lanes, merge pushed ones), `rebase`, or `merge` |
 | `worktreeCompare.previewAbsorbStrays` | `true` | Move work committed on the preview branch onto the base by itself (off = the rebuild refuses until you run **Absorb** by hand) |
 | `worktreeCompare.previewCommitGuard` | `true` | Install a `pre-commit` hook refusing commits made on the preview branch; `git commit --no-verify` overrides. An existing `pre-commit` hook is chained into, not replaced |
+| `worktreeCompare.autoRemoveLandedWorktrees` | `true` | Remove a landed branch's checkout once it holds nothing of its own (ref kept); off keeps the folder and badges the row `landed · on disk` |
+| `worktreeCompare.pruneRemoteRefs` | `true` | Prune remote-tracking refs origin no longer has, on the full refresh (throttled) — without it (and without `fetch.prune`) a branch deleted by a merged PR shows under **Remote** forever |
 | `worktreeCompare.autoRebaseLanes` | `off` | `local-only` auto-catches-up clean, behind, conflict-free, **unpushed** linked worktrees as the base moves |
 
 ## Preview (overlay)
@@ -242,12 +244,19 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 ▼ Working        has a checkout, root first then tip recency  ← click to focus
 ▼ Local          has a local ref, no checkout — ↑ahead ↓behind vs origin
 ▶ Remote         no local ref (hidden when there are none)
-▶ Landed         merged into the base (hidden when empty) — Prune lives here
+▶ Landed         in the base, ref only (hidden when empty) — Prune lives here
 ```
 
 **Preview** leads: it is what the lanes below are combined *into*. It holds one row per preview — base drift first, then the applied and candidate lanes with their checkboxes — and everything the Preview panel's title menu used to carry (Rebuild, Change Base…, Absorb, Disable) is now that row's context menu. The group stays visible when preview is off, offering to enable it; a group that vanishes is a feature nobody finds. A **landed** lane drops out of Preview rather than lingering with a tag, since Landed is a group in the same panel and one branch belongs in one place.
 
-The groups are a **ladder**, not four categories: each rung is what falls through the one above it, so a branch appears in exactly one. A branch that exists both locally and on the remote stays in **Local** — its sync state is a badge (`↑2 ↓1`), not a second row. Those counts come from `%(upstream:track)` in the ref listing the panel already runs, so every branch's divergence costs no extra git call. A branch with no upstream shows nothing: it is not *ahead* of anything, it is unpublished, and the row says that by other means. An upstream that was deleted (`[gone]`) shows nothing either, since a count against a missing ref would be meaningless. **Landed is decided first and shown last**, so a landed branch that still has a checkout reaches the group whose purpose is clearing it, rather than hiding in Working forever.
+The groups are a **ladder**, not four categories: each rung is what falls through the one above it, so a branch appears in exactly one. A branch that exists both locally and on the remote stays in **Local** — its sync state is a badge (`↑2 ↓1`), not a second row. Those counts come from `%(upstream:track)` in the ref listing the panel already runs, so every branch's divergence costs no extra git call. A branch with no upstream shows nothing: it is not *ahead* of anything, it is unpublished, and the row says that by other means. An upstream that was deleted (`[gone]`) shows nothing either, since a count against a missing ref would be meaningless.
+
+**Working wins over Landed**, so a folder on disk is always reported as one. A landed branch that still had a checkout used to render under Landed, where it looked exactly like a branch that was only a ref — the folder was invisible, which is how stale checkouts piled up. Now:
+
+- a landed checkout that holds **nothing of its own** is removed on sight — clean, unlocked, attached, no ignored files, no paused rebase/merge, nothing open in an editor (`autoRemoveLandedWorktrees`). The branch **ref is never deleted**; that is Prune Landed Branches' job, which proves the landing three ways and asks. This only ever gives back a folder `git worktree add` recreates;
+- anything else stays under **Working**, badged with the reason: `landed · uncommitted changes`, `landed · ignored files`, `landed · open in an editor`, `landed · rebase/merge paused`, `landed · locked`. Each is a thing only a human can resolve, and the tooltip says what resolving it does. With automatic removal off the row reads `landed · on disk` — the visibility is the bug being fixed, not what the switch turns off.
+
+So **Landed** is refs waiting to be pruned, and a `landed · …` row under Working is exactly the set that needs you. Ignored files are singled out because they are the one thing removal could actually destroy: `git worktree remove` takes a local `.env` or build output without complaint, and the dirty probe cannot see them.
 
 Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the preview preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
 
