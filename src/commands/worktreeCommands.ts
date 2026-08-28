@@ -19,6 +19,8 @@ import type { SectionItem } from '../views/nodes';
 import type { FileItem } from '../views/nodes/files';
 import type { CommitItem } from '../views/nodes/worktrees';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
+import { branchNameFromItem } from './branchName';
+import { worktreeTerminalSpec } from './worktreeTerminal';
 
 export function registerWorktreeCommands(
   treeProvider: WorktreeTreeProvider,
@@ -72,6 +74,19 @@ export function registerWorktreeCommands(
         );
         if (!picked) return;
         await treeProvider.setSelectedPath(picked.path);
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.openWorktreeTerminal',
+      async (item?: { worktreePath?: string; branch?: string }) => {
+        const cwd = item?.worktreePath ?? treeProvider.getSelectedPath();
+        if (!cwd) return;
+        const wt = treeProvider.getWorktree(cwd);
+        const spec = worktreeTerminalSpec(cwd, item?.branch ?? wt?.branch);
+        if (!spec) return;
+        const term = vscode.window.createTerminal(spec);
+        term.show();
+        log.appendLine(`Opened terminal in ${spec.cwd}`);
       },
     ),
     vscode.commands.registerCommand(
@@ -348,6 +363,26 @@ export function registerWorktreeCommands(
           `Git Workflow: copied ${item.commit.shortHash}`,
           2000,
         );
+      },
+    ),
+    vscode.commands.registerCommand(
+      'worktreeCompare.copyBranchName',
+      async (item?: {
+        branch?: string;
+        worktreePath?: string;
+        label?: unknown;
+      }) => {
+        const fromSelected = item?.worktreePath
+          ? treeProvider.getWorktree(item.worktreePath)?.branch
+          : treeProvider.getSelected()?.branch;
+        const name = branchNameFromItem(item) ?? fromSelected;
+        if (!name) return;
+        await vscode.env.clipboard.writeText(name);
+        void vscode.window.setStatusBarMessage(
+          `Git Workflow: copied ${name}`,
+          2000,
+        );
+        log.appendLine(`Copied branch: ${name}`);
       },
     ),
     vscode.commands.registerCommand(
