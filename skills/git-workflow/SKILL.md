@@ -57,10 +57,15 @@ base — and moving it is a manual copy-and-revert nothing verifies.
 
 > New feature or fix? Make the worktree, then work. Not after the edits.
 
-Use the **root checkout** only for what belongs to it: reading, running tests,
-edits the user pointed at there. The root sits on the base, so a feature written
-into it moves the base branch — surfaced as base drift (`main · +N unpushed`)
-and measured against by every other lane.
+**Preview on (`gw-lane` exists)? Never write in the root checkout at all.**
+The root *is* the preview — that is the only place it can be — so it is derived:
+`reset --hard` recreates it on every rebuild and a `pre-commit` hook refuses
+commits there. Read it, run tests in it, nothing else. (§4.)
+
+Preview off, the root is still the wrong home for a feature: it sits on the
+base, so work written into it moves the base branch — surfaced as base drift
+(`main · +N unpushed`) and measured against by every other lane. Use it only
+for reading, running tests, and edits the user pointed at there.
 
 Started in the wrong place? Say so, then move it: create the lane, copy the
 paths, **diff to prove they match**, then revert the originals. Never commit
@@ -87,6 +92,12 @@ list`, so anywhere works. Remove with `git worktree remove`, never `rm -rf`.
 recreates it via `reset --hard` as base + each applied lane merged. A commit
 there has no home, and the only rescue, Absorb, can aim only at the base, which
 is wrong if the work belonged to a lane.
+
+It lives in the **workspace root checkout and nowhere else**: preview mode is
+the root switched onto that branch. The same branch checked out in a linked
+worktree is somebody's manual `git switch` — the extension ignores it entirely
+(not rebuilt, not guarded, not shown), so do not create one and do not describe
+one as a preview.
 
 A `pre-commit` hook refuses it. **Do not reach for `--no-verify`** — that is a
 human's override. Check out the real lane, or ask for **Absorb Preview
@@ -164,7 +175,7 @@ the git state.
 | Situation | Tell them |
 |---|---|
 | Work stranded on the preview branch | **Absorb Preview Edits…** |
-| Preview looks stale | **Rebuild Preview Worktree** |
+| Preview looks stale | **Rebuild Preview** |
 | Lane conflicts with base | **Resolve Conflict with Base…** / **Catch Up with Base…** |
 | Rebased a pushed lane | **Force Push (with lease)** — their call |
 | Branch list has grown | **Prune Landed Branches** |

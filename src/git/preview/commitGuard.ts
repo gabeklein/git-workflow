@@ -108,11 +108,15 @@ echo "  That branch is a PREVIEW built by Git Workflow — the base branch with"
 echo "  the applied lanes merged on top. Every rebuild recreates it, so a"
 echo "  commit made here does not survive and does not belong to any lane."
 echo
+echo "  This checkout IS the preview — the workspace root. Do not switch it"
+echo "  to another branch to get around this: that turns the preview off."
+echo
 echo "  Your changes are untouched and still staged. Pick an exit:"
 echo
-echo "    * Check out the branch this work belongs to and commit there."
 echo "    * Run Git Workflow: Absorb Preview Edits to move the working"
-echo "      tree onto the base branch, then commit there."
+echo "      tree onto a real branch's checkout, then commit there."
+echo "    * Commit in the lane this work belongs to — its own worktree:"
+echo "        git worktree add .worktrees/NAME -b BRANCH BASE"
 echo "    * git commit --no-verify   (you meant it; absorb can rescue it later)"
 echo
 echo "  Agent: this repo has a worktree workflow you likely do not know yet."

@@ -19,9 +19,8 @@ import { PreviewLaneItem } from './nodes/lanes';
 /**
  * Within-tree drags carry the VIEW ID, lowercased, by VS Code convention —
  * so this has to track the view the lanes are actually rendered in. It said
- * `...preview` until that panel became the Preview group of Lanes; a
- * stale value here does not fail loudly, it just means nothing can be
- * dropped.
+ * `...preview` until that panel became part of Lanes; a stale value here
+ * does not fail loudly, it just means nothing can be dropped.
  */
 const MIME = 'application/vnd.code.tree.worktreecomparelanes';
 

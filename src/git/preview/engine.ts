@@ -625,11 +625,6 @@ async function rebuildInWorktree(
   return { ok: true, lanes: merged, skipped, landed, resolved: [] };
 }
 
-/**
- * Enable the overlay in a separate worktree: create one on the preview
- * branch. Reuses the branch when it already exists; else branches off base.
- */
-
 export async function abortPreviewMerge(
   workingPath: string,
 ): Promise<void> {

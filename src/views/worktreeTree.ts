@@ -728,8 +728,6 @@ export class WorktreeTreeProvider
     return nodes;
   }
 
-  /** Worktrees shown in the list — the preview checkout lives under
-   *  the Preview row instead. */
   /**
    * Tell the decoration provider what is in the preview — checkout paths
    * for rows that have one, branch names for the rest, since a row keys its

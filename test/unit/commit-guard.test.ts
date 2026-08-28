@@ -97,6 +97,12 @@ describe('preview commit guard', () => {
     expect(said).not.toMatch(/\.claude|\.cursor|~\/\./);
     // …and the escape hatch is still there to be found
     expect(said).toContain('--no-verify');
+    // The two exits that exist now that the preview IS the root checkout:
+    // absorb the edits, or commit in the lane's own worktree. Switching
+    // this checkout to another branch is not one of them — it would turn
+    // the preview off, which is why the message says so.
+    expect(said).toContain('Absorb Preview Edits');
+    expect(said).toContain('git worktree add');
   });
 
   it('lets --no-verify through — the deliberate case still works', async () => {

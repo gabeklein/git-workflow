@@ -9,9 +9,11 @@ before your first edit, not at commit time:
 @skills/git-workflow/SKILL.md
 
 The three that cost the most to learn by accident: pick the worktree **before
-you write** (writing into the root checkout moves the base branch every other
-lane is measured against), never commit on the preview branch and never
-`--no-verify` past the guard, and never hand-edit `focus-*` — use `gw-lane`.
+you write** (with preview on the root checkout IS the preview, rebuilt with
+`reset --hard`; with it off the root sits on the base, so writing there moves
+the branch every other lane is measured against), never commit on the preview
+branch and never `--no-verify` past the guard, and never hand-edit `focus-*` —
+use `gw-lane`.
 
 ## Shipping a feature
 
@@ -107,10 +109,15 @@ There are two layers — pick by what the code needs, not by convenience:
 
 ## Working in a repo with preview on
 
-The **preview** branch (default `preview/{base}`) is a derived
-preview: the base with each applied lane merged on top, rebuilt with
-`reset --hard`. It is not a place work can live — commit on a real
-branch instead. A `pre-commit` hook refuses commits made there.
+The **preview** branch (default `preview/{base}`) is derived: the base with
+each applied lane merged on top, rebuilt with `reset --hard`. It is not a
+place work can live — commit on a real branch instead. A `pre-commit` hook
+refuses commits made there.
+
+There is exactly one preview, and it is the **workspace root checkout**
+switched onto that branch. So in this repo, with preview on, the root is not
+somewhere to write at all — every feature belongs in a worktree under
+`.worktrees/`.
 
 A worktree you create off the preview base becomes a **candidate**
 automatically: it shows as an unchecked row, and nothing of yours is

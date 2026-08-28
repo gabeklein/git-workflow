@@ -179,10 +179,10 @@ export async function discoverWorktrees(
 
       try {
         let dirty: boolean | undefined;
-        // Root / main checkouts are gated by includeRootCheckout — except on
-        // the preview branch (preview mode must stay visible)
-        const isPreview =
-          !admin.detached && branch === previewBranch();
+        // Root / main checkouts are gated by includeRootCheckout — except
+        // on the preview branch, where the root IS the preview and hiding
+        // it would hide the feature (see findPreviewCheckout).
+        const isPreview = !admin.detached && branch === previewBranch();
         if ((isRootCheckout || admin.isMain) && !isPreview) {
           if (rootMode === 'never') continue;
           dirty = await isWorktreeDirty(normalized);
