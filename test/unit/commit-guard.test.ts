@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +44,17 @@ describe('integration commit guard', () => {
     }
   }
 
+  /** The refusal's own words — what a human or an agent actually reads. */
+  function refusalText(cwd: string, name: string): string {
+    fs.writeFileSync(path.join(cwd, `${name}.txt`), `${name}\n`);
+    git(cwd, ['add', '-A']);
+    const done = spawnSync('git', ['commit', '-qm', name], {
+      cwd,
+      encoding: 'utf8',
+    });
+    return `${done.stdout ?? ''}${done.stderr ?? ''}`;
+  }
+
   it('installs an executable hook and records the branch', async () => {
     expect(await commitGuardState(scratch.repo)).toBe('none');
     expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
@@ -68,6 +80,23 @@ describe('integration commit guard', () => {
     expect(git(scratch.repo, ['rev-parse', 'HEAD'])).toBe(before);
     // The refusal is only safe because the work survives it
     expect(fs.existsSync(path.join(scratch.repo, 'stray.txt'))).toBe(true);
+  });
+
+  /**
+   * The refusal is the one moment an agent that does not know this workflow
+   * is guaranteed to be listening — and its default read of any refusal is
+   * to look for the flag that gets past it. So the message has to offer
+   * somewhere to learn the rule, not just the override that skips it.
+   */
+  it('points an agent at the skill, not just at --no-verify', async () => {
+    await installCommitGuard(scratch.repo, 'integration/main');
+    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    const said = refusalText(scratch.repo, 'stray');
+    expect(said).toContain('skills/git-workflow/SKILL.md');
+    // Tool-agnostic: no agent's config path is hardcoded into a git hook
+    expect(said).not.toMatch(/\.claude|\.cursor|~\/\./);
+    // …and the escape hatch is still there to be found
+    expect(said).toContain('--no-verify');
   });
 
   it('lets --no-verify through — the deliberate case still works', async () => {
