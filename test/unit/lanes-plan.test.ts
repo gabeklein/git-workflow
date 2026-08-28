@@ -212,22 +212,35 @@ describe('orderLaneRows', () => {
 
 /**
  * The ladder. Each rung is defined by falling through the one above, so
- * the properties worth pinning are that nothing appears twice and that
- * Landed — decided FIRST, shown LAST — claims a branch even when it still
- * has a checkout. Miss that and the group whose entire purpose is cleanup
- * never sees the thing most worth cleaning.
+ * the properties worth pinning are that nothing appears twice and that a
+ * folder on disk is always reported as one — Working wins over Landed,
+ * because a landed checkout shown under Landed looked exactly like a
+ * branch that was only a ref, which is how stale folders went unnoticed.
  */
 describe('planLaneRows — the ladder', () => {
-  it('claims a landed branch even though it still has a checkout', () => {
+  it('keeps a landed branch under Working while its checkout exists', () => {
     const result = plan({
       worktrees: [wt('feat/done'), wt('feat/live')],
       branches: [br('feat/done', 2), br('feat/live', 1)],
       landed: new Set(['feat/done']),
     });
+    // The folder is the fact Working reports; the row is badged landed.
+    expect(result.working.map((w) => w.branch)).toEqual([
+      'feat/done',
+      'feat/live',
+    ]);
+    // ...and Landed does not repeat it — one branch, one row.
+    expect(result.landed).toEqual([]);
+  });
+
+  it('moves it to Landed once the checkout is gone', () => {
+    const result = plan({
+      branches: [br('feat/done', 2), br('feat/live', 1)],
+      landed: new Set(['feat/done']),
+    });
     expect(result.landed.map((l) => l.branch)).toEqual(['feat/done']);
-    // ...and carries the checkout, so the row can offer to remove the folder
-    expect(result.landed[0]?.worktree?.branch).toBe('feat/done');
-    expect(result.working.map((w) => w.branch)).toEqual(['feat/live']);
+    expect(result.working).toEqual([]);
+    expect(result.local.map((b) => b.name)).toEqual(['feat/live']);
   });
 
   it('lists a landed branch with no checkout as a bare lane', () => {
@@ -263,6 +276,8 @@ describe('planLaneRows — the ladder', () => {
       'feat/c',
       'feat/done',
     ]);
+    // feat/done has no checkout here, so it is a Landed ref row
+    expect(result.landed.map((l) => l.branch)).toEqual(['feat/done']);
   });
 
   it('keeps a branch that is both local and remote in Local only', () => {
@@ -281,6 +296,18 @@ describe('planLaneRows — the ladder', () => {
     });
     expect(result.landed).toEqual([]);
     expect(result.working).toHaveLength(1);
+  });
+
+  it('a landed branch with a checkout is never offered for prune as a ref', () => {
+    // Prune deletes REFS. While a folder still holds the branch, the row
+    // that matters is the folder — and git refuses to delete a checked-out
+    // ref anyway, so listing it under Landed would be an offer that fails.
+    const result = plan({
+      worktrees: [wt('feat/done')],
+      branches: [br('feat/done', 1)],
+      landed: new Set(['feat/done']),
+    });
+    expect(result.landed).toEqual([]);
   });
 
   it('leaves every group empty-but-present when nothing has landed', () => {

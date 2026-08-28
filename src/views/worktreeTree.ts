@@ -38,6 +38,7 @@ import {
   CommitItem,
   ConflictWarningItem,
   WorktreeListItem,
+  type LandedRowInfo,
   type PreviewRowInfo,
 } from './nodes/worktrees';
 import {
@@ -761,7 +762,7 @@ export class WorktreeTreeProvider
    * Public so the Focus panel can order the checkouts itself and still get
    * rows built the one way.
    */
-  buildCheckoutRow(wt: DiscoveredWorktree, landed = false): TreeNode {
+  buildCheckoutRow(wt: DiscoveredWorktree, landed?: LandedRowInfo): TreeNode {
     const selected = this.getSelectedPath();
     const baseRef = previewBaseRef();
     const state = this.preview.getState();
