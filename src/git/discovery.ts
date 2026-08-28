@@ -3,7 +3,6 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git, gitOk } from './exec';
 import { isWorktreeDirty } from './plumbing';
-import { previewBranch } from './preview/config';
 import { listWorktreeAdmin, type WorktreeAdminState } from './worktreeAdmin';
 
 /** What `git worktree list` knows about a checkout, before we look closer. */
@@ -28,7 +27,7 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   relativePath?: string;
   /** True when this is the workspace root checkout (not under watchFolders). */
   isRootCheckout?: boolean;
-  /** Working tree has uncommitted changes (best-effort; used for root visibility). */
+  /** Working tree has uncommitted changes (best-effort; root row label). */
   isDirty?: boolean;
   /** Primary repo checkout — cannot be removed with git worktree remove. */
   isMainWorktree?: boolean;
@@ -42,20 +41,10 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   publishState?: 'pushed' | 'local';
 }
 
-type RootCheckoutMode = 'always' | 'dirty' | 'never';
-
 function getWatchFolders(): string[] {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
   const folders = config.get<string[]>('watchFolders', ['.worktrees']);
   return folders.length > 0 ? folders : ['.worktrees'];
-}
-
-function getRootCheckoutMode(): RootCheckoutMode {
-  const v = vscode.workspace
-    .getConfiguration('worktreeCompare')
-    .get<string>('includeRootCheckout', 'dirty');
-  if (v === 'always' || v === 'never') return v;
-  return 'dirty';
 }
 
 /** Branch has remote tip → pushed; else local-only. */
@@ -128,14 +117,13 @@ async function listRegisteredWorktrees(
 /**
  * Discover worktrees via `git worktree list` from each workspace folder's
  * repo. Every registered worktree is listed no matter where it lives on
- * disk; the workspace-root / main checkout is gated by includeRootCheckout.
+ * disk, including the workspace-root / main checkout.
  */
 export async function discoverWorktrees(
   output?: { appendLine(value: string): void },
 ): Promise<DiscoveredWorktree[]> {
   const t0 = Date.now();
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
-  const rootMode = getRootCheckoutMode();
   const found: DiscoveredWorktree[] = [];
 
   if (workspaceFolders.length === 0) {
@@ -178,21 +166,17 @@ export async function discoverWorktrees(
         : (admin.branch ?? 'unknown');
 
       try {
+        // The root / main checkout is a checkout like any other: it holds a
+        // branch and it is a folder on disk, so discovery lists it. Whether
+        // it is SHOWN as a lane is the view's business — with preview on it
+        // is the preview and lanesPlan filters it out by path — which is
+        // what lets this module stop knowing about preview at all.
+        //
+        // Its dirty state is still read, for the row's label rather than
+        // for its visibility.
         let dirty: boolean | undefined;
-        // Root / main checkouts are gated by includeRootCheckout — except
-        // on the preview branch, where the root IS the preview and hiding
-        // it would hide the feature (see findPreviewCheckout).
-        const isPreview = !admin.detached && branch === previewBranch();
-        if ((isRootCheckout || admin.isMain) && !isPreview) {
-          if (rootMode === 'never') continue;
+        if (isRootCheckout || admin.isMain)
           dirty = await isWorktreeDirty(normalized);
-          if (rootMode === 'dirty' && !dirty) {
-            output?.appendLine(
-              `Root checkout clean, omitted (includeRootCheckout=dirty): ${normalized}`,
-            );
-            continue;
-          }
-        }
         const publishState = await probePublishState(
           normalized,
           branch,
@@ -243,7 +227,7 @@ export async function discoverWorktrees(
     return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
   });
   output?.appendLine(
-    `Discovered ${found.length} worktree(s) in ${Date.now() - t0}ms (rootMode=${rootMode})`,
+    `Discovered ${found.length} worktree(s) in ${Date.now() - t0}ms`,
   );
   return found;
 }

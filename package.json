@@ -45,21 +45,6 @@
           "default": "main",
           "description": "Fallback base ref when a worktree's fork point cannot be inferred (reflog / merge-base / upstream)."
         },
-        "worktreeCompare.includeRootCheckout": {
-          "type": "string",
-          "enum": [
-            "dirty",
-            "always",
-            "never"
-          ],
-          "default": "dirty",
-          "enumDescriptions": [
-            "Only list the root checkout when it has uncommitted changes (hide when empty/clean)",
-            "Always list the workspace root git checkout first",
-            "Never list the root checkout (linked worktrees only)"
-          ],
-          "description": "Whether to include the main workspace checkout in the Worktrees list. Default: hide when clean (empty working tree)."
-        },
         "worktreeCompare.squashLayout": {
           "type": "string",
           "enum": [
