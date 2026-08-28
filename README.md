@@ -60,6 +60,7 @@ npm run install:local
 | `npm run package` | Production `dist/` only |
 | `npm run vsix` | Production build + `artifacts/*.vsix` |
 | `npm run install:local` | Build → VSIX → editor install → vscode-server mirror |
+| `npm run install:skill` | Installs the agent skill into `~/.claude/skills` (`-- --project [dir]` for one repo) |
 | `npm run test` | Type-check tests, then unit + EDH suites |
 | `npm run test:unit` | Vitest unit tests (`test/unit/*.test.ts`): pure-git logic against scratch repos |
 | `npm run test:edh` | Live EDH suite (`test/edh/*.test.ts`, mocha): sample repo + real VS Code, drives integration commands |
@@ -82,6 +83,24 @@ npm run vsix
 code --install-extension ./artifacts/git-workflow-0.0.1.vsix --force
 # Reload window
 ```
+
+## Agent skill
+
+The rules this extension enforces are not discoverable from the code an agent is
+looking at — a derived branch it must not commit to, lane files it must not
+hand-edit, a headless opt-in it would never guess. Those ship as a skill in
+[`skills/git-workflow`](skills/git-workflow/SKILL.md):
+
+```bash
+npm run install:skill                    # ~/.claude/skills/git-workflow (all repos)
+npm run install:skill -- --project       # .claude/skills/git-workflow in this repo
+npm run install:skill -- --project ../x  # …or another one
+```
+
+It is deliberately **not** part of `install:local` — writing into `~/.claude` is
+a separate decision from installing an extension. Claude Code loads it on its
+own when a repo has linked worktrees or a `focus-*` / `gw-lane` file in its git
+common dir; other agents can be pointed at the file directly.
 
 ## Develop (fast iteration)
 

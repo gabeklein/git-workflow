@@ -88,6 +88,10 @@ To opt in, once the work is worth previewing:
 Inside the editor the same thing is **Git Workflow: Add to Integration**
 (`worktreeCompare.addToIntegration`).
 
+These rules are also packaged for other repos as the skill in
+`skills/git-workflow` (`npm run install:skill`) — when the workflow changes,
+change both.
+
 Leave it out when the branch is mid-refactor, deliberately broken, or
 exploring something that would clash with other lanes. Being out costs
 nothing — the row stays visible and one click away.

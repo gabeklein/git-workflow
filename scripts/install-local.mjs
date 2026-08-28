@@ -209,6 +209,7 @@ log(
 );
 log('Reload the VS Code window (or reconnect Remote-SSH) to activate.');
 log('F5 Extension Development Host still overrides this only in the EDH window.');
+log('Agent skill not installed by this step — run `npm run install:skill` for it.');
 
 /**
  * Ensure extensions.json lists this extension (VS Code may not rescan folders alone).
