@@ -195,13 +195,15 @@
     "views": {
       "worktreeCompare": [
         {
-          "id": "worktreeCompare.focused",
-          "name": "Focus"
-        },
-        {
           "id": "worktreeCompare.lanes",
           "name": "Lanes",
-          "contextualTitle": "Lanes"
+          "contextualTitle": "Lanes",
+          "initialSize": 1
+        },
+        {
+          "id": "worktreeCompare.focused",
+          "name": "Focus",
+          "initialSize": 3
         }
       ]
     },
