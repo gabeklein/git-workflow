@@ -32,7 +32,11 @@ describe('auto membership', () => {
   it('auto-enrolls a lane based on the preview base; stacked lanes stay out', async () => {
     // A fresh worktree based on main should enroll with NO add command;
     // a lane stacked on feat/c (its base is its parent branch) must not.
-    git(repo, ['branch', 'feat/c']);
+    //
+    // `main` explicitly, never the root checkout's HEAD: the root IS the
+    // preview, so a bare `git branch` here would cut from a derived merge
+    // of the lanes and the new branch's base would not be main at all.
+    git(repo, ['branch', 'feat/c', 'main']);
     git(repo, ['worktree', 'add', '-q', '.worktrees/feat-c', 'feat/c']);
     git(repo, ['branch', 'feat/stack', 'feat/c']);
     git(repo, ['worktree', 'add', '-q', '.worktrees/feat-stack', 'feat/stack']);

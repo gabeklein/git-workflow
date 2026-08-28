@@ -5,6 +5,7 @@ import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
+import { excludeWorkspaceSettings } from '../git/exclude';
 import {
   absorbDirtyEdits,
   absorbStrayCommits,
@@ -273,6 +274,13 @@ export class PreviewController implements vscode.Disposable {
     ensurePreviewPushBlocked(previewPath).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       this.host.output.appendLine(`Push-block config failed: ${message}`);
+    });
+    // The preview is the workspace root, so VS Code's own settings file
+    // lands inside a derived tree — and an untracked file there is enough
+    // to make every rebuild refuse as dirty.
+    excludeWorkspaceSettings(previewPath).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Excluding workspace settings failed: ${message}`);
     });
     // Enabling must not hijack the compare focus: if the selected
     // checkout just became the preview surface, move selection to a

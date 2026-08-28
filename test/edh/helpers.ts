@@ -19,6 +19,12 @@ export const laneB = path.join(repo, '.worktrees', 'feat-b');
  * means "the derived tree" rather than "the repository".
  */
 export const previewRoot = repo;
+/**
+ * The BASE's checkout. It needs one of its own now that the root is the
+ * preview: absorb moves work into it, and a commit on local main (base
+ * drift) has to be made somewhere.
+ */
+export const mainTree = path.join(repo, '.worktrees', 'main');
 
 /** View-state hooks exported by activate() under GW_TEST_HOOKS. */
 export interface TestApi {

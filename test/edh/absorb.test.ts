@@ -15,6 +15,7 @@ import {
   git,
   gitOk,
   poll,
+  mainTree,
   repo,
   run,
   previewRoot,
@@ -82,7 +83,7 @@ describe('absorbing stray preview work', () => {
       return landed && git(previewRoot, ['rev-parse', 'HEAD']) !== strayTip;
     });
     assert.ok(
-      fs.readFileSync(path.join(repo, 'README.md'), 'utf8').includes(
+      fs.readFileSync(path.join(mainTree, 'README.md'), 'utf8').includes(
         'an agent wrote here',
       ),
       'the edit came with it',
@@ -106,7 +107,7 @@ describe('absorbing stray preview work', () => {
       const error = api.preview()?.error as { code?: string } | undefined;
       return (
         error?.code === 'unique' &&
-        !fs.existsSync(path.join(repo, 'stray-new.txt'))
+        !fs.existsSync(path.join(mainTree, 'stray-new.txt'))
       );
     });
     assert.ok(
@@ -120,10 +121,10 @@ describe('absorbing stray preview work', () => {
   it('absorbs the held commit once asked explicitly', async () => {
     await run('worktreeCompare.absorbPreviewCommits');
     await poll('the added file reaches main on command', 30000, () =>
-      fs.existsSync(path.join(repo, 'stray-new.txt')),
+      fs.existsSync(path.join(mainTree, 'stray-new.txt')),
     );
     assert.equal(
-      fs.readFileSync(path.join(repo, 'stray-new.txt'), 'utf8'),
+      fs.readFileSync(path.join(mainTree, 'stray-new.txt'), 'utf8'),
       'needs the lanes\n',
     );
   });
@@ -159,14 +160,14 @@ describe('absorbing stray preview work', () => {
     );
     await run('worktreeCompare.absorbPreviewEdits');
     await poll('uncommitted edits reach main', 30000, () =>
-      fs.existsSync(path.join(repo, 'edit.txt')),
+      fs.existsSync(path.join(mainTree, 'edit.txt')),
     );
     assert.equal(
-      fs.readFileSync(path.join(repo, 'edit.txt'), 'utf8'),
+      fs.readFileSync(path.join(mainTree, 'edit.txt'), 'utf8'),
       'uncommitted agent edit\n',
     );
     assert.equal(
-      git(repo, ['status', '--porcelain', '--', 'edit.txt']).trim(),
+      git(mainTree, ['status', '--porcelain', '--', 'edit.txt']).trim(),
       'A  edit.txt',
       'it arrives UNCOMMITTED — absorbing must not decide the work is done',
     );

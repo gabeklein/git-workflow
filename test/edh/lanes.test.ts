@@ -152,14 +152,18 @@ describe('focus panel', () => {
   });
 
   it('keeps the preview branch out of every group', async () => {
-    const everything = [
-      ...(await labels('working')),
-      ...(await labels('local')),
-      ...(await labels('remote')),
-    ];
-    assert.ok(
-      !everything.some((l) => l.startsWith('preview/')),
-      'the preview branch is the panel subject, not a row',
+    const groups = {
+      working: await labels('working'),
+      local: await labels('local'),
+      remote: await labels('remote'),
+    };
+    const stragglers = Object.entries(groups).flatMap(([group, labels]) =>
+      labels.filter((l) => l.startsWith('preview/')).map((l) => `${group}/${l}`),
+    );
+    assert.deepEqual(
+      stragglers,
+      [],
+      'the preview is the leading row, never a row in a group',
     );
   });
 });

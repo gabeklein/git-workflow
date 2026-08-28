@@ -75,9 +75,12 @@ function buildFixture() {
   git(landing, ['config', 'user.name', 'edh']);
 
   // Preview mode on, the only way it can be: the ROOT checkout switched
-  // to the default preview branch name. main becomes a ref with no
-  // checkout of its own, which is what the shape actually looks like.
+  // to the default preview branch name.
   git(repo, ['checkout', '-q', '-b', 'preview/main', 'main']);
+  // ...which leaves main without a checkout, so it gets a worktree like
+  // any other branch. Scenarios need it: absorb rescues work INTO the
+  // base's checkout, and base drift is a commit somebody made on main.
+  git(repo, ['worktree', 'add', '-q', '.worktrees/main', 'main']);
 
   // Keep checkouts out of status, like the extension's creation paths do
   writeFileSync(

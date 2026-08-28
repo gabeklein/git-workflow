@@ -16,6 +16,7 @@ import {
   createWorktreeForBranch,
   suggestWorktreePath,
 } from '../git/branches';
+import { unexcludeWorkspaceSettings } from '../git/exclude';
 import { isWorktreeDirty } from '../git/plumbing';
 import { listWorktreeAdmin } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
@@ -127,6 +128,9 @@ export function registerPreviewCommands(
           if (await deletePreviewBranch(cwd))
             log.appendLine(`Preview branch deleted: ${preview.branch}`);
           await clearBasePin(cwd).catch(() => {});
+          // The root is a normal checkout again, so its settings file goes
+          // back to being an ordinary untracked file of the user's own.
+          await unexcludeWorkspaceSettings(preview.path).catch(() => {});
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Disable preview failed: ${message}`);

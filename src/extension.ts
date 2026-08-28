@@ -11,6 +11,7 @@ import { GitContentProvider, GIT_CONTENT_SCHEME } from './git/contentProvider';
 import { createFileBackedLogger } from './log';
 import { BranchesTreeProvider } from './views/branchesTree';
 import { LanesTreeProvider } from './views/lanesTree';
+import type { TreeNode } from './views/nodes';
 import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
 import { LaneDragAndDropController } from './views/laneDragAndDrop';
@@ -206,11 +207,18 @@ export function activate(context: vscode.ExtensionContext): unknown {
         focusRows: async (
           group?: 'working' | 'local' | 'remote' | 'landed',
         ) => {
-          const parent = group
-            ? (await lanesProvider.getChildren()).find(
-                (n) => n.kind === 'group' && n.group === group,
-              )
-            : undefined;
+          let parent: TreeNode | undefined;
+          if (group) {
+            parent = (await lanesProvider.getChildren()).find(
+              (n) => n.kind === 'group' && n.group === group,
+            );
+            // A group that is not rendered has no rows. Falling through to
+            // getChildren(undefined) here would answer with the panel's
+            // ROOT rows, so "what is under Remote?" came back as the whole
+            // panel whenever Remote was hidden — a group asserted to be
+            // empty passed on rows from somewhere else.
+            if (!parent) return [];
+          }
           return (await lanesProvider.getChildren(parent)).map((item) => ({
             kind: (item as { kind?: string }).kind,
             group: (item as { group?: string }).group,
