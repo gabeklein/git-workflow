@@ -1,8 +1,17 @@
 # Agent instructions — git-workflow
 
-This repo develops the Git Workflow extension **and uses it**. Before your
-first edit, read [`skills/git-workflow/SKILL.md`](skills/git-workflow/SKILL.md)
-— the worktree and integration rules below are enforced here, by real hooks.
+This repo develops the Git Workflow extension **and uses it**: there are linked
+worktrees under `.worktrees/`, integration mode may be on, and a `pre-commit`
+hook will refuse a commit made on the derived integration branch. The rules are
+not hypothetical here, so they are imported rather than linked — read them
+before your first edit, not at commit time:
+
+@skills/git-workflow/SKILL.md
+
+The three that cost the most to learn by accident: pick the worktree **before
+you write** (writing into the root checkout moves the base branch every other
+lane is measured against), never commit on the integration branch and never
+`--no-verify` past the guard, and never hand-edit `focus-*` — use `gw-lane`.
 
 ## Shipping a feature
 

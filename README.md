@@ -103,8 +103,10 @@ own skills live.
 
 Caveat worth knowing: the hook only exists while integration is on. With
 integration off there is no refusal, so nothing nudges — a repo that wants the
-rules regardless should reference the file from its own `CLAUDE.md` / `AGENTS.md`
-the way [this one does](CLAUDE.md).
+rules regardless should reference the file from its own agent instructions. This
+one does: [`CLAUDE.md`](CLAUDE.md) is a single `@AGENTS.md`, and
+[`AGENTS.md`](AGENTS.md) imports the skill, so it loads before the first edit
+rather than after the first mistake.
 
 `npm run install:skill` copies it to `~/.claude/skills/git-workflow` (or
 `-- --project [dir]` for one repo). That is a convenience for people who have
