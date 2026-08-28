@@ -10,9 +10,7 @@ export async function commitStaged(
   message: string,
 ): Promise<void> {
   const msg = message.trim();
-  if (!msg) {
-    throw new Error('Commit message is required');
-  }
+  if (!msg) throw new Error('Commit message is required');
   await git(worktreePath, ['commit', '-m', msg]);
 }
 
@@ -26,9 +24,7 @@ export async function commitUnstagedPaths(
   message: string,
 ): Promise<void> {
   const msg = message.trim();
-  if (!msg) {
-    throw new Error('Commit message is required');
-  }
+  if (!msg) throw new Error('Commit message is required');
   if (relativePaths.length === 0) {
     await git(worktreePath, ['add', '-A']);
   } else {

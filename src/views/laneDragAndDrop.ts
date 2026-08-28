@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { IntegrationLaneItem, type TreeNode } from './nodes';
+import type { TreeNode } from './nodes';
+import { IntegrationLaneItem } from './nodes/lanes';
 
 /**
  * Dragging lane rows to say which lane wins.
@@ -47,9 +48,7 @@ export class LaneDragAndDropController
           n instanceof IntegrationLaneItem && n.applied,
       )
       .map((n) => n.branch);
-    if (lanes.length === 0) {
-      return;
-    }
+    if (lanes.length === 0) return;
     data.set(MIME, new vscode.DataTransferItem(lanes));
   }
 
@@ -58,9 +57,7 @@ export class LaneDragAndDropController
     data: vscode.DataTransfer,
   ): Promise<void> {
     const item = data.get(MIME);
-    if (!item) {
-      return;
-    }
+    if (!item) return;
     // The payload survives a round trip through the host, so it may arrive
     // as JSON rather than the array that was set.
     let lanes: string[];
@@ -77,9 +74,7 @@ export class LaneDragAndDropController
         return;
       }
     }
-    if (lanes.length === 0) {
-      return;
-    }
+    if (lanes.length === 0) return;
     // Dropped on a lane → land before it. Dropped on empty space or on any
     // other row → last, which is the only unambiguous reading.
     const before =
@@ -87,9 +82,7 @@ export class LaneDragAndDropController
         ? target.branch
         : undefined;
     for (const lane of lanes) {
-      if (lane === before) {
-        continue;
-      }
+      if (lane === before) continue;
       await this.reorder(lane, before);
     }
   }

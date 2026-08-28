@@ -1,4 +1,4 @@
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import {
   autoRebaseLanes,
   baseStatusFor,
@@ -17,9 +17,9 @@ import {
   inferBaseRef,
   preferRemoteTrackingRef,
   resolveBaseRef,
-} from '../git/worktree';
+} from '../git/baseRef';
 
-export interface BaseStatusHost {
+interface BaseStatusHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
   /** Rows the Worktree panel shows (integration checkout excluded). */
@@ -30,7 +30,7 @@ export interface BaseStatusHost {
 }
 
 /** Row badge: how a worktree relates to its base, plus paused git state. */
-export interface WorktreeBaseState {
+interface WorktreeBaseState {
   behind: number;
   ahead: number;
   conflicts: boolean;
@@ -81,9 +81,7 @@ export class BaseStatusTracker {
   invalidate(worktreePath: string): void {
     for (const map of [this.inferred, this.genuine]) {
       for (const key of [...map.keys()]) {
-        if (key.startsWith(`${worktreePath}\0`)) {
-          map.delete(key);
-        }
+        if (key.startsWith(`${worktreePath}\0`)) map.delete(key);
       }
     }
   }
@@ -96,17 +94,13 @@ export class BaseStatusTracker {
 
   async baseFor(worktreePath: string): Promise<string> {
     const override = this.overrides.get(worktreePath);
-    if (override) {
-      return override;
-    }
+    if (override) return override;
     const branch =
       this.host.getWorktrees().find((w) => w.path === worktreePath)?.branch ??
       '';
     const key = `${worktreePath}\0${branch}`;
     const cached = this.inferred.get(key);
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
     const base = await resolveBaseRef(worktreePath, this.host.fallbackBaseRef());
     this.inferred.set(key, base);
     return base;
@@ -120,17 +114,13 @@ export class BaseStatusTracker {
    */
   async genuineBaseFor(worktreePath: string): Promise<string | undefined> {
     const override = this.overrides.get(worktreePath);
-    if (override) {
-      return override;
-    }
+    if (override) return override;
     const branch =
       this.host.getWorktrees().find((w) => w.path === worktreePath)?.branch ??
       '';
     const key = `${worktreePath}\0${branch}`;
     const cached = this.genuine.get(key);
-    if (cached !== undefined) {
-      return cached || undefined;
-    }
+    if (cached !== undefined) return cached || undefined;
     const base = await inferBaseRef(worktreePath);
     this.genuine.set(key, base ?? '');
     return base;
@@ -148,9 +138,7 @@ export class BaseStatusTracker {
    * HEAD, and that is exactly when the row must show Continue/Abort.
    */
   async refresh(): Promise<void> {
-    if (this.inFlight) {
-      return;
-    }
+    if (this.inFlight) return;
     this.inFlight = true;
     try {
       const targets = this.host.listedWorktrees();
@@ -184,9 +172,7 @@ export class BaseStatusTracker {
             return;
           }
           if (wt.detached) {
-            if (this.statuses.delete(wt.path)) {
-              changed = true;
-            }
+            if (this.statuses.delete(wt.path)) changed = true;
             return;
           }
           const baseRef = await this.baseFor(wt.path);
@@ -197,9 +183,7 @@ export class BaseStatusTracker {
             this.probeMemo,
           );
           if (!status) {
-            if (this.statuses.delete(wt.path)) {
-              changed = true;
-            }
+            if (this.statuses.delete(wt.path)) changed = true;
             return;
           }
           const entry: WorktreeBaseState = {
@@ -221,9 +205,8 @@ export class BaseStatusTracker {
           ) {
             changed = true;
           }
-          if (await this.autoCatchUp(wt, entry, status.refSha, status.baseSha)) {
+          if (await this.autoCatchUp(wt, entry, status.refSha, status.baseSha))
             changed = true;
-          }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           this.host.output.appendLine(
@@ -237,9 +220,7 @@ export class BaseStatusTracker {
         Array.from({ length: Math.min(4, queue.length) }, async () => {
           for (;;) {
             const wt = queue.shift();
-            if (!wt) {
-              return;
-            }
+            if (!wt) return;
             await worker(wt);
           }
         }),
@@ -250,9 +231,7 @@ export class BaseStatusTracker {
           changed = true;
         }
       }
-      if (changed) {
-        this.host.fireTreeData();
-      }
+      if (changed) this.host.fireTreeData();
     } finally {
       this.inFlight = false;
     }
@@ -287,9 +266,7 @@ export class BaseStatusTracker {
       return false;
     }
     const key = `${refSha}:${baseSha}`;
-    if (this.autoTried.get(wt.path) === key) {
-      return false;
-    }
+    if (this.autoTried.get(wt.path) === key) return false;
     this.autoTried.set(wt.path, key);
     try {
       const viaMerge = catchUpStrategy() === 'merge';

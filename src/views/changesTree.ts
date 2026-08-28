@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GroupItem, type TreeNode } from './nodes';
-import { describeLocation } from './pathFilters';
+import { describeLocation } from './paths';
 import type { ExplorerNode, FilesTreeProvider } from './filesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
@@ -24,7 +24,7 @@ import type { WorktreeTreeProvider } from './worktreeTree';
  * this delegates to.
  */
 
-export type ChangesNode = TreeNode | ExplorerNode;
+type ChangesNode = TreeNode | ExplorerNode;
 
 function isExplorerNode(node: ChangesNode): node is ExplorerNode {
   return node.kind.startsWith('explorer');
@@ -58,21 +58,15 @@ export class ChangesTreeProvider
   }
 
   async getChildren(element?: ChangesNode): Promise<ChangesNode[]> {
-    if (element && isExplorerNode(element)) {
+    if (element && isExplorerNode(element))
       return this.files.getChildren(element);
-    }
-    if (element?.kind === 'group' && element.group === 'directory') {
+    if (element?.kind === 'group' && element.group === 'directory')
       return this.files.getChildren();
-    }
-    if (element) {
-      return this.worktrees.getChangesChildren(element);
-    }
+    if (element) return this.worktrees.getChangesChildren(element);
     const changes = await this.worktrees.getChangesChildren();
     // No selection: the diff half already says so — a second "select a
     // worktree" under a Directory header is the same sentence twice.
-    if (!this.worktrees.getSelectedPath()) {
-      return changes;
-    }
+    if (!this.worktrees.getSelectedPath()) return changes;
     const root = this.worktrees.getSelectedPath();
     // Warnings stay at the very top, above Directory. They are banners
     // about the focused checkout, and a banner sitting under a collapsible

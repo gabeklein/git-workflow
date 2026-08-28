@@ -69,9 +69,7 @@ export function registerIntegrationCommands(
           ],
           { placeHolder: 'Enable integration mode' },
         );
-        if (!mode) {
-          return;
-        }
+        if (!mode) return;
 
         try {
           // Enabling re-freezes the base at NOW — a stale pin from a
@@ -104,9 +102,7 @@ export function registerIntegrationCommands(
               validateInput: (v) =>
                 v.trim() ? undefined : 'Destination path is required',
             });
-            if (!dest?.trim()) {
-              return;
-            }
+            if (!dest?.trim()) return;
             await createIntegrationWorktree(repoCwd, dest.trim(), baseRef);
             log.appendLine(`Integration worktree created at ${dest.trim()}`);
           }
@@ -127,9 +123,7 @@ export function registerIntegrationCommands(
       'worktreeCompare.disableIntegration',
       async () => {
         const integration = treeProvider.getIntegration();
-        if (!integration) {
-          return;
-        }
+        if (!integration) return;
         const wt = treeProvider.getWorktree(integration.path);
         const onMainCheckout = Boolean(
           wt?.isRootCheckout || wt?.isMainWorktree,
@@ -147,9 +141,7 @@ export function registerIntegrationCommands(
           { modal: true },
           'Disable',
         );
-        if (confirm !== 'Disable') {
-          return;
-        }
+        if (confirm !== 'Disable') return;
         try {
           if (onMainCheckout) {
             const baseRef = integrationBaseRef();
@@ -170,9 +162,7 @@ export function registerIntegrationCommands(
             const result = await removeWorktree(integration.path, {
               force: true,
             });
-            if (!result.ok) {
-              throw new Error(result.message);
-            }
+            if (!result.ok) throw new Error(result.message);
             log.appendLine(
               `Integration worktree removed: ${integration.path}`,
             );
@@ -185,12 +175,9 @@ export function registerIntegrationCommands(
             : repoCwd !== integration.path
               ? repoCwd
               : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (cwd && (await deleteIntegrationBranch(cwd))) {
+          if (cwd && (await deleteIntegrationBranch(cwd)))
             log.appendLine(`Integration branch deleted: ${integration.branch}`);
-          }
-          if (cwd) {
-            await clearBasePin(cwd).catch(() => {});
-          }
+          if (cwd) await clearBasePin(cwd).catch(() => {});
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Disable integration failed: ${message}`);
@@ -210,17 +197,13 @@ export function registerIntegrationCommands(
       'worktreeCompare.changeIntegrationBase',
       async () => {
         const integration = treeProvider.getIntegration();
-        if (!integration) {
-          return;
-        }
+        if (!integration) return;
         try {
           const picked = await pickBaseRef(
             integration.path,
             integrationBaseRef(),
           );
-          if (!picked) {
-            return;
-          }
+          if (!picked) return;
           // Workspace-scoped: the integration base is a property of this repo
           await vscode.workspace
             .getConfiguration('worktreeCompare')
@@ -254,9 +237,7 @@ export function registerIntegrationCommands(
       async (nameArg?: unknown) => {
         const integration = treeProvider.getIntegration();
         const drift = integration?.baseDrift;
-        if (!integration || !drift) {
-          return;
-        }
+        if (!integration || !drift) return;
         const baseName = integrationBaseRef().replace(/^origin\//, '');
         // The base branch may be checked out (often a clean root that the
         // Worktrees list hides) — resolve its checkout from git itself,
@@ -299,9 +280,7 @@ export function registerIntegrationCommands(
                 validateInput: (v) =>
                   v.trim() ? undefined : 'Branch name is required',
               });
-        if (!name?.trim()) {
-          return;
-        }
+        if (!name?.trim()) return;
         const branch = name.trim();
         try {
           if (
@@ -358,9 +337,7 @@ export function registerIntegrationCommands(
                 'Create Worktree',
               )
               .then(async (pick) => {
-                if (pick !== 'Create Worktree') {
-                  return;
-                }
+                if (pick !== 'Create Worktree') return;
                 try {
                   const dest = suggestWorktreePath(
                     workspaceRoot,
@@ -396,9 +373,7 @@ export function registerIntegrationCommands(
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         try {
           // Adding means "put it in the preview": applied immediately —
           // the checkbox is for taking a lane OUT, not for finishing an add
@@ -413,9 +388,7 @@ export function registerIntegrationCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.includeWipInIntegration',
       async (item?: { branch?: string }) => {
-        if (!item?.branch) {
-          return;
-        }
+        if (!item?.branch) return;
         const result = await treeProvider.setLaneWip(item.branch, true);
         reportIntegrationResult(result, `wip on for ${item.branch}`);
       },
@@ -423,9 +396,7 @@ export function registerIntegrationCommands(
     vscode.commands.registerCommand(
       'worktreeCompare.excludeWipFromIntegration',
       async (item?: { branch?: string }) => {
-        if (!item?.branch) {
-          return;
-        }
+        if (!item?.branch) return;
         const result = await treeProvider.setLaneWip(item.branch, false);
         reportIntegrationResult(result, `wip off for ${item.branch}`);
       },
@@ -438,9 +409,7 @@ export function registerIntegrationCommands(
           (item?.worktreePath
             ? treeProvider.getWorktree(item.worktreePath)?.branch
             : undefined);
-        if (!branch) {
-          return;
-        }
+        if (!branch) return;
         const result = await treeProvider.removeIntegrationCandidate(branch);
         reportIntegrationResult(result, `removed ${branch}`);
       },
@@ -450,9 +419,7 @@ export function registerIntegrationCommands(
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         const result = await treeProvider.applyToIntegration(wt.branch);
         reportIntegrationResult(result, `applied ${wt.branch}`);
       },
@@ -462,9 +429,7 @@ export function registerIntegrationCommands(
       async (item?: { worktreePath?: string }) => {
         const target = item?.worktreePath ?? treeProvider.getSelectedPath();
         const wt = target ? treeProvider.getWorktree(target) : undefined;
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         const result = await treeProvider.hideFromIntegration(wt.branch);
         reportIntegrationResult(result, `hid ${wt.branch}`);
       },
@@ -486,9 +451,7 @@ export function registerIntegrationCommands(
       'worktreeCompare.absorbIntegrationCommits',
       async () => {
         const result = await treeProvider.absorbIntegrationCommits();
-        if (!result) {
-          return;
-        }
+        if (!result) return;
         if (result.ok) {
           void vscode.window.showInformationMessage(
             `Git Workflow: moved ${result.commits} commit(s) onto ${path.basename(result.target)} — they show as unpushed base work.`,

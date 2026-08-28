@@ -65,9 +65,7 @@ export class GitDirWatcher {
     ];
     while (stack.length > 0 && found.size < MAX_DIRS) {
       const dir = path.normalize(stack.pop()!);
-      if (found.has(dir)) {
-        continue;
-      }
+      if (found.has(dir)) continue;
       let entries: fs.Dirent[];
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -76,9 +74,7 @@ export class GitDirWatcher {
       }
       found.add(dir);
       for (const e of entries) {
-        if (e.isDirectory()) {
-          stack.push(path.join(dir, e.name));
-        }
+        if (e.isDirectory()) stack.push(path.join(dir, e.name));
       }
     }
     return found;
@@ -100,9 +96,7 @@ export class GitDirWatcher {
         }
       }
       for (const dir of dirs) {
-        if (this.watchers.has(dir)) {
-          continue;
-        }
+        if (this.watchers.has(dir)) continue;
         try {
           const watcher = fs.watch(dir, () => this.handleEvent());
           watcher.on('error', () => {
@@ -129,12 +123,8 @@ export class GitDirWatcher {
   }
 
   private handleEvent(): void {
-    if (this.disposed) {
-      return;
-    }
-    if (this.debounce) {
-      clearTimeout(this.debounce);
-    }
+    if (this.disposed) return;
+    if (this.debounce) clearTimeout(this.debounce);
     this.debounce = setTimeout(() => {
       this.debounce = undefined;
       // Reconcile watchers first (new branch dirs / worktrees), then notify

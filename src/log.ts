@@ -3,12 +3,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 
-export interface LineLogger {
+interface LineLogger {
   appendLine(value: string): void;
 }
 
 /** Always-writable location (survives even when context.logUri is flaky under F5). */
-export function stableLogPath(): string {
+function stableLogPath(): string {
   return path.join(os.homedir(), '.git-workflow', 'git-workflow.log');
 }
 
@@ -35,9 +35,7 @@ export function createFileBackedLogger(
   try {
     const vscodeLog = path.join(context.logUri.fsPath, 'git-workflow.log');
     fs.mkdirSync(context.logUri.fsPath, { recursive: true });
-    if (vscodeLog !== stableFile) {
-      logFiles.push(vscodeLog);
-    }
+    if (vscodeLog !== stableFile) logFiles.push(vscodeLog);
   } catch {
     // ignore secondary path
   }
@@ -48,9 +46,7 @@ export function createFileBackedLogger(
       'git-workflow.log',
     );
     fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
-    if (!logFiles.includes(globalLog)) {
-      logFiles.push(globalLog);
-    }
+    if (!logFiles.includes(globalLog)) logFiles.push(globalLog);
   } catch {
     // ignore
   }

@@ -1,7 +1,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { describeLocation } from '../../src/views/pathFilters';
+import { describeLocation } from '../../src/views/paths';
 
 /**
  * The Directory row says where a checkout is. Worktrees are usually

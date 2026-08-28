@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 import { git } from '../git/exec';
 import { catchUpStrategy, integrationBaseRef } from '../git/integration';
 import {
@@ -28,9 +28,7 @@ export function registerLaneOpsCommands(
     worktreePath?: string;
     branch?: string;
   }): DiscoveredWorktree | undefined {
-    if (item?.worktreePath) {
-      return treeProvider.getWorktree(item.worktreePath);
-    }
+    if (item?.worktreePath) return treeProvider.getWorktree(item.worktreePath);
     if (item?.branch) {
       return treeProvider
         .getWorktrees()
@@ -152,9 +150,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.catchUpWithBase',
       async (item?: { worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         const baseRef = await treeProvider.worktreeBaseFor(wt.path);
         const strategy = catchUpStrategy();
         const viaMerge =
@@ -171,9 +167,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.rebaseOntoBase',
       async (item?: { worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         await runRebase(wt, await treeProvider.worktreeBaseFor(wt.path));
       },
     ),
@@ -181,9 +175,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.mergeFromBase',
       async (item?: { worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         await runMerge(wt, await treeProvider.worktreeBaseFor(wt.path));
       },
     ),
@@ -206,9 +198,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.continueRebase',
       async (item?: { worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         const baseRef = await treeProvider.worktreeBaseFor(wt.path);
         const result = await continueLaneRebase(wt.path);
         await handleRebaseResult(
@@ -224,9 +214,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.abortRebase',
       async (item?: { worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         try {
           await abortLaneRebase(wt.path);
           await refreshRows();
@@ -246,9 +234,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.completeMergeFromBase',
       async (item?: { branch?: string; worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         // Captured before the commit flips the state
         const { branch, path: worktreePath, publishState } = wt;
         const result = await completeBaseMerge(worktreePath);
@@ -295,9 +281,7 @@ export function registerLaneOpsCommands(
       'worktreeCompare.abortMergeFromBase',
       async (item?: { branch?: string; worktreePath?: string }) => {
         const wt = resolveWorktree(item);
-        if (!wt) {
-          return;
-        }
+        if (!wt) return;
         try {
           await abortBaseMerge(wt.path);
           await refreshRows();

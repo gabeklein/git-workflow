@@ -59,13 +59,9 @@ function parseCommits(stdout: string): CommitInfo[] {
   const commits: CommitInfo[] = [];
   for (const record of stdout.split('\x1e')) {
     const trimmed = record.trim();
-    if (!trimmed) {
-      continue;
-    }
+    if (!trimmed) continue;
     const [hash, shortHash, subject, author, relativeDate] = trimmed.split('\x1f');
-    if (!hash) {
-      continue;
-    }
+    if (!hash) continue;
     commits.push({
       hash,
       shortHash: shortHash ?? hash.slice(0, 7),
@@ -80,9 +76,7 @@ function parseCommits(stdout: string): CommitInfo[] {
 function parseNameStatus(stdout: string): FileChange[] {
   const files: FileChange[] = [];
   for (const line of stdout.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
+    if (!line.trim()) continue;
     // M\tpath | A\tpath | D\tpath | R100\told\tnew
     const parts = line.split('\t');
     const statusRaw = parts[0] ?? '';
@@ -103,40 +97,9 @@ function parseNameStatus(stdout: string): FileChange[] {
   return files;
 }
 
-export interface FileChangeBreakdown {
-  added: number;
-  modified: number;
-  deleted: number;
-}
-
-/** Count A / M(etc) / D for section descriptions. Renames & copies count as modified. */
-export function breakdownFileChanges(files: FileChange[]): FileChangeBreakdown {
-  let added = 0;
-  let modified = 0;
-  let deleted = 0;
-  for (const f of files) {
-    switch (f.status) {
-      case 'A':
-      case '?':
-        added += 1;
-        break;
-      case 'D':
-        deleted += 1;
-        break;
-      default:
-        // M, T, R, C, U, etc.
-        modified += 1;
-        break;
-    }
-  }
-  return { added, modified, deleted };
-}
-
 /** e.g. `2 new · 1 untracked · 5 modified · 1 deleted` (omits zero buckets). */
 export function formatFileChangeBreakdown(files: FileChange[]): string | undefined {
-  if (files.length === 0) {
-    return undefined;
-  }
+  if (files.length === 0) return undefined;
   let added = 0;
   let untracked = 0;
   let modified = 0;
@@ -158,18 +121,10 @@ export function formatFileChangeBreakdown(files: FileChange[]): string | undefin
     }
   }
   const parts: string[] = [];
-  if (added > 0) {
-    parts.push(`${added} new`);
-  }
-  if (untracked > 0) {
-    parts.push(`${untracked} untracked`);
-  }
-  if (modified > 0) {
-    parts.push(`${modified} modified`);
-  }
-  if (deleted > 0) {
-    parts.push(`${deleted} deleted`);
-  }
+  if (added > 0) parts.push(`${added} new`);
+  if (untracked > 0) parts.push(`${untracked} untracked`);
+  if (modified > 0) parts.push(`${modified} modified`);
+  if (deleted > 0) parts.push(`${deleted} deleted`);
   return parts.length > 0 ? parts.join(' · ') : String(files.length);
 }
 
@@ -194,9 +149,7 @@ export async function compareWorkingTreeToBase(
       const mb = (
         await git(worktreePath, ['merge-base', 'HEAD', baseTipRef])
       ).trim();
-      if (mb) {
-        compareRef = mb;
-      }
+      if (mb) compareRef = mb;
     } catch {
       // Detached / unrelated histories — fall back to tip
       compareRef = baseTipRef;
@@ -318,9 +271,8 @@ export async function showFileAtRef(
   relativePath: string,
 ): Promise<string> {
   try {
-    if (ref === 'INDEX' || ref === ':' || ref === ':0') {
+    if (ref === 'INDEX' || ref === ':' || ref === ':0')
       return await git(worktreePath, ['show', `:${relativePath}`]);
-    }
     return await git(worktreePath, ['show', `${ref}:${relativePath}`]);
   } catch {
     return '';

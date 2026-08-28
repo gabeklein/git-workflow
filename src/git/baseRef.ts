@@ -1,18 +1,5 @@
 import { git, gitOk } from './exec';
 
-export interface WorktreeInfo {
-  /** Absolute path to the worktree checkout */
-  path: string;
-  /** Display name (directory basename) */
-  name: string;
-  /** Current branch, or detached HEAD short sha */
-  branch: string;
-  /** Whether HEAD is detached */
-  detached: boolean;
-  /** Absolute path to the main worktree (common root), if known */
-  mainWorktreePath?: string;
-}
-
 /** Well-known integration-branch names used when inferring a compare base. */
 const INTEGRATION_NAMES = [
   'main',
@@ -25,9 +12,7 @@ const INTEGRATION_NAMES = [
 ];
 
 async function refResolves(worktreePath: string, ref: string): Promise<boolean> {
-  if (!ref) {
-    return false;
-  }
+  if (!ref) return false;
   return gitOk(worktreePath, ['rev-parse', '--verify', `${ref}^{commit}`]);
 }
 
@@ -40,18 +25,12 @@ export async function preferRemoteTrackingRef(
   ref: string,
 ): Promise<string> {
   const trimmed = ref.trim();
-  if (!trimmed || trimmed === 'HEAD' || trimmed.includes('..')) {
-    return trimmed;
-  }
+  if (!trimmed || trimmed === 'HEAD' || trimmed.includes('..')) return trimmed;
   // Already remote-tracking style or full ref
-  if (trimmed.startsWith('refs/') || trimmed.includes('/')) {
-    return trimmed;
-  }
+  if (trimmed.startsWith('refs/') || trimmed.includes('/')) return trimmed;
   for (const remote of ['origin', 'upstream']) {
     const candidate = `${remote}/${trimmed}`;
-    if (await refResolves(worktreePath, candidate)) {
-      return candidate;
-    }
+    if (await refResolves(worktreePath, candidate)) return candidate;
   }
   return trimmed;
 }
@@ -65,31 +44,23 @@ async function baseFromReflog(
   worktreePath: string,
   branch: string,
 ): Promise<string | undefined> {
-  if (!branch || branch === 'HEAD' || branch === 'unknown') {
-    return undefined;
-  }
+  if (!branch || branch === 'HEAD' || branch === 'unknown') return undefined;
 
   const trySource = async (
     sourceRaw: string,
     line: string,
   ): Promise<string | undefined> => {
     let source = sourceRaw.trim().replace(/[.,;]+$/, '');
-    if (!source) {
-      return undefined;
-    }
+    if (!source) return undefined;
     if (source === 'HEAD') {
       const hashMatch = line.match(/^([0-9a-f]{7,40})\s/i);
-      if (hashMatch?.[1]) {
+      if (hashMatch?.[1])
         return nameIntegrationRefAt(worktreePath, hashMatch[1]);
-      }
       return undefined;
     }
-    if (source === branch || source.endsWith(`/${branch}`)) {
-      return undefined;
-    }
-    if (await refResolves(worktreePath, source)) {
+    if (source === branch || source.endsWith(`/${branch}`)) return undefined;
+    if (await refResolves(worktreePath, source))
       return preferRemoteTrackingRef(worktreePath, source);
-    }
     return undefined;
   };
 
@@ -101,9 +72,7 @@ async function baseFromReflog(
       const created = line.match(/Created from\s+(.+?)\s*$/i);
       if (created?.[1]) {
         const hit = await trySource(created[1], line);
-        if (hit) {
-          return hit;
-        }
+        if (hit) return hit;
       }
       const checkout = line.match(
         /checkout:\s+moving from\s+(.+?)\s+to\s+(\S+)\s*$/i,
@@ -112,9 +81,7 @@ async function baseFromReflog(
         const to = checkout[2].trim();
         if (to === branch || to === 'HEAD') {
           const hit = await trySource(checkout[1], line);
-          if (hit) {
-            return hit;
-          }
+          if (hit) return hit;
         }
       }
     }
@@ -129,9 +96,7 @@ async function baseFromReflog(
       branch,
     ]);
     const fromBranch = await scanLines(branchLog);
-    if (fromBranch) {
-      return fromBranch;
-    }
+    if (fromBranch) return fromBranch;
   } catch {
     // no branch reflog
   }
@@ -157,15 +122,11 @@ async function nameIntegrationRefAt(
   commit: string,
 ): Promise<string | undefined> {
   for (const ref of integrationCandidates()) {
-    if (!(await refResolves(worktreePath, ref))) {
-      continue;
-    }
+    if (!(await refResolves(worktreePath, ref))) continue;
     try {
       const tip = (await git(worktreePath, ['rev-parse', ref])).trim();
       const target = (await git(worktreePath, ['rev-parse', commit])).trim();
-      if (tip === target) {
-        return ref;
-      }
+      if (tip === target) return ref;
     } catch {
       // skip
     }
@@ -175,9 +136,7 @@ async function nameIntegrationRefAt(
 
 function integrationCandidates(extra?: string): string[] {
   const names = [...INTEGRATION_NAMES];
-  if (extra && !names.includes(extra)) {
-    names.unshift(extra);
-  }
+  if (extra && !names.includes(extra)) names.unshift(extra);
   const refs: string[] = [];
   for (const n of names) {
     // Prefer remote tips first — local integration branches are often stale
@@ -194,9 +153,7 @@ async function baseFromBranchConfig(
   worktreePath: string,
   branch: string,
 ): Promise<string | undefined> {
-  if (!branch || branch === 'HEAD' || branch === 'unknown') {
-    return undefined;
-  }
+  if (!branch || branch === 'HEAD' || branch === 'unknown') return undefined;
   const keys = [
     `branch.${branch}.vscode-merge-base`,
     `branch.${branch}.merge-base`,
@@ -205,9 +162,8 @@ async function baseFromBranchConfig(
   for (const key of keys) {
     try {
       const value = (await git(worktreePath, ['config', '--get', key])).trim();
-      if (value && (await refResolves(worktreePath, value))) {
+      if (value && (await refResolves(worktreePath, value)))
         return preferRemoteTrackingRef(worktreePath, value);
-      }
     } catch {
       // unset
     }
@@ -232,16 +188,12 @@ async function baseFromUpstream(
         '@{upstream}',
       ])
     ).trim();
-    if (!upstream) {
-      return undefined;
-    }
+    if (!upstream) return undefined;
     const short = upstream.replace(/^refs\/remotes\//, '');
     const withoutRemote = short.includes('/')
       ? short.slice(short.indexOf('/') + 1)
       : short;
-    if (branch && withoutRemote === branch) {
-      return undefined;
-    }
+    if (branch && withoutRemote === branch) return undefined;
     return preferRemoteTrackingRef(worktreePath, upstream);
   } catch {
     return undefined;
@@ -289,9 +241,7 @@ export async function resolveBaseRef(
   defaultBaseRef: string,
 ): Promise<string> {
   const inferred = await inferBaseRef(worktreePath);
-  if (inferred) {
-    return inferred;
-  }
+  if (inferred) return inferred;
 
   // Skip closest-ancestor scan by default — it can spawn dozens of git
   // processes on large repos and was a hang risk. Prefer quick fallbacks.
@@ -307,13 +257,10 @@ export async function resolveBaseRef(
   ];
   const seen = new Set<string>();
   for (const ref of candidates) {
-    if (!ref || seen.has(ref)) {
-      continue;
-    }
+    if (!ref || seen.has(ref)) continue;
     seen.add(ref);
-    if (await refResolves(worktreePath, ref)) {
+    if (await refResolves(worktreePath, ref))
       return preferRemoteTrackingRef(worktreePath, ref);
-    }
   }
 
   return defaultBaseRef;

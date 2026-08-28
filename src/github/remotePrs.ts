@@ -59,9 +59,7 @@ async function ghJson<T>(
       },
     });
     const text = stdout.toString().trim();
-    if (!text) {
-      return undefined;
-    }
+    if (!text) return undefined;
     return JSON.parse(text) as T;
   } catch {
     return undefined;
@@ -107,7 +105,7 @@ function normalizeRemote(row: GhRemotePrRow): RemotePullRequest | undefined {
   };
 }
 
-export function remotePrLimit(): number {
+function remotePrLimit(): number {
   const n = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<number>('remotePrLimit', 30);
@@ -118,9 +116,7 @@ export function remotePrLimit(): number {
 export async function listOpenRemotePullRequests(
   repoCwd: string,
 ): Promise<RemotePullRequest[]> {
-  if (!isGithubPrIntegrationEnabled()) {
-    return [];
-  }
+  if (!isGithubPrIntegrationEnabled()) return [];
   const rows = await ghJson<GhRemotePrRow[]>(repoCwd, [
     'pr',
     'list',
@@ -131,16 +127,14 @@ export async function listOpenRemotePullRequests(
     '--json',
     REMOTE_LIST_FIELDS,
   ]);
-  if (!rows?.length) {
-    return [];
-  }
+  if (!rows?.length) return [];
   return rows
     .map(normalizeRemote)
     .filter((p): p is RemotePullRequest => Boolean(p));
 }
 
 /** Tracking ref for a fetched PR head: refs/remotes/pr/<n> */
-export function prRemoteRef(prNumber: number): string {
+function prRemoteRef(prNumber: number): string {
   return `refs/remotes/pr/${prNumber}`;
 }
 
@@ -148,7 +142,7 @@ export function prRemoteRef(prNumber: number): string {
  * Fetch PR head into refs/remotes/pr/<n> (object download only — no worktree).
  * Returns the ref name on success.
  */
-export async function ensurePrHeadFetched(
+async function ensurePrHeadFetched(
   repoCwd: string,
   prNumber: number,
 ): Promise<string> {
@@ -164,15 +158,14 @@ export async function ensurePrHeadFetched(
 }
 
 /** Prefer origin/<base> when present. */
-export async function resolvePrBaseRef(
+async function resolvePrBaseRef(
   repoCwd: string,
   baseRefName: string | undefined,
 ): Promise<string> {
   const name = (baseRefName || 'main').trim();
   for (const candidate of [`origin/${name}`, name]) {
-    if (await gitOk(repoCwd, ['rev-parse', '--verify', `${candidate}^{commit}`])) {
+    if (await gitOk(repoCwd, ['rev-parse', '--verify', `${candidate}^{commit}`]))
       return candidate;
-    }
   }
   // Last resort: fetch base then use origin/
   try {
@@ -180,18 +173,15 @@ export async function resolvePrBaseRef(
   } catch {
     // ignore
   }
-  if (await gitOk(repoCwd, ['rev-parse', '--verify', `origin/${name}^{commit}`])) {
+  if (await gitOk(repoCwd, ['rev-parse', '--verify', `origin/${name}^{commit}`]))
     return `origin/${name}`;
-  }
   return name;
 }
 
 function parseNameStatus(stdout: string): FileChange[] {
   const files: FileChange[] = [];
   for (const line of stdout.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
+    if (!line.trim()) continue;
     const parts = line.split('\t');
     const statusRaw = parts[0] ?? '';
     const status = statusRaw.charAt(0) || 'M';
@@ -240,9 +230,8 @@ export async function createWorktreeForPr(
     await fs.access(destDir);
     throw new Error(`Path already exists: ${destDir}`);
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('Path already')) {
+    if (err instanceof Error && err.message.startsWith('Path already'))
       throw err;
-    }
     // ENOENT — free to create
   }
 

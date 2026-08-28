@@ -1,12 +1,26 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { git, gitOk } from '../git/exec';
-import { isWorktreeDirty } from '../git/plumbing';
-import { integrationBranch } from '../git/integration';
-import { listWorktreeAdmin, type WorktreeAdminState } from '../git/worktreeAdmin';
-import type { WorktreeInfo } from '../git/worktree';
+import { git, gitOk } from './exec';
+import { isWorktreeDirty } from './plumbing';
+import { integrationBranch } from './integration/config';
+import { listWorktreeAdmin, type WorktreeAdminState } from './worktreeAdmin';
 
+/** What `git worktree list` knows about a checkout, before we look closer. */
+interface WorktreeInfo {
+  /** Absolute path to the worktree checkout */
+  path: string;
+  /** Display name (directory basename) */
+  name: string;
+  /** Current branch, or detached HEAD short sha */
+  branch: string;
+  /** Whether HEAD is detached */
+  detached: boolean;
+  /** Absolute path to the main worktree (common root), if known */
+  mainWorktreePath?: string;
+}
+
+/** …and what the panels need on top of it. */
 export interface DiscoveredWorktree extends WorktreeInfo {
   /** Workspace folder this worktree belongs to (repo opened in it) */
   workspaceFolder?: vscode.WorkspaceFolder;
@@ -28,7 +42,7 @@ export interface DiscoveredWorktree extends WorktreeInfo {
   publishState?: 'pushed' | 'local';
 }
 
-export type RootCheckoutMode = 'always' | 'dirty' | 'never';
+type RootCheckoutMode = 'always' | 'dirty' | 'never';
 
 function getWatchFolders(): string[] {
   const config = vscode.workspace.getConfiguration('worktreeCompare');
@@ -40,9 +54,7 @@ function getRootCheckoutMode(): RootCheckoutMode {
   const v = vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<string>('includeRootCheckout', 'dirty');
-  if (v === 'always' || v === 'never') {
-    return v;
-  }
+  if (v === 'always' || v === 'never') return v;
   return 'dirty';
 }
 
@@ -52,13 +64,11 @@ async function probePublishState(
   branch: string,
   detached: boolean,
 ): Promise<'pushed' | 'local' | undefined> {
-  if (detached || !branch || branch === 'HEAD' || branch === 'unknown') {
+  if (detached || !branch || branch === 'HEAD' || branch === 'unknown')
     return undefined;
-  }
   try {
-    if (await gitOk(dir, ['rev-parse', '--verify', `@{upstream}^{commit}`])) {
+    if (await gitOk(dir, ['rev-parse', '--verify', `@{upstream}^{commit}`]))
       return 'pushed';
-    }
   } catch {
     // no upstream
   }
@@ -106,9 +116,7 @@ async function listRegisteredWorktrees(
     // Dedup repos: the main worktree path identifies the repo
     const mainPath =
       [...admin.values()].find((s) => s.isMain)?.path ?? rootPath;
-    if (seenRepos.has(mainPath)) {
-      continue;
-    }
+    if (seenRepos.has(mainPath)) continue;
     seenRepos.add(mainPath);
     for (const state of admin.values()) {
       entries.push({ admin: state, workspaceFolder: folder });
@@ -152,9 +160,7 @@ export async function discoverWorktrees(
       const i = next++;
       const { admin, workspaceFolder } = entries[i]!;
       const normalized = path.normalize(admin.path);
-      if (admin.bare) {
-        continue;
-      }
+      if (admin.bare) continue;
       if (admin.prunable) {
         output?.appendLine(`Skipping prunable worktree: ${normalized}`);
         continue;
@@ -178,9 +184,7 @@ export async function discoverWorktrees(
         const isIntegration =
           !admin.detached && branch === integrationBranch();
         if ((isRootCheckout || admin.isMain) && !isIntegration) {
-          if (rootMode === 'never') {
-            continue;
-          }
+          if (rootMode === 'never') continue;
           dirty = await isWorktreeDirty(normalized);
           if (rootMode === 'dirty' && !dirty) {
             output?.appendLine(
@@ -234,9 +238,7 @@ export async function discoverWorktrees(
 
   // Root first, then linked worktrees by branch
   found.sort((a, b) => {
-    if (a.isRootCheckout !== b.isRootCheckout) {
-      return a.isRootCheckout ? -1 : 1;
-    }
+    if (a.isRootCheckout !== b.isRootCheckout) return a.isRootCheckout ? -1 : 1;
     const byBranch = a.branch.localeCompare(b.branch);
     return byBranch !== 0 ? byBranch : a.name.localeCompare(b.name);
   });
@@ -248,7 +250,7 @@ export async function discoverWorktrees(
 
 /** Absolute watch-folder dirs — still used as the default creation location
  *  for new (PR) worktrees and as an event fast-path hint. */
-export function resolveWatchRoots(): string[] {
+function resolveWatchRoots(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   const watchFolders = getWatchFolders();
   const roots: string[] = [];
@@ -288,9 +290,7 @@ export async function resolveRepoCommonDirs(): Promise<string[]> {
     try {
       const out = (await git(root, ['rev-parse', '--git-common-dir'])).trim();
       const abs = path.normalize(path.resolve(root, out));
-      if (!dirs.includes(abs)) {
-        dirs.push(abs);
-      }
+      if (!dirs.includes(abs)) dirs.push(abs);
     } catch {
       // not a git repo
     }
@@ -303,9 +303,7 @@ export function isDirectChildOfWatchRoot(fsPath: string): boolean {
   const resolved = path.resolve(fsPath);
   const parent = path.dirname(resolved);
   for (const root of resolveWatchRoots()) {
-    if (parent === path.resolve(root)) {
-      return true;
-    }
+    if (parent === path.resolve(root)) return true;
   }
   return false;
 }

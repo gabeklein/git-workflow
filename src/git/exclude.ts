@@ -20,13 +20,9 @@ export async function ensureExcludedFromStatus(
     (await git(parent, ['rev-parse', '--show-toplevel'])).trim(),
   );
   const rel = path.relative(top, path.resolve(destDir));
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-    return undefined;
-  }
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return undefined;
   const relPosix = rel.split(path.sep).join('/');
-  if (relPosix === '.git' || relPosix.startsWith('.git/')) {
-    return undefined;
-  }
+  if (relPosix === '.git' || relPosix.startsWith('.git/')) return undefined;
   // Exclude the containing folder (dedicated to checkouts); a checkout
   // sitting directly at the repo root excludes just itself.
   const parentRel = path.posix.dirname(relPosix);

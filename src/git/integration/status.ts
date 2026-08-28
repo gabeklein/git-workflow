@@ -37,9 +37,8 @@ export async function resolveBaseSha(
   // user advances the base directly. Diverged → origin (a fetch reconciles).
   const local = await sha(`refs/heads/${name}`);
   if (remote && local && remote !== local) {
-    if (await gitOk(cwd, ['merge-base', '--is-ancestor', remote, local])) {
+    if (await gitOk(cwd, ['merge-base', '--is-ancestor', remote, local]))
       return local;
-    }
     return remote;
   }
   return remote ?? local ?? sha(baseRef);
@@ -127,9 +126,7 @@ export async function findLandedLanes(
   lanes: string[],
 ): Promise<string[]> {
   const baseSha = await resolveBaseSha(cwd, baseRef);
-  if (!baseSha) {
-    return [];
-  }
+  if (!baseSha) return [];
   let baseTree: string;
   try {
     baseTree = (await git(cwd, ['rev-parse', `${baseSha}^{tree}`])).trim();
@@ -143,18 +140,14 @@ export async function findLandedLanes(
       continue; // branch gone — not our call to make
     }
     if (await gitOk(cwd, ['merge-base', '--is-ancestor', laneSha, baseSha])) {
-      if (!(await laneNeverDiverged(cwd, laneSha, baseSha))) {
-        landed.push(lane);
-      }
+      if (!(await laneNeverDiverged(cwd, laneSha, baseSha))) landed.push(lane);
       continue;
     }
     try {
       const result = await mergeOffTree(cwd, baseSha, laneSha, {
         strict: true,
       });
-      if (result.kind === 'tree' && result.tree === baseTree) {
-        landed.push(lane);
-      }
+      if (result.kind === 'tree' && result.tree === baseTree) landed.push(lane);
     } catch {
       // probe failure ⇒ not landed
     }
@@ -180,24 +173,17 @@ export async function findStaleLandedLanes(
   lanes: string[],
 ): Promise<string[]> {
   const baseSha = await resolveBaseSha(cwd, baseRef);
-  if (!baseSha) {
-    return [];
-  }
+  if (!baseSha) return [];
   const landed: string[] = [];
   for (const lane of lanes) {
     const laneSha = await revParseCommit(cwd, `refs/heads/${lane}`);
-    if (!laneSha) {
-      continue;
-    }
+    if (!laneSha) continue;
     const via = await landedVia(cwd, laneSha, baseSha).catch(() => undefined);
-    if (!via) {
-      continue;
-    }
+    if (!via) continue;
     // Empty is not landed: a fresh worktree keeps its place in the preview
     // until its first commit.
-    if (via === 'ancestor' && (await laneNeverDiverged(cwd, laneSha, baseSha))) {
+    if (via === 'ancestor' && (await laneNeverDiverged(cwd, laneSha, baseSha)))
       continue;
-    }
     landed.push(lane);
   }
   return landed;
@@ -277,14 +263,10 @@ export async function landedPrefix(
     // The tip itself landing means the whole branch is done — that is
     // retirement's business, not catch-up's; there is nothing to replay.
     if (i === 0) {
-      if (await isLanded(sha)) {
-        return undefined;
-      }
+      if (await isLanded(sha)) return undefined;
       continue;
     }
-    if (await isLanded(sha)) {
-      return sha;
-    }
+    if (await isLanded(sha)) return sha;
   }
   return undefined;
 }
@@ -295,7 +277,7 @@ export async function landedPrefix(
  * 'unsupported' when git predates merge-tree --write-tree (< 2.38).
  */
 
-export interface BaseStatus {
+interface BaseStatus {
   /** Commits the base has that this branch lacks */
   behind: number;
   /** Commits this branch has that the base lacks */
@@ -320,13 +302,9 @@ export async function baseStatusFor(
   probeMemo?: Map<string, boolean>,
 ): Promise<BaseStatus | undefined> {
   const baseSha = await resolveBaseSha(cwd, baseRef);
-  if (!baseSha) {
-    return undefined;
-  }
+  if (!baseSha) return undefined;
   const refSha = await revParseCommit(cwd, ref);
-  if (!refSha) {
-    return undefined;
-  }
+  if (!refSha) return undefined;
   const counts = (
     await git(cwd, [
       'rev-list',
@@ -351,9 +329,7 @@ export async function baseStatusFor(
       }).catch(() => ({ kind: 'tree' }) as const);
       conflicts = probe.kind === 'conflict';
       probeMemo?.set(memoKey, conflicts);
-      if (probeMemo && probeMemo.size > 512) {
-        probeMemo.clear();
-      }
+      if (probeMemo && probeMemo.size > 512) probeMemo.clear();
     }
   }
   return { behind, ahead, conflicts, refSha, baseSha };

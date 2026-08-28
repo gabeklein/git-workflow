@@ -4,7 +4,7 @@ import {
   discoverWorktrees,
   isDirectChildOfWatchRoot,
   type DiscoveredWorktree,
-} from '../discovery/scanner';
+} from '../git/discovery';
 import {
   compareWorkingTreeToBase,
   formatFileChangeBreakdown,
@@ -20,37 +20,33 @@ import {
 } from '../git/integration';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
-  findPullRequestForBranch,
-  isGithubPrIntegrationEnabled,
-  prCacheKey,
   prHasMergeConflicts,
   resetGithubPrClient,
   type PullRequestInfo,
 } from '../github/pr';
 import { BaseStatusTracker } from './baseStatusTracker';
-import { childrenAtPrefix, joinPrefix } from './fileTree';
 import { GitActivityHub } from './gitActivityHub';
+import { HotFollowPoll } from './hotFollowPoll';
+import { PullRequestCache } from './pullRequestCache';
 import {
   IntegrationController,
   type IntegrationState,
 } from './integrationController';
+import { GroupItem, MessageItem, SectionItem, type TreeNode } from './nodes';
+import { FileItem, FolderItem } from './nodes/files';
 import {
-  ConflictWarningItem,
   CommitItem,
-  FileItem,
-  FolderItem,
-  GroupItem,
-  type IntegrationRowInfo,
-  MessageItem,
-  SectionItem,
-  type TreeNode,
+  ConflictWarningItem,
   WorktreeListItem,
-} from './nodes';
-import { isPathInside, shouldIgnoreHotFollowPath } from './pathFilters';
+  type IntegrationRowInfo,
+} from './nodes/worktrees';
+import {
+  childrenAtPrefix,
+  isPathInside,
+  joinPrefix,
+  shouldIgnoreHotFollowPath,
+} from './paths';
 import { WorktreeRowDecorationProvider } from './worktreeDecorations';
-
-export type { TreeNode } from './nodes';
-export { CommitItem, FileItem, WorktreeListItem } from './nodes';
 
 const SELECTED_PATH_KEY = 'worktreeCompare.selectedPath';
 
@@ -86,23 +82,18 @@ export class WorktreeTreeProvider
   private loading = false;
   private readonly disposables: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
-  private pollTimer: NodeJS.Timeout | undefined;
   private contentDebounce: NodeJS.Timeout | undefined;
   private softRefreshInFlight = false;
-  /** 'active' = recent changes (faster poll); 'idle' = quiet (slower). */
-  private pollPace: 'active' | 'idle' = 'idle';
-  private lastFingerprintChangeAt = 0;
 
   private readonly snapshotCache = new Map<string, WorktreeSnapshot>();
   private readonly compareErrors = new Map<string, string>();
-  /** PR lookup cache keyed by worktreePath\\0branch */
-  private readonly prCache = new Map<string, PullRequestInfo | null>();
-  private prRefreshGeneration = 0;
 
   private selectedPath: string | undefined;
   private readonly selectionDecorations =
     new WorktreeRowDecorationProvider();
 
+  private readonly poll: HotFollowPoll;
+  private readonly prs: PullRequestCache;
   private readonly integration: IntegrationController;
   private readonly baseStatus: BaseStatusTracker;
   private readonly activity: GitActivityHub;
@@ -111,6 +102,12 @@ export class WorktreeTreeProvider
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
   ) {
+    this.poll = new HotFollowPoll(output, (reason) =>
+      this.softRefreshSelected(reason),
+    );
+    this.prs = new PullRequestCache(output, () =>
+      this._onDidChangeTreeData.fire(),
+    );
     this.integration = new IntegrationController({
       output,
       getWorktrees: () => this.worktrees,
@@ -149,6 +146,7 @@ export class WorktreeTreeProvider
     this.selectionDecorations.setSelectedPath(this.selectedPath);
     this.disposables.push(
       this.selectionDecorations,
+      this.poll,
       this.integration,
       this.activity,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -157,13 +155,12 @@ export class WorktreeTreeProvider
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('worktreeCompare')) {
-          if (e.affectsConfiguration('worktreeCompare.watchFolders')) {
+          if (e.affectsConfiguration('worktreeCompare.watchFolders'))
             this.activity.restartPoll();
-          }
-          this.restartPoll();
+          this.poll.restart();
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
-            this.prCache.clear();
+            this.prs.clear();
             void this.refreshPullRequests();
           }
           if (
@@ -181,9 +178,7 @@ export class WorktreeTreeProvider
             e.affectsConfiguration('worktreeCompare.defaultBaseRef')
           ) {
             const sel = this.getSelectedPath();
-            if (sel) {
-              this.refreshCompare(sel);
-            }
+            if (sel) this.refreshCompare(sel);
           }
         }
       }),
@@ -223,7 +218,7 @@ export class WorktreeTreeProvider
       }),
     );
     void this.activity.restart();
-    this.restartPoll();
+    this.poll.restart();
     void this.refresh();
   }
 
@@ -239,14 +234,10 @@ export class WorktreeTreeProvider
   }
 
   getSelected(): DiscoveredWorktree | undefined {
-    if (this.worktrees.length === 0) {
-      return undefined;
-    }
+    if (this.worktrees.length === 0) return undefined;
     if (this.selectedPath) {
       const hit = this.worktrees.find((w) => w.path === this.selectedPath);
-      if (hit) {
-        return hit;
-      }
+      if (hit) return hit;
     }
     return this.worktrees[0];
   }
@@ -272,9 +263,7 @@ export class WorktreeTreeProvider
     this.output.appendLine(`Selected worktree → ${worktreePath}`);
     // Drop other snapshots so we don't grow unbounded; keep selected warm on next expand
     for (const key of [...this.snapshotCache.keys()]) {
-      if (key !== worktreePath) {
-        this.snapshotCache.delete(key);
-      }
+      if (key !== worktreePath) this.snapshotCache.delete(key);
     }
     this._onDidChangeTreeData.fire();
     this._onDidChangeWorktrees.fire();
@@ -320,9 +309,7 @@ export class WorktreeTreeProvider
   // ---- discovery ----------------------------------------------------------
 
   refresh(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-    }
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.snapshotCache.clear();
       this.compareErrors.clear();
@@ -346,7 +333,7 @@ export class WorktreeTreeProvider
     try {
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
-      this.prunePrCache();
+      this.prs.prune(this.worktrees);
       await this.integration.refreshState();
       void this.baseStatus.refresh();
       this.output.appendLine(
@@ -356,7 +343,7 @@ export class WorktreeTreeProvider
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`Discovery failed: ${message}`);
       this.worktrees = [];
-      this.prCache.clear();
+      this.prs.clear();
     } finally {
       this.loading = false;
       // Paths changed, so the applied-lane badges have to be recomputed even
@@ -374,12 +361,8 @@ export class WorktreeTreeProvider
    * the create/delete, plus the hub's poll for changes outside VS Code.
    */
   private scheduleDiscoverIfWatchRootChild(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file') {
-      return;
-    }
-    if (!isDirectChildOfWatchRoot(uri.fsPath)) {
-      return;
-    }
+    if (uri.scheme !== 'file') return;
+    if (!isDirectChildOfWatchRoot(uri.fsPath)) return;
     this.refresh();
   }
 
@@ -388,226 +371,35 @@ export class WorktreeTreeProvider
   /** Cached PR for a worktree row (if looked up). */
   getPullRequest(worktreePath: string): PullRequestInfo | undefined {
     const wt = this.worktrees.find((w) => w.path === worktreePath);
-    if (!wt) {
-      return undefined;
-    }
-    const key = prCacheKey(wt.path, wt.branch);
-    const hit = this.prCache.get(key);
-    return hit ?? undefined;
+    return wt && this.prs.get(wt.path, wt.branch);
   }
 
   /** Drop PR cache so the next lookup re-queries `gh`. */
   clearPullRequestCache(): void {
-    this.prCache.clear();
+    this.prs.clear();
   }
 
-  /** Re-query GitHub (via `gh`) for PRs associated with each worktree branch. */
-  async refreshPullRequests(): Promise<void> {
-    if (!isGithubPrIntegrationEnabled()) {
-      if (this.prCache.size > 0) {
-        this.prCache.clear();
-        this._onDidChangeTreeData.fire();
-      }
-      return;
-    }
-    if (this.worktrees.length === 0) {
-      return;
-    }
-    const generation = ++this.prRefreshGeneration;
-    const t0 = Date.now();
-    let found = 0;
-    try {
-      // Bounded concurrency so many worktrees don't spawn a gh storm
-      const queue = this.worktrees.slice();
-      const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
-        while (queue.length > 0) {
-          if (generation !== this.prRefreshGeneration) {
-            return;
-          }
-          const wt = queue.shift();
-          if (!wt) {
-            return;
-          }
-          const key = prCacheKey(wt.path, wt.branch);
-          try {
-            const pr = await findPullRequestForBranch(
-              wt.path,
-              wt.branch,
-              wt.detached,
-            );
-            if (generation !== this.prRefreshGeneration) {
-              return;
-            }
-            this.prCache.set(key, pr ?? null);
-            if (pr) {
-              found += 1;
-            }
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            this.output.appendLine(
-              `PR lookup failed for ${wt.branch}: ${message}`,
-            );
-            this.prCache.set(key, null);
-          }
-        }
-      });
-      await Promise.all(workers);
-      if (generation !== this.prRefreshGeneration) {
-        return;
-      }
-      this.output.appendLine(
-        `GitHub PR lookup: ${found}/${this.worktrees.length} branch(es) have a PR (${Date.now() - t0}ms)`,
-      );
-      this._onDidChangeTreeData.fire();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`GitHub PR lookup failed: ${message}`);
-    }
-  }
-
-  /** Drop PR cache entries for worktrees / branches that no longer exist. */
-  private prunePrCache(): void {
-    if (this.prCache.size === 0) {
-      return;
-    }
-    const live = new Set(
-      this.worktrees.map((wt) => prCacheKey(wt.path, wt.branch)),
-    );
-    for (const key of [...this.prCache.keys()]) {
-      if (!live.has(key)) {
-        this.prCache.delete(key);
-      }
-    }
+  refreshPullRequests(): Promise<void> {
+    return this.prs.refresh(this.worktrees);
   }
 
   // ---- hot-follow compare (selected worktree) ------------------------------
 
   private scheduleSoftRefreshIfUnderSelected(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file') {
-      return;
-    }
+    if (uri.scheme !== 'file') return;
     const selected = this.getSelected();
-    if (!selected || !isPathInside(uri.fsPath, selected.path)) {
-      return;
-    }
+    if (!selected || !isPathInside(uri.fsPath, selected.path)) return;
     // Root monorepo checkout: ignore high-churn / irrelevant paths so every
     // node_modules or dist write does not trigger git status.
-    if (shouldIgnoreHotFollowPath(uri.fsPath, selected.path)) {
-      return;
-    }
+    if (shouldIgnoreHotFollowPath(uri.fsPath, selected.path)) return;
     // File activity → mark active (poll pace, if enabled)
-    this.enterActivePollPace('file-event');
-    if (this.contentDebounce) {
-      clearTimeout(this.contentDebounce);
-    }
+    this.poll.markActive('file-event');
+    if (this.contentDebounce) clearTimeout(this.contentDebounce);
     // Longer debounce: agent bursts can write many files in one go
     this.contentDebounce = setTimeout(() => {
       this.contentDebounce = undefined;
       void this.softRefreshSelected('file-event');
     }, 800);
-  }
-
-  /** Idle (relaxed) poll interval; 0 disables polling entirely. */
-  private idlePollIntervalMs(): number {
-    return vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIntervalMs', 0);
-  }
-
-  /** Active (rapid) poll while changes keep landing. */
-  private activePollIntervalMs(): number {
-    const configured = vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshActiveIntervalMs', 1500);
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) {
-      return configured;
-    }
-    // Never slower than idle; never below 500ms
-    return Math.max(500, Math.min(configured, idle));
-  }
-
-  /** Quiet time before stepping back from active → idle pace. */
-  private idleAfterMs(): number {
-    return vscode.workspace
-      .getConfiguration('worktreeCompare')
-      .get<number>('contentRefreshIdleAfterMs', 15000);
-  }
-
-  private enterActivePollPace(reason: string): void {
-    const was = this.pollPace;
-    this.pollPace = 'active';
-    this.lastFingerprintChangeAt = Date.now();
-    if (was !== 'active') {
-      this.output.appendLine(`Hot-follow pace → active (${reason})`);
-      // Pull the next poll forward without a full restart/log spam
-      this.scheduleNextPoll();
-    }
-  }
-
-  private maybeRelaxPollPace(): void {
-    if (this.pollPace !== 'active') {
-      return;
-    }
-    if (Date.now() - this.lastFingerprintChangeAt < this.idleAfterMs()) {
-      return;
-    }
-    this.pollPace = 'idle';
-    this.output.appendLine('Hot-follow pace → idle (quiet)');
-  }
-
-  private currentPollIntervalMs(): number {
-    return this.pollPace === 'active'
-      ? this.activePollIntervalMs()
-      : this.idlePollIntervalMs();
-  }
-
-  private restartPoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = undefined;
-    }
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) {
-      this.output.appendLine(
-        'Hot-follow poll disabled (contentRefreshIntervalMs=0); save/create/delete events still refresh',
-      );
-      return;
-    }
-    this.pollPace = 'idle';
-    this.output.appendLine(
-      `Hot-follow poll: idle=${idle}ms active=${this.activePollIntervalMs()}ms relaxAfter=${this.idleAfterMs()}ms`,
-    );
-    this.scheduleNextPoll();
-  }
-
-  private scheduleNextPoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = undefined;
-    }
-    const idle = this.idlePollIntervalMs();
-    if (idle <= 0) {
-      return;
-    }
-    this.maybeRelaxPollPace();
-    const ms = this.currentPollIntervalMs();
-    this.pollTimer = setTimeout(() => {
-      this.pollTimer = undefined;
-      void this.runPollTick();
-    }, ms);
-  }
-
-  private async runPollTick(): Promise<void> {
-    try {
-      if (vscode.window.state.focused) {
-        await this.softRefreshSelected('poll');
-      } else {
-        this.maybeRelaxPollPace();
-      }
-    } finally {
-      this.scheduleNextPoll();
-    }
   }
 
   /**
@@ -616,9 +408,7 @@ export class WorktreeTreeProvider
    */
   private async softRefreshSelected(reason: string): Promise<void> {
     const worktreePath = this.getSelectedPath();
-    if (!worktreePath || this.loading || this.softRefreshInFlight) {
-      return;
-    }
+    if (!worktreePath || this.loading || this.softRefreshInFlight) return;
     this.softRefreshInFlight = true;
     try {
       const prev = this.snapshotCache.get(worktreePath);
@@ -636,12 +426,12 @@ export class WorktreeTreeProvider
       this.compareErrors.delete(worktreePath);
 
       if (prevFp === nextFp) {
-        this.maybeRelaxPollPace();
+        this.poll.relax();
         return;
       }
-      this.enterActivePollPace(reason);
+      this.poll.markActive(reason);
       this.output.appendLine(
-        `Hot-follow update (${reason}, pace=${this.pollPace}): ${path.basename(worktreePath)}`,
+        `Hot-follow update (${reason}, pace=${this.poll.currentPace}): ${path.basename(worktreePath)}`,
       );
       this._onDidChangeTreeData.fire();
     } catch (err) {
@@ -656,9 +446,7 @@ export class WorktreeTreeProvider
     worktreePath: string,
   ): Promise<WorktreeSnapshot | undefined> {
     const cached = this.snapshotCache.get(worktreePath);
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
     const t0 = Date.now();
     try {
       const overridden = this.baseStatus.getOverride(worktreePath);
@@ -804,9 +592,8 @@ export class WorktreeTreeProvider
     if (element) {
       return []; // worktree rows are leaves; details live in the Changes view
     }
-    if (this.loading && this.worktrees.length === 0) {
+    if (this.loading && this.worktrees.length === 0)
       return [new MessageItem('Scanning worktrees…', undefined, 'loading~spin')];
-    }
     if (this.worktrees.length === 0) {
       return [
         new MessageItem(
@@ -824,9 +611,7 @@ export class WorktreeTreeProvider
    */
   async getChangesChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
-      if (!element) {
-        return await this.getChangesRootChildren();
-      }
+      if (!element) return await this.getChangesRootChildren();
       switch (element.kind) {
         case 'group':
           return await this.getAheadChildren();
@@ -983,8 +768,7 @@ export class WorktreeTreeProvider
     const baseRef = integrationBaseRef();
     const state = this.integration.getState();
     return ((): TreeNode => {
-      const key = prCacheKey(wt.path, wt.branch);
-      const pr = this.prCache.get(key);
+      const pr = this.prs.get(wt.path, wt.branch);
       let integration: IntegrationRowInfo | undefined;
       if (state && !wt.detached && isLaneBranch(wt.branch, baseRef)) {
         integration = {
@@ -1014,9 +798,7 @@ export class WorktreeTreeProvider
   /** Commits ahead of compare point (merge-base of integration tip by default). */
   private async getAheadChildren(): Promise<TreeNode[]> {
     const selected = this.getSelected();
-    if (!selected) {
-      return [new MessageItem('Select a worktree above')];
-    }
+    if (!selected) return [new MessageItem('Select a worktree above')];
     const snap = await this.getSnapshot(selected.path);
     if (!snap) {
       const err = this.compareErrors.get(selected.path) ?? 'Failed to load';
@@ -1024,9 +806,8 @@ export class WorktreeTreeProvider
     }
 
     const { compare } = snap;
-    if (compare.commitsAhead.length === 0) {
+    if (compare.commitsAhead.length === 0)
       return [new MessageItem('No commits ahead of base', compare.baseRef)];
-    }
 
     return compare.commitsAhead.map(
       (c) => new CommitItem(selected.path, compare.baseRef, c),
@@ -1035,9 +816,7 @@ export class WorktreeTreeProvider
 
   private async getSectionChildren(item: SectionItem): Promise<TreeNode[]> {
     const snap = await this.getSnapshot(item.worktreePath);
-    if (!snap) {
-      return [];
-    }
+    if (!snap) return [];
 
     if (item.section === 'staged') {
       return snap.status.staged.map(
@@ -1060,9 +839,8 @@ export class WorktreeTreeProvider
     }
 
     // Full Diff (working tree ↔ base)
-    if (snap.compare.fullPrFiles.length === 0) {
+    if (snap.compare.fullPrFiles.length === 0)
       return [new MessageItem('No differences from base', item.baseRef)];
-    }
     if (this.squashLayout() === 'tree') {
       return this.buildFolderLevel(
         item.worktreePath,
@@ -1081,9 +859,7 @@ export class WorktreeTreeProvider
 
   private async getFolderChildren(item: FolderItem): Promise<TreeNode[]> {
     const snap = await this.getSnapshot(item.worktreePath);
-    if (!snap) {
-      return [];
-    }
+    if (!snap) return [];
     return this.buildFolderLevel(
       item.worktreePath,
       item.baseRef,
@@ -1140,15 +916,8 @@ export class WorktreeTreeProvider
   }
 
   dispose(): void {
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-    }
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-    }
-    if (this.contentDebounce) {
-      clearTimeout(this.contentDebounce);
-    }
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    if (this.contentDebounce) clearTimeout(this.contentDebounce);
     for (const d of this.disposables) {
       d.dispose();
     }

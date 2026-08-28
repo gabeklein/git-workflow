@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { DiscoveredWorktree } from '../discovery/scanner';
+import type { DiscoveredWorktree } from '../git/discovery';
 
 interface WorktreeQuickPickItem extends vscode.QuickPickItem {
   worktree: DiscoveredWorktree;
@@ -30,12 +30,8 @@ export async function pickWorktree(
 
   // Put current selection first for faster access
   items.sort((a, b) => {
-    if (a.worktree.path === currentPath) {
-      return -1;
-    }
-    if (b.worktree.path === currentPath) {
-      return 1;
-    }
+    if (a.worktree.path === currentPath) return -1;
+    if (b.worktree.path === currentPath) return 1;
     return a.label.localeCompare(b.label);
   });
 

@@ -28,17 +28,11 @@ export async function listCompareRefs(worktreePath: string): Promise<GitRef[]> {
     ]);
 
     for (const line of out.split('\n')) {
-      if (!line.trim()) {
-        continue;
-      }
+      if (!line.trim()) continue;
       const [name, shortHash, relativeDate, fullRef] = line.split('\0');
-      if (!name || !fullRef) {
-        continue;
-      }
+      if (!name || !fullRef) continue;
       // Skip remote HEAD pointers (origin/HEAD)
-      if (name.endsWith('/HEAD') || fullRef.endsWith('/HEAD')) {
-        continue;
-      }
+      if (name.endsWith('/HEAD') || fullRef.endsWith('/HEAD')) continue;
       let kind: RefKind = 'local';
       if (fullRef.startsWith('refs/remotes/')) {
         kind = 'remote';

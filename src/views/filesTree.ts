@@ -1,8 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { git } from '../git/exec';
-import { childrenAtPrefix, joinPrefix } from './fileTree';
-import { isPathInside } from './pathFilters';
+import { childrenAtPrefix, isPathInside, joinPrefix } from './paths';
 import type { WorktreeTreeProvider } from './worktreeTree';
 
 /**
@@ -118,12 +117,9 @@ export class FilesTreeProvider
 
   async getChildren(element?: ExplorerNode): Promise<ExplorerNode[]> {
     const selected = this.worktrees.getSelectedPath();
-    if (!selected) {
+    if (!selected)
       return element ? [] : [new ExplorerMessageItem('Select a worktree above')];
-    }
-    if (element && element.kind !== 'explorerFolder') {
-      return [];
-    }
+    if (element && element.kind !== 'explorerFolder') return [];
     let files: { path: string }[];
     try {
       files = await this.listFiles(selected);
@@ -131,9 +127,8 @@ export class FilesTreeProvider
       const message = err instanceof Error ? err.message : String(err);
       return element ? [] : [new ExplorerMessageItem('Could not list files', message)];
     }
-    if (!element && files.length === 0) {
+    if (!element && files.length === 0)
       return [new ExplorerMessageItem('No files', 'empty worktree')];
-    }
     const prefix = element ? element.relPath : '';
     const level = childrenAtPrefix(files, prefix);
     return [
@@ -147,9 +142,7 @@ export class FilesTreeProvider
   private async listFiles(
     worktreePath: string,
   ): Promise<{ path: string }[]> {
-    if (this.cache?.worktreePath === worktreePath) {
-      return this.cache.files;
-    }
+    if (this.cache?.worktreePath === worktreePath) return this.cache.files;
     const listed = (
       await git(worktreePath, [
         'ls-files',

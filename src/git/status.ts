@@ -30,9 +30,8 @@ export async function getWorkingStatus(worktreePath: string): Promise<WorkingSta
 
   // Untracked: not "A" (that is index/tree-added). Mark as '?' → UI letter U.
   for (const filePath of parseNulPaths(untrackedOut)) {
-    if (!unstaged.some((f) => f.path === filePath)) {
+    if (!unstaged.some((f) => f.path === filePath))
       unstaged.push({ path: filePath, status: '?' });
-    }
   }
 
   staged.sort((a, b) => a.path.localeCompare(b.path));
@@ -43,9 +42,7 @@ export async function getWorkingStatus(worktreePath: string): Promise<WorkingSta
 function parseNameStatus(stdout: string): FileChange[] {
   const files: FileChange[] = [];
   for (const line of stdout.split('\n')) {
-    if (!line.trim()) {
-      continue;
-    }
+    if (!line.trim()) continue;
     // M\tpath | A\tpath | D\tpath | R100\told\tnew
     const parts = line.split('\t');
     const statusRaw = parts[0] ?? '';

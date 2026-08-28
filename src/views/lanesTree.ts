@@ -1,14 +1,8 @@
 import * as vscode from 'vscode';
 import { integrationBaseRef, integrationBranch } from '../git/integration';
-import {
-  BaseDriftItem,
-  BranchItem,
-  GroupItem,
-  IntegrationLaneItem,
-  MessageItem,
-  PreviewItem,
-  type TreeNode,
-} from './nodes';
+import { GroupItem, MessageItem, type TreeNode } from './nodes';
+import { BranchItem } from './nodes/branches';
+import { BaseDriftItem, IntegrationLaneItem, PreviewItem } from './nodes/lanes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
@@ -61,13 +55,10 @@ export class LanesTreeProvider
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     const cwd = this.branches.getRepoCwd();
     // PR rows still nest — their files ARE children of the PR.
-    if (element?.kind === 'branch' && element.pr) {
+    if (element?.kind === 'branch' && element.pr)
       return this.branches.getPrFileRows(element.repoCwd, element.pr);
-    }
     if (element?.kind === 'group') {
-      if (!cwd) {
-        return [];
-      }
+      if (!cwd) return [];
       const plan = this.plan();
       switch (element.group) {
         case 'preview':
@@ -86,19 +77,12 @@ export class LanesTreeProvider
     }
     // A preview's children are its lanes — drift first, since it is the
     // base's own unlanded work and merges before everything else.
-    if (element?.kind === 'preview') {
-      return this.laneRows();
-    }
-    if (element) {
-      return [];
-    }
-    if (!cwd) {
-      return [new MessageItem('No repository folder open')];
-    }
+    if (element?.kind === 'preview') return this.laneRows();
+    if (element) return [];
+    if (!cwd) return [new MessageItem('No repository folder open')];
     const error = this.branches.getError();
-    if (error) {
+    if (error)
       return [new MessageItem('Could not list branches', error, 'error')];
-    }
     return this.rootRows();
   }
 
@@ -115,9 +99,8 @@ export class LanesTreeProvider
 
   private rootRows(): TreeNode[] {
     const plan = this.plan();
-    if (plan.working.length === 0 && this.branches.isLoading()) {
+    if (plan.working.length === 0 && this.branches.isLoading())
       return [new MessageItem('Loading…', undefined, 'loading~spin')];
-    }
     const group = (
       label: string,
       key: 'preview' | 'working' | 'local' | 'remote' | 'landed',
@@ -147,14 +130,12 @@ export class LanesTreeProvider
     // branch you already have locally is represented by its local row, so
     // an empty Remote group is a heading over nothing. It starts closed
     // because expanding it is what pays for PR association.
-    if (plan.remote.length > 0) {
+    if (plan.remote.length > 0)
       rows.push(group('Remote', 'remote', plan.remote.length, false));
-    }
     // Landed appears only when there is something to clear. A permanent
     // "Landed · none" is the clutter the group exists to remove.
-    if (plan.landed.length > 0) {
+    if (plan.landed.length > 0)
       rows.push(group('Landed', 'landed', plan.landed.length, false));
-    }
     return rows;
   }
 
@@ -201,9 +182,7 @@ export class LanesTreeProvider
    */
   private laneRows(): TreeNode[] {
     const integration = this.worktrees.getIntegration();
-    if (!integration) {
-      return [];
-    }
+    if (!integration) return [];
     const rows: TreeNode[] = [];
     if (integration.baseDrift) {
       rows.push(
@@ -261,9 +240,7 @@ export class LanesTreeProvider
    * getting rid of it.
    */
   private landedRows(cwd: string, landed: LandedLane[]): TreeNode[] {
-    if (landed.length === 0) {
-      return [new MessageItem('None')];
-    }
+    if (landed.length === 0) return [new MessageItem('None')];
     return landed.map((lane) =>
       lane.worktree
         ? this.worktrees.buildCheckoutRow(lane.worktree, true)
@@ -286,9 +263,7 @@ export class LanesTreeProvider
     list: ReturnType<BranchesTreeProvider['getBranches']>,
     hidden: number,
   ): TreeNode[] {
-    if (list.length === 0) {
-      return [new MessageItem('None')];
-    }
+    if (list.length === 0) return [new MessageItem('None')];
     const rows: TreeNode[] = list.map(
       (b) =>
         new BranchItem(

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import {
   resolveRepoCommonDirs,
   worktreeListFingerprint,
-} from '../discovery/scanner';
+} from '../git/discovery';
 import { GitDirWatcher } from '../git/gitWatcher';
 
 /**
@@ -14,7 +14,7 @@ import { GitDirWatcher } from '../git/gitWatcher';
 const POLL_FALLBACK_MS = 30000;
 const POLL_NO_WATCHER_MS = 4000;
 
-export interface GitActivityHost {
+interface GitActivityHost {
   readonly output: { appendLine(value: string): void };
   /** Worktree membership changed (fingerprint moved) — rediscover. */
   onMembershipChanged(reason: string): void;
@@ -51,9 +51,7 @@ export class GitActivityHub implements vscode.Disposable {
     this.watchers = [];
     try {
       const commonDirs = await resolveRepoCommonDirs();
-      if (generation !== this.generation) {
-        return;
-      }
+      if (generation !== this.generation) return;
       for (const dir of commonDirs) {
         const watcher = new GitDirWatcher(
           dir,
@@ -94,9 +92,7 @@ export class GitActivityHub implements vscode.Disposable {
   }
 
   private schedulePoll(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-    }
+    if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = setTimeout(() => {
       this.pollTimer = undefined;
       void (async () => {

@@ -30,9 +30,7 @@ export class GitContentProvider implements vscode.TextDocumentContentProvider {
     const params = new URLSearchParams(uri.query);
     const cwd = params.get('cwd');
     const ref = params.get('ref');
-    if (!cwd || !ref) {
-      return '';
-    }
+    if (!cwd || !ref) return '';
     // uri.path is absolute-form "/foo/bar.ts"
     const relativePath = uri.path.replace(/^\//, '');
     return showFileAtRef(cwd, ref, relativePath);

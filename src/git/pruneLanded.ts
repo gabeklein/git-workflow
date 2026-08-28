@@ -1,5 +1,5 @@
 import { git } from './exec';
-import { resolveBaseSha } from './integration';
+import { resolveBaseSha } from './integration/status';
 import { landedVia } from './landedProbe';
 import { revParseCommit } from './plumbing';
 import { listWorktreeAdmin } from './worktreeAdmin';
@@ -32,7 +32,7 @@ export interface LandedBranch {
   hasRemote: boolean;
 }
 
-export interface LandedScan {
+interface LandedScan {
   landed: LandedBranch[];
   /** Branches with real unlanded work — never offered, counted for honesty. */
   keptCount: number;
@@ -51,17 +51,13 @@ export async function findLandedBranches(
   protect: string[] = [],
 ): Promise<LandedScan> {
   const baseSha = await resolveBaseSha(repoCwd, baseRef);
-  if (!baseSha) {
-    return { landed: [], keptCount: 0 };
-  }
+  if (!baseSha) return { landed: [], keptCount: 0 };
   const admin = await listWorktreeAdmin(repoCwd).catch(
     () => new Map<string, { branch?: string; path: string; detached: boolean }>(),
   );
   const heldBy = new Map<string, string>();
   for (const state of admin.values()) {
-    if (!state.detached && state.branch) {
-      heldBy.set(state.branch, state.path);
-    }
+    if (!state.detached && state.branch) heldBy.set(state.branch, state.path);
   }
 
   const locals = (
@@ -91,13 +87,9 @@ export async function findLandedBranches(
   const landed: LandedBranch[] = [];
   let keptCount = 0;
   for (const name of locals) {
-    if (guard.has(name)) {
-      continue;
-    }
+    if (guard.has(name)) continue;
     const sha = await revParseCommit(repoCwd, `refs/heads/${name}`);
-    if (!sha || sha === baseSha) {
-      continue;
-    }
+    if (!sha || sha === baseSha) continue;
     // Every probe is sound and any may abstain, so a miss means "keep it".
     const via = await landedVia(repoCwd, sha, baseSha).catch(() => undefined);
     if (!via) {
@@ -114,7 +106,7 @@ export async function findLandedBranches(
   return { landed, keptCount };
 }
 
-export interface PruneOutcome {
+interface PruneOutcome {
   deleted: string[];
   /** Name → why it survived. */
   failed: Map<string, string>;
@@ -138,9 +130,7 @@ export async function pruneLandedBranches(
 ): Promise<PruneOutcome> {
   const deleted: string[] = [];
   const failed = new Map<string, string>();
-  if (names.length === 0) {
-    return { deleted, failed };
-  }
+  if (names.length === 0) return { deleted, failed };
   const fresh = await findLandedBranches(repoCwd, baseRef, protect);
   const stillLanded = new Map(fresh.landed.map((b) => [b.name, b]));
   for (const name of names) {

@@ -21,9 +21,7 @@ export function registerFileExplorerCommands(
         // checkout itself, so fall back to the focused worktree's root.
         const target =
           item?.resourceUri?.fsPath ?? treeProvider.getSelectedPath();
-        if (!target) {
-          return;
-        }
+        if (!target) return;
         await vscode.env.clipboard.writeText(target);
         void vscode.window.setStatusBarMessage(
           `Git Workflow: copied ${path.basename(target)} path`,
@@ -42,9 +40,7 @@ export function registerFileExplorerCommands(
       // tests/automation may pass the relative path directly.
       async (item?: ExplorerFolderItem, nameArg?: unknown) => {
         const selected = treeProvider.getSelectedPath();
-        if (!selected) {
-          return;
-        }
+        if (!selected) return;
         const baseDir = item?.kind === 'explorerFolder' ? item.relPath : '';
         const rel =
           typeof nameArg === 'string' && nameArg.trim()
@@ -56,9 +52,7 @@ export function registerFileExplorerCommands(
                 validateInput: (v) =>
                   v.trim() ? undefined : 'File path is required',
               });
-        if (!rel?.trim()) {
-          return;
-        }
+        if (!rel?.trim()) return;
         const target = path.join(selected, baseDir, rel.trim());
         // Never write outside the worktree, even via ../ in the input
         if (!path.resolve(target).startsWith(path.resolve(selected) + path.sep)) {
@@ -94,18 +88,14 @@ export function registerFileExplorerCommands(
       'worktreeCompare.deleteWorktreeEntry',
       async (item?: ExplorerFileItem | ExplorerFolderItem) => {
         const uri = item?.resourceUri;
-        if (!uri) {
-          return;
-        }
+        if (!uri) return;
         const isFolder = item.kind === 'explorerFolder';
         const confirm = await vscode.window.showWarningMessage(
           `Delete ${isFolder ? 'folder' : 'file'} “${path.basename(uri.fsPath)}”${isFolder ? ' and its contents' : ''}?`,
           { modal: true },
           'Delete',
         );
-        if (confirm !== 'Delete') {
-          return;
-        }
+        if (confirm !== 'Delete') return;
         try {
           await vscode.workspace.fs.delete(uri, {
             recursive: isFolder,

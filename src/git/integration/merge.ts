@@ -40,9 +40,7 @@ export async function mergeOffTree(
         const lines = err.stdout.split('\n').map((l) => l.trim());
         const files: string[] = [];
         for (const line of lines.slice(1)) {
-          if (!line) {
-            break;
-          }
+          if (!line) break;
           files.push(line);
         }
         // Line 1 is still a real tree: the merge with conflicts
@@ -69,7 +67,7 @@ export async function mergeOffTree(
  * touching the working tree.
  */
 
-export interface ResolvedConflicts {
+interface ResolvedConflicts {
   tree: string;
   /** Files resolved by a LOSSLESS rule (union insert / linewise 3-way). */
   lossless: string[];
@@ -111,9 +109,7 @@ export async function resolveConflictedTree(
     .split('\n')[0];
 
   const blobAt = async (commit: string, file: string) => {
-    if (!commit) {
-      return undefined;
-    }
+    if (!commit) return undefined;
     try {
       return (
         await git(cwd, ['rev-parse', '--verify', `${commit}:${file}`])
@@ -196,9 +192,7 @@ export async function resolveConflictedTree(
       }
       unresolved.push(file);
     }
-    if (unresolved.length > 0) {
-      return { unresolved };
-    }
+    if (unresolved.length > 0) return { unresolved };
     // Rewrite the conflicted tree: replace each marker file with its
     // resolved blob via a temp index — no working tree involved.
     const indexFile = path.join(tmp, 'index');
@@ -230,9 +224,7 @@ function bothSidesOnlyInsert(base: string, ours: string, theirs: string) {
     const lines = side.split('\n');
     let i = 0;
     for (const line of lines) {
-      if (i < b.length && line === b[i]) {
-        i++;
-      }
+      if (i < b.length && line === b[i]) i++;
     }
     return i === b.length;
   };
@@ -251,9 +243,7 @@ function mergeLinewise(
   const b = base.split('\n');
   const o = ours.split('\n');
   const t = theirs.split('\n');
-  if (b.length !== o.length || b.length !== t.length) {
-    return undefined;
-  }
+  if (b.length !== o.length || b.length !== t.length) return undefined;
   const out: string[] = [];
   for (let i = 0; i < b.length; i++) {
     if (o[i] === t[i]) {
@@ -291,9 +281,8 @@ async function mergeFile(
   } catch (err) {
     // Exit code = number of conflict hunks; with --union/--theirs the
     // content is still fully resolved on stdout. Negative/128+ = error.
-    if (err instanceof GitError && err.code !== null && err.code > 0 && err.code < 128) {
+    if (err instanceof GitError && err.code !== null && err.code > 0 && err.code < 128)
       return err.stdout;
-    }
     return undefined;
   }
 }

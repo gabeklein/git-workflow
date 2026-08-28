@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as vscode from 'vscode';
-import { git } from '../git/exec';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,7 +21,7 @@ export interface PullRequestInfo {
   baseRefName?: string;
 }
 
-export type GithubPrMode = 'off' | 'auto';
+type GithubPrMode = 'off' | 'auto';
 
 const PR_JSON_FIELDS =
   'number,title,state,url,isDraft,headRefName,mergeable,mergeStateStatus,baseRefName';
@@ -43,12 +42,8 @@ export function isGithubPrIntegrationEnabled(): boolean {
 }
 
 async function isGhAvailable(): Promise<boolean> {
-  if (ghAvailable !== undefined) {
-    return ghAvailable;
-  }
-  if (ghCheckInFlight) {
-    return ghCheckInFlight;
-  }
+  if (ghAvailable !== undefined) return ghAvailable;
+  if (ghCheckInFlight) return ghCheckInFlight;
   ghCheckInFlight = (async () => {
     try {
       await execFileAsync('gh', ['--version'], {
@@ -89,9 +84,7 @@ async function ghJson<T>(
       },
     });
     const text = stdout.toString().trim();
-    if (!text) {
-      return undefined;
-    }
+    if (!text) return undefined;
     return JSON.parse(text) as T;
   } catch {
     return undefined;
@@ -113,13 +106,9 @@ interface GhPrRow {
 function normalizeMergeable(
   raw: string | undefined,
 ): PullRequestInfo['mergeable'] | undefined {
-  if (!raw) {
-    return undefined;
-  }
+  if (!raw) return undefined;
   const u = raw.toUpperCase();
-  if (u === 'MERGEABLE' || u === 'CONFLICTING' || u === 'UNKNOWN') {
-    return u;
-  }
+  if (u === 'MERGEABLE' || u === 'CONFLICTING' || u === 'UNKNOWN') return u;
   return undefined;
 }
 
@@ -162,12 +151,9 @@ export async function findPullRequestForBranch(
   branch: string,
   detached: boolean,
 ): Promise<PullRequestInfo | undefined> {
-  if (!isGithubPrIntegrationEnabled() || detached || !branch || branch === 'HEAD') {
+  if (!isGithubPrIntegrationEnabled() || detached || !branch || branch === 'HEAD')
     return undefined;
-  }
-  if (!(await isGhAvailable())) {
-    return undefined;
-  }
+  if (!(await isGhAvailable())) return undefined;
 
   // Open first (includes drafts when not filtered)
   const openList = await ghJson<GhPrRow[]>(worktreePath, [
@@ -206,9 +192,7 @@ export async function findPullRequestForBranch(
     '--json',
     PR_JSON_FIELDS,
   ]);
-  if (!allList?.length) {
-    return undefined;
-  }
+  if (!allList?.length) return undefined;
   const exact = allList.find((r) => r.headRefName === branch) ?? allList[0];
   return normalizePr(exact);
 }
@@ -218,14 +202,10 @@ async function enrichOpenPr(
   worktreePath: string,
   pr: PullRequestInfo,
 ): Promise<PullRequestInfo> {
-  if (pr.state !== 'open' || pr.mergeable === 'CONFLICTING') {
-    return pr;
-  }
+  if (pr.state !== 'open' || pr.mergeable === 'CONFLICTING') return pr;
   if (pr.mergeable === 'MERGEABLE' || pr.mergeable === 'UNKNOWN') {
     // Still refresh DIRTY via mergeStateStatus when missing
-    if (pr.mergeStateStatus) {
-      return pr;
-    }
+    if (pr.mergeStateStatus) return pr;
   }
   const detail = await ghJson<GhPrRow>(worktreePath, [
     'pr',
@@ -234,41 +214,25 @@ async function enrichOpenPr(
     '--json',
     PR_JSON_FIELDS,
   ]);
-  if (!detail) {
-    return pr;
-  }
+  if (!detail) return pr;
   return normalizePr(detail) ?? pr;
 }
 
 /** True when GitHub reports a real merge conflict (not merely "behind"). */
 export function prHasMergeConflicts(pr: PullRequestInfo): boolean {
-  if (pr.state !== 'open') {
-    return false;
-  }
-  if (pr.mergeable === 'CONFLICTING') {
-    return true;
-  }
+  if (pr.state !== 'open') return false;
+  if (pr.mergeable === 'CONFLICTING') return true;
   // DIRTY = merge conflicts with base (GitHub)
-  if (pr.mergeStateStatus === 'DIRTY') {
-    return true;
-  }
+  if (pr.mergeStateStatus === 'DIRTY') return true;
   return false;
 }
 
 /** Human-readable PR badge for tree description. */
 export function formatPrDescription(pr: PullRequestInfo): string {
-  if (pr.state === 'merged') {
-    return `#${pr.number} · merged`;
-  }
-  if (pr.state === 'closed') {
-    return `#${pr.number} · closed`;
-  }
-  if (prHasMergeConflicts(pr)) {
-    return `#${pr.number} · conflicts`;
-  }
-  if (pr.isDraft) {
-    return `#${pr.number} · draft`;
-  }
+  if (pr.state === 'merged') return `#${pr.number} · merged`;
+  if (pr.state === 'closed') return `#${pr.number} · closed`;
+  if (prHasMergeConflicts(pr)) return `#${pr.number} · conflicts`;
+  if (pr.isDraft) return `#${pr.number} · draft`;
   return `#${pr.number} · open`;
 }
 
@@ -306,32 +270,4 @@ export function prThemeIcon(pr: PullRequestInfo): vscode.ThemeIcon {
     'git-pull-request',
     new vscode.ThemeColor('charts.green'),
   );
-}
-
-/**
- * Best-effort github.com owner/repo from origin URL (for tooltips / future API use).
- */
-export async function resolveGithubRepoSlug(
-  worktreePath: string,
-): Promise<string | undefined> {
-  try {
-    const url = (await git(worktreePath, ['remote', 'get-url', 'origin'])).trim();
-    return parseGithubSlug(url);
-  } catch {
-    return undefined;
-  }
-}
-
-export function parseGithubSlug(remoteUrl: string): string | undefined {
-  // git@github.com:owner/repo.git  |  https://github.com/owner/repo.git
-  const ssh = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/i);
-  if (ssh) {
-    return `${ssh[1]}/${ssh[2]}`;
-  }
-  return undefined;
-}
-
-/** Map key for PR cache (path + branch). */
-export function prCacheKey(worktreePath: string, branch: string): string {
-  return `${worktreePath}\0${branch}`;
 }

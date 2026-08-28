@@ -12,8 +12,9 @@ import {
   listRemotePrFiles,
   type RemotePullRequest,
 } from '../github/remotePrs';
-import type { DiscoveredWorktree } from '../discovery/scanner';
-import { BranchItem, MessageItem, RemotePrFileItem, type TreeNode } from './nodes';
+import type { DiscoveredWorktree } from '../git/discovery';
+import { MessageItem, type TreeNode } from './nodes';
+import { BranchItem, RemotePrFileItem } from './nodes/branches';
 
 const MAX_ROWS = 50;
 
@@ -164,9 +165,7 @@ export class BranchesTreeProvider
       return;
     }
     const cwd = this.getRepoCwd();
-    if (!cwd) {
-      return;
-    }
+    if (!cwd) return;
     this.loading = true;
     const t0 = Date.now();
     try {
@@ -192,12 +191,9 @@ export class BranchesTreeProvider
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
-      if (!element) {
-        return this.getRootChildren();
-      }
-      if (element.kind === 'branch' && element.pr) {
+      if (!element) return this.getRootChildren();
+      if (element.kind === 'branch' && element.pr)
         return await this.getPrFiles(element.repoCwd, element.pr);
-      }
       return [];
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -207,12 +203,9 @@ export class BranchesTreeProvider
 
   private getRootChildren(): TreeNode[] {
     const cwd = this.getRepoCwd();
-    if (!cwd) {
-      return [new MessageItem('No repository folder open')];
-    }
-    if (this.error) {
+    if (!cwd) return [new MessageItem('No repository folder open')];
+    if (this.error)
       return [new MessageItem('Could not list branches', this.error, 'error')];
-    }
     if (this.branches.length === 0) {
       return this.loading
         ? [new MessageItem('Loading…', undefined, 'loading~spin')]
@@ -223,12 +216,8 @@ export class BranchesTreeProvider
     const rows: TreeNode[] = [];
     const seen = new Set<string>();
     for (const b of this.branches) {
-      if (b.name === integration) {
-        continue;
-      }
-      if (rows.length >= MAX_ROWS) {
-        break;
-      }
+      if (b.name === integration) continue;
+      if (rows.length >= MAX_ROWS) break;
       seen.add(b.name);
       rows.push(
         new BranchItem(
@@ -244,9 +233,7 @@ export class BranchesTreeProvider
     }
     // PR heads with no local/remote ref (e.g. fork PRs)
     for (const [head, pr] of this.prsByHead) {
-      if (seen.has(head) || head === integration) {
-        continue;
-      }
+      if (seen.has(head) || head === integration) continue;
       rows.push(
         new BranchItem(cwd, head, false, false, '', this.worktreeByBranch.get(head), pr),
       );
@@ -273,9 +260,8 @@ export class BranchesTreeProvider
         cached = await listRemotePrFiles(cwd, pr);
         this.filesCache.set(pr.number, cached);
       }
-      if (cached.files.length === 0) {
+      if (cached.files.length === 0)
         return [new MessageItem('No file changes', pr.baseRefName)];
-      }
       return cached.files.map(
         (f) => new RemotePrFileItem(cwd, pr, cached!.baseRef, cached!.headRef, f),
       );
