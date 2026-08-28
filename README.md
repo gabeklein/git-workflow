@@ -258,7 +258,9 @@ The groups are a **ladder**, not four categories: each rung is what falls throug
 
 So **Landed** is refs waiting to be pruned, and a `landed · …` row under Working is exactly the set that needs you. Ignored files are singled out because they are the one thing removal could actually destroy: `git worktree remove` takes a local `.env` or build output without complaint, and the dirty probe cannot see them.
 
-Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the preview preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
+Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
+
+Every row's context menu also offers **Copy Branch Name** — the thing you paste into `gw-lane add`, `git worktree add`, or a PR description, and the one identifier the panel shows that was previously unselectable — and a checkout's menu offers **Open Terminal Here**, which starts an integrated terminal in that worktree named after its branch. VS Code's own "Open in Integrated Terminal" reaches worktrees only through the Explorer, and a lane's shell is where `gw-lane` and the test commands are run from.
 
 **Focus** panel (presentation — header shows the focused branch):
 

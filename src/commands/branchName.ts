@@ -1,7 +1,7 @@
 /**
  * Branch name carried on a Lanes-panel row. Worktree, branch, and
- * integration-lane items all expose `branch`; the label is a fallback
- * for rows that only show "name (detached)".
+ * preview-lane items all expose `branch`; the label is a fallback for
+ * rows that only show "name (detached)".
  */
 export function branchNameFromItem(item?: {
   branch?: string;

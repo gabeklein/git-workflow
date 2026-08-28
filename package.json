@@ -780,7 +780,7 @@
         },
         {
           "command": "worktreeCompare.copyBranchName",
-          "when": "view == worktreeCompare.lanes && viewItem =~ /^integrationLane/",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^previewLane/",
           "group": "1_copy@1"
         },
         {
