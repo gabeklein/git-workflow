@@ -88,19 +88,29 @@ code --install-extension ./artifacts/git-workflow-0.0.1.vsix --force
 
 The rules this extension enforces are not discoverable from the code an agent is
 looking at — a derived branch it must not commit to, lane files it must not
-hand-edit, a headless opt-in it would never guess. Those ship as a skill in
-[`skills/git-workflow`](skills/git-workflow/SKILL.md):
+hand-edit, a headless opt-in it would never guess. They live in
+[`skills/git-workflow/SKILL.md`](skills/git-workflow/SKILL.md), written to be
+read by an agent and self-checking: it opens by establishing how much of itself
+applies, and says plainly to stop reading in a repo that has no worktrees.
 
-```bash
-npm run install:skill                    # ~/.claude/skills/git-workflow (all repos)
-npm run install:skill -- --project       # .claude/skills/git-workflow in this repo
-npm run install:skill -- --project ../x  # …or another one
-```
+**The intended way it spreads is the commit guard.** When the hook refuses a
+commit on the integration branch, the refusal names the skill's URL — that is
+the one moment an agent that does not know this workflow is guaranteed to be
+listening, and it is what stops the message's own `--no-verify` line from being
+the easiest thing to act on. No install command is issued and no tool's config
+path appears in a git hook: the agent fetches a document and decides where its
+own skills live.
 
-It is deliberately **not** part of `install:local` — writing into `~/.claude` is
-a separate decision from installing an extension. Claude Code loads it on its
-own when a repo has linked worktrees or a `focus-*` / `gw-lane` file in its git
-common dir; other agents can be pointed at the file directly.
+Caveat worth knowing: the hook only exists while integration is on. With
+integration off there is no refusal, so nothing nudges — a repo that wants the
+rules regardless should reference the file from its own `CLAUDE.md` / `AGENTS.md`
+the way [this one does](CLAUDE.md).
+
+`npm run install:skill` copies it to `~/.claude/skills/git-workflow` (or
+`-- --project [dir]` for one repo). That is a convenience for people who have
+already cloned this repo to work on it — nobody clones an extension to install a
+skill, and it is deliberately not part of `install:local`, since writing into
+`~/.claude` is a different decision from installing an extension.
 
 ## Develop (fast iteration)
 
