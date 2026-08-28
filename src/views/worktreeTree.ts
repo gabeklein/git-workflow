@@ -166,7 +166,6 @@ export class WorktreeTreeProvider
           }
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
-            e.affectsConfiguration('worktreeCompare.includeRootCheckout') ||
             e.affectsConfiguration('worktreeCompare.previewBranch')
           ) {
             this.refresh();

@@ -88,6 +88,25 @@ describe('focus panel', () => {
     );
   });
 
+  // The root checkout holds a branch like any other — clean, on main, it
+  // is still a checkout of main and belongs under Working, not Local.
+  it('lists the clean root checkout under Working', async () => {
+    await poll('the root row appears', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return (await api.focusRows('working')).some(
+        (r) => r.kind === 'worktreeList' && r.label === 'main',
+      );
+    });
+    assert.ok(
+      api.worktrees().some((w) => w.path === repo && w.branch === 'main'),
+      'the workspace root is a discovered checkout',
+    );
+    assert.ok(
+      !(await labels('local')).includes('main'),
+      'and main is not also a branch row',
+    );
+  });
+
   it('a branch with a checkout is not repeated under Local', async () => {
     const checkouts = await labels('working');
     const branches = await labels('local');
