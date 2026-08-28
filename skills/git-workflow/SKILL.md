@@ -1,6 +1,6 @@
 ---
 name: git-workflow
-description: How to work in a repo managed by the Git Workflow VS Code extension — worktree-per-branch lanes, an integration preview branch that is derived and must not be committed to, and the `gw-lane` headless opt-in. Load this before creating branches, switching branches, committing, rebasing onto a base, deleting branches, or resolving conflicts in any repo that has linked git worktrees or a `focus-*` / `gw-lane` file in its git common dir.
+description: How to work in a repo managed by the Git Workflow VS Code extension — worktree-per-branch lanes, an integration preview branch that is derived and must not be committed to, and the `gw-lane` headless opt-in. Load this BEFORE THE FIRST EDIT of any new feature or fix — not just before git commands — and before creating or switching branches, committing, rebasing onto a base, deleting branches, or resolving conflicts, in any repo that has linked git worktrees or a `focus-*` / `gw-lane` file in its git common dir.
 ---
 
 # Working in a Git Workflow repo
@@ -24,6 +24,28 @@ ls    "$dir/gw-lane"    2>/dev/null   # headless lane CLI, present while integra
 
 Multiple linked worktrees → treat this as a lane repo even if integration is
 off. `focus-base` present → integration is on; the rules below are load-bearing.
+
+## Pick the lane before you write, not before you commit
+
+**The first edit decides where the work lives.** By the time there is
+something to commit, the change is already in whatever checkout you were
+standing in — usually the workspace root, usually on the base branch — and
+moving it out is a manual copy-and-revert that nothing verifies for you. So the
+worktree decision comes *first*, ahead of the first file you touch:
+
+> Is this a new feature or fix? → make the worktree, work in it. Not after the
+> edits, not at commit time.
+
+Work in the **root checkout** only for things that genuinely belong to the
+checkout you are in: reading, running tests, and edits the user pointed you at
+there. The root is normally sitting on the base, so writing a feature into it
+does not just misplace the work — it moves the base branch, which the extension
+surfaces as base drift (a `main · +N unpushed` row in the preview) and which
+every other lane is measured against.
+
+If you notice you have already started in the wrong place, say so, then move it:
+create the lane, copy the paths across, **diff them to prove they match**, and
+only then revert the originals. Do not commit "just this once" where you are.
 
 ## Bias to worktrees, hard
 
@@ -83,8 +105,23 @@ It works with the editor closed and takes the same lock the rebuild does. In the
 editor the equivalent is **Git Workflow: Add to Integration**
 (`worktreeCompare.addToIntegration`).
 
+**You may add your own lane without asking** — that is what the CLI is for, and
+the party doing the work is the one who knows whether it is worth previewing.
+Two conditions: integration is actually on (`gw-lane` exists), and you **say so
+in your report**, since the user's preview changed and the row will not explain
+itself.
+
+Do not use "it has no conflicts" as the reason. Conflicts are not the risk the
+opt-in guards — a rebuild that hits one fails *without touching the checkout*
+and tags the lane, so a clash is visible and cheap. The question is whether this
+work belongs beside the others yet.
+
 Leave a lane **out** while it is mid-refactor, deliberately broken, or exploring
 something that would clash. Being out costs nothing; the row stays visible.
+
+If `gw-lane` is missing, integration is off in this repo — do **not** hand-write
+`focus-applied` to simulate it. Those files are read under a lock and a preview
+that is off has no rebuild to honour them.
 
 ## Staying current with the base
 
@@ -137,9 +174,10 @@ rather than a shell line, name it:
 
 ## Quick rules
 
-1. New work → new worktree. Never switch a branch out from under a checkout.
+1. Decide the worktree **before the first edit**, not at commit time. Never
+   switch a branch out from under an existing checkout.
 2. Never commit on the integration branch; never `--no-verify` past the guard.
 3. Never hand-edit `focus-*`; use `gw-lane`.
-4. Join the preview deliberately, and say so when you do.
+4. You may join the preview yourself — deliberately, and say so when you do.
 5. Never force-push or `branch -D` without being asked.
 6. Never abort a rebase or merge you did not start.
