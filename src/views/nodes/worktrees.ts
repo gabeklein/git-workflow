@@ -150,7 +150,7 @@ export class WorktreeListItem extends vscode.TreeItem {
           : 'Locked (git worktree lock)'
         : undefined,
       preview?.role === 'lane' && preview.applied
-        ? 'Applied to the preview worktree'
+        ? 'Applied to the preview'
         : undefined,
       baseStatus?.rebasing
         ? 'A rebase is paused here — resolve the conflicts, then Continue Rebase (or Abort Rebase).'

@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../git/discovery';
-import { orderLaneRows } from './lanesPlan';
+import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
@@ -142,7 +142,7 @@ export class PreviewController implements vscode.Disposable {
 
   constructor(private readonly host: PreviewHost) {}
 
-  /** Preview worktree + lanes, if one is checked out. */
+  /** The preview and its lanes, if preview mode is on. */
   getState(): PreviewState | undefined {
     if (!this.previewPath) return undefined;
     return {
@@ -177,9 +177,7 @@ export class PreviewController implements vscode.Disposable {
    */
   async refreshState(): Promise<void> {
     const branch = previewBranch();
-    const wt = this.host
-      .getWorktrees()
-      .find((w) => !w.detached && w.branch === branch);
+    const wt = findPreviewCheckout(this.host.getWorktrees(), branch);
 
     if (!wt) {
       this.forgetPreview(branch);
@@ -242,10 +240,10 @@ export class PreviewController implements vscode.Disposable {
     }
   }
 
-  /** The preview checkout is gone — drop the overlay and the guard. */
+  /** The root checkout left the preview branch — drop overlay and guard. */
   private forgetPreview(branch: string): void {
     if (this.previewPath)
-      this.host.output.appendLine('Preview worktree gone — overlay off');
+      this.host.output.appendLine('Root checkout left the preview branch — overlay off');
     if (this.guardSyncedFor) {
       this.guardSyncedFor = undefined;
       void this.syncCommitGuard(undefined, branch);
@@ -269,7 +267,7 @@ export class PreviewController implements vscode.Disposable {
     this.error = undefined;
     this.fingerprint = undefined;
     this.host.output.appendLine(
-      `Preview worktree: ${previewPath} (${branch})`,
+      `Preview: ${previewPath} (${branch})`,
     );
     // Covers checkouts created by the shell script or by hand too
     ensurePreviewPushBlocked(previewPath).catch((err) => {
@@ -541,7 +539,7 @@ export class PreviewController implements vscode.Disposable {
   /** Toggle overlaying a lane's uncommitted edits; rebuild when applied. */
   async setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
     if (!this.previewPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     await setWipLane(this.previewPath, branch, enabled);
     await this.refreshState();
     this.host.fireTreeData();
@@ -684,7 +682,7 @@ export class PreviewController implements vscode.Disposable {
   async runRebuild(reason: string): Promise<RebuildResult> {
     const workingPath = this.previewPath;
     if (!workingPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     if (this.rebuildInFlight) {
       // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
       // follow-up run — it re-reads the lane files, so it applies whatever
@@ -806,7 +804,7 @@ export class PreviewController implements vscode.Disposable {
    */
   async removeCandidate(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     await dropCandidateLane(this.previewPath, branch);
     await addExcludedLane(this.previewPath, branch);
     if (this.lanes.includes(branch)) return this.hide(branch);
@@ -818,7 +816,7 @@ export class PreviewController implements vscode.Disposable {
   /** Add this branch as a lane and rebuild. */
   async apply(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     if (!isLaneBranch(branch, previewBaseRef())) {
       return {
         ok: false,
@@ -837,7 +835,7 @@ export class PreviewController implements vscode.Disposable {
   /** Drop this branch from the lanes and rebuild. */
   async hide(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     await dropAppliedLane(this.previewPath, branch);
     return this.runRebuild(`hide ${branch}`);
   }
@@ -853,7 +851,7 @@ export class PreviewController implements vscode.Disposable {
    */
   async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
     if (!this.previewPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     const baseName = previewBaseRef().replace(/^origin\//, '');
     if (included) {
       await dropExcludedLane(this.previewPath, baseName);
@@ -1088,7 +1086,7 @@ export class PreviewController implements vscode.Disposable {
   async absorbEdits(): Promise<AbsorbResult> {
     const workingPath = this.previewPath;
     if (!workingPath)
-      return { ok: false, code: 'error', message: 'no preview worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     const target = await this.absorbTarget();
     // Uncommitted work has to land in a working tree, so unlike stray
     // COMMITS this one cannot fall back to the ref. Committing it on the

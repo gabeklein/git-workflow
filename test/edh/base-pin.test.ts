@@ -18,7 +18,7 @@ import {
   poll,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -49,7 +49,7 @@ describe('base pin & drift lane', () => {
       return (
         (drift()?.ahead ?? 0) >= 1 &&
         drift()?.included === true &&
-        fs.existsSync(path.join(working, 'mainwork.txt'))
+        fs.existsSync(path.join(previewRoot, 'mainwork.txt'))
       );
     });
     assert.equal(pin(), pinBefore, 'the frozen base (pin) did not move');
@@ -71,7 +71,7 @@ describe('base pin & drift lane', () => {
       await run('worktreeCompare.refresh');
       return (
         drift()?.included === false &&
-        !fs.existsSync(path.join(working, 'mainwork.txt'))
+        !fs.existsSync(path.join(previewRoot, 'mainwork.txt'))
       );
     });
     await run('worktreeCompare.refresh');
@@ -83,7 +83,7 @@ describe('base pin & drift lane', () => {
 
     await api.setBaseDriftIncluded(true);
     await poll('re-including brings the work back', 30000, () =>
-      fs.existsSync(path.join(working, 'mainwork.txt')),
+      fs.existsSync(path.join(previewRoot, 'mainwork.txt')),
     );
   });
 
@@ -93,7 +93,7 @@ describe('base pin & drift lane', () => {
     await run('worktreeCompare.branchifyBaseDrift', 'feat/main-work');
     await poll('branchified commits reach the preview as a lane', 30000, () =>
       applied().includes('feat/main-work') &&
-      fs.existsSync(path.join(working, 'mainwork.txt')),
+      fs.existsSync(path.join(previewRoot, 'mainwork.txt')),
     );
     assert.equal(
       git(repo, ['rev-parse', 'feat/main-work']),
@@ -130,8 +130,8 @@ describe('base pin & drift lane', () => {
     await run('worktreeCompare.catchUpPreviewBase');
     await poll('catch-up rebases the preview onto the new base', 30000, () => {
       try {
-        git(working, ['merge-base', '--is-ancestor', mainSha, 'HEAD']);
-        return fs.existsSync(path.join(working, 'mainwork2.txt'));
+        git(previewRoot, ['merge-base', '--is-ancestor', mainSha, 'HEAD']);
+        return fs.existsSync(path.join(previewRoot, 'mainwork2.txt'));
       } catch {
         return false;
       }
@@ -153,7 +153,7 @@ describe('base pin & drift lane', () => {
     git(repo, ['push', '-q', 'origin', 'main']);
     await poll('push clears drift and the work becomes base', 30000, async () => {
       await run('worktreeCompare.refresh');
-      return !drift() && fs.existsSync(path.join(working, 'mainwork3.txt'));
+      return !drift() && fs.existsSync(path.join(previewRoot, 'mainwork3.txt'));
     });
   });
 

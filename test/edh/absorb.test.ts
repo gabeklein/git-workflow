@@ -17,7 +17,7 @@ import {
   poll,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -32,34 +32,34 @@ describe('absorbing stray preview work', () => {
     // at the BASE, which is the wrong destination when the work belonged to
     // a lane, so the hook stops the commit while the author still knows
     // which branch they meant.
-    fs.appendFileSync(path.join(working, 'README.md'), 'blocked write\n');
-    git(working, ['add', '-A']);
-    const before = git(working, ['rev-parse', 'HEAD']);
+    fs.appendFileSync(path.join(previewRoot, 'README.md'), 'blocked write\n');
+    git(previewRoot, ['add', '-A']);
+    const before = git(previewRoot, ['rev-parse', 'HEAD']);
     await poll('pre-commit guard is installed', 30000, () =>
       fs.existsSync(path.join(repo, '.git', 'hooks', 'pre-commit')),
     );
     assert.equal(
-      gitOk(working, ['commit', '-qm', 'should never exist']),
+      gitOk(previewRoot, ['commit', '-qm', 'should never exist']),
       false,
       'the hook refused the commit',
     );
     assert.equal(
-      git(working, ['rev-parse', 'HEAD']),
+      git(previewRoot, ['rev-parse', 'HEAD']),
       before,
       'HEAD did not move',
     );
     // The staged work is untouched — that is what makes the refusal safe.
-    git(working, ['reset', '-q', '--hard', 'HEAD']);
+    git(previewRoot, ['reset', '-q', '--hard', 'HEAD']);
   });
 
   it('moves an EDIT made on the preview checkout onto main by itself', async () => {
     // An edit carries diff context, so a replay onto the base is vetted by
     // git itself — safe to move unattended. README.md is on the base and
     // no lane touches it.
-    fs.appendFileSync(path.join(working, 'README.md'), 'an agent wrote here\n');
-    git(working, ['add', '-A']);
-    git(working, ['commit', '--no-verify', '-qm', 'agent edits README on preview']);
-    const strayTip = git(working, ['rev-parse', 'HEAD']);
+    fs.appendFileSync(path.join(previewRoot, 'README.md'), 'an agent wrote here\n');
+    git(previewRoot, ['add', '-A']);
+    git(previewRoot, ['commit', '--no-verify', '-qm', 'agent edits README on preview']);
+    const strayTip = git(previewRoot, ['rev-parse', 'HEAD']);
 
     // No command: the tick's fingerprint carries a stray component, so the
     // rebuild that trips the guard also runs the rescue.
@@ -79,7 +79,7 @@ describe('absorbing stray preview work', () => {
       const landed = git(repo, ['log', 'main', '-5', '--format=%s']).includes(
         'agent edits README on preview',
       );
-      return landed && git(working, ['rev-parse', 'HEAD']) !== strayTip;
+      return landed && git(previewRoot, ['rev-parse', 'HEAD']) !== strayTip;
     });
     assert.ok(
       fs.readFileSync(path.join(repo, 'README.md'), 'utf8').includes(
@@ -93,9 +93,9 @@ describe('absorbing stray preview work', () => {
     // An added file has no diff context, so it would apply to the base
     // cleanly even if its contents depend on merged lane code. That one
     // shape asks first instead of moving unattended.
-    fs.writeFileSync(path.join(working, 'stray-new.txt'), 'needs the lanes\n');
-    git(working, ['add', '-A']);
-    git(working, ['commit', '--no-verify', '-qm', 'agent adds a file on preview']);
+    fs.writeFileSync(path.join(previewRoot, 'stray-new.txt'), 'needs the lanes\n');
+    git(previewRoot, ['add', '-A']);
+    git(previewRoot, ['commit', '--no-verify', '-qm', 'agent adds a file on preview']);
 
     // 60s for the same reason the poll above it is 60s: this waits on the
     // same watcher-driven tick, so when a .git event is missed the next one
@@ -135,7 +135,7 @@ describe('absorbing stray preview work', () => {
       return error?.code !== 'unique';
     });
     assert.equal(
-      git(working, ['status', '--porcelain']),
+      git(previewRoot, ['status', '--porcelain']),
       '',
       'preview checkout is clean after the recovery rebuild',
     );
@@ -151,9 +151,9 @@ describe('absorbing stray preview work', () => {
   });
 
   it('moves UNCOMMITTED edits only when asked, and cleans the checkout', async () => {
-    fs.writeFileSync(path.join(working, 'edit.txt'), 'uncommitted agent edit\n');
+    fs.writeFileSync(path.join(previewRoot, 'edit.txt'), 'uncommitted agent edit\n');
     assert.notEqual(
-      git(working, ['status', '--porcelain']),
+      git(previewRoot, ['status', '--porcelain']),
       '',
       'the preview checkout is dirty before the command',
     );
@@ -171,7 +171,7 @@ describe('absorbing stray preview work', () => {
       'it arrives UNCOMMITTED — absorbing must not decide the work is done',
     );
     assert.ok(
-      !fs.existsSync(path.join(working, 'edit.txt')),
+      !fs.existsSync(path.join(previewRoot, 'edit.txt')),
       'the preview checkout was restored, untracked file included',
     );
   });

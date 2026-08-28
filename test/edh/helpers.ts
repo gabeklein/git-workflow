@@ -13,7 +13,12 @@ export const repo = process.env.GW_FIXTURE_REPO as string;
 export const landing = process.env.GW_FIXTURE_LANDING as string;
 export const laneA = path.join(repo, '.worktrees', 'feat-a');
 export const laneB = path.join(repo, '.worktrees', 'feat-b');
-export const working = path.join(repo, '.worktrees', 'working');
+/**
+ * The preview tree — the SAME directory as `repo`, because the preview is
+ * the root checkout and nothing else. Named separately where a scenario
+ * means "the derived tree" rather than "the repository".
+ */
+export const previewRoot = repo;
 
 /** View-state hooks exported by activate() under GW_TEST_HOOKS. */
 export interface TestApi {
@@ -52,9 +57,9 @@ export interface TestApi {
     }[]
   >;
   /**
-   * The RENDERED lane rows under Preview (what VS Code actually paints).
-   * Async now: they are read through the Lanes tree, group → preview → lanes,
-   * so a preview that stopped rendering fails here instead of passing on a
+   * The RENDERED lane rows under the preview row (what VS Code actually
+   * paints). Read through the Lanes tree — preview row → lanes — so a
+   * preview that stopped rendering fails here instead of passing on a
    * provider nothing draws.
    */
   previewRows(): Promise<

@@ -147,6 +147,32 @@ export function planLaneRows(input: LanesPlanInput): LanesPlan {
   };
 }
 
+/**
+ * The preview checkout, if preview mode is on.
+ *
+ * The preview is the ROOT checkout on the preview branch, and only that.
+ * Not "whichever worktree holds the branch": the root is the one checkout
+ * that sits on the base, so a feature written there moves the base instead
+ * of landing on a lane. Making it the preview turns that hazard into the
+ * single rule "never write here", which the commit guard then enforces
+ * unconditionally — and it means "which checkout is the preview?" is a
+ * property rather than a search.
+ *
+ * A preview branch checked out in a linked worktree is somebody's manual
+ * `git switch`. It is left alone: not rebuilt, not guarded, not shown.
+ */
+export function findPreviewCheckout(
+  worktrees: readonly DiscoveredWorktree[],
+  previewBranch: string,
+): DiscoveredWorktree | undefined {
+  return worktrees.find(
+    (wt) =>
+      !wt.detached &&
+      wt.branch === previewBranch &&
+      Boolean(wt.isRootCheckout || wt.isMainWorktree),
+  );
+}
+
 /** Label for a checkout row — detached ones are identified by sha. */
 export function checkoutLabel(
   wt: DiscoveredWorktree,

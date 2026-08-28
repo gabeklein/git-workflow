@@ -16,7 +16,7 @@ import {
   readLanes,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -35,7 +35,7 @@ describe('landed lifecycle', () => {
     await run('worktreeCompare.rebuildPreview');
     await run('worktreeCompare.applyToPreview', { worktreePath: laneA });
     await poll('true-merged lane retires instead of merging', 20000, () => {
-      const tree = git(working, ['rev-parse', 'HEAD^{tree}']);
+      const tree = git(previewRoot, ['rev-parse', 'HEAD^{tree}']);
       const base = git(repo, ['rev-parse', 'origin/main^{tree}']);
       return !applied().includes('feat/a') && tree === base;
     });
@@ -58,7 +58,7 @@ describe('landed lifecycle', () => {
     await run('worktreeCompare.applyToPreview', { worktreePath: laneB });
     await poll('squash-landed lane retires by content', 20000, () =>
       !applied().includes('feat/b') &&
-      fs.existsSync(path.join(working, 'b.txt')),
+      fs.existsSync(path.join(previewRoot, 'b.txt')),
     );
   });
 
@@ -67,12 +67,12 @@ describe('landed lifecycle', () => {
     git(landing, ['push', '-q']);
     await run('worktreeCompare.rebuildPreview');
     await poll('revert reaches the preview tree', 20000, () =>
-      !fs.existsSync(path.join(working, 'b.txt')),
+      !fs.existsSync(path.join(previewRoot, 'b.txt')),
     );
     await run('worktreeCompare.applyToPreview', { worktreePath: laneB });
     await poll('reverted lane re-applies as a real merge', 20000, () =>
       applied().includes('feat/b') &&
-      fs.existsSync(path.join(working, 'b.txt')),
+      fs.existsSync(path.join(previewRoot, 'b.txt')),
     );
   });
 });

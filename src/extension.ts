@@ -227,13 +227,7 @@ export function activate(context: vscode.ExtensionContext): unknown {
         // arrive via the tree that actually renders them, or a preview that
         // stopped appearing would pass green on its old provider.
         previewRows: async () => {
-          const groups = await lanesProvider.getChildren();
-          const preview = groups.find(
-            (n) => n.kind === 'group' && n.group === 'preview',
-          );
-          const rows = preview
-            ? await lanesProvider.getChildren(preview)
-            : [];
+          const rows = await lanesProvider.getChildren();
           const previewRow = rows.find((n) => n.kind === 'preview');
           const lanes = previewRow
             ? await lanesProvider.getChildren(previewRow)

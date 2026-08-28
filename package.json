@@ -103,7 +103,7 @@
         "worktreeCompare.previewBranch": {
           "type": "string",
           "default": "preview/{base}",
-          "description": "Branch name of the preview overlay; {base} expands to the short base name (preview/main). Checking this branch out opts in: that checkout is rebuilt as the base plus a merge of each applied lane. Set to focus/working for interop with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
+          "description": "Branch name of the preview overlay; {base} expands to the short base name (preview/main). Preview mode is the WORKSPACE ROOT checkout switched to this branch, where it is rebuilt as the base plus a merge of each applied lane \u2014 the same branch checked out in a linked worktree is left alone. Set to focus/working for interop with agent-focus's scripts/focus-working.sh (shared focus-applied file and lock)."
         },
         "worktreeCompare.previewBaseRef": {
           "type": "string",
@@ -167,7 +167,7 @@
         "worktreeCompare.previewCommitGuard": {
           "type": "boolean",
           "default": true,
-          "description": "Install a pre-commit hook that refuses commits made while the preview branch is checked out. That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
+          "description": "Install a pre-commit hook that refuses commits made while the preview branch is checked out (which, in preview mode, is the workspace root). That branch is derived and rebuilt with reset --hard, so a commit there has no home. Use git commit --no-verify to override for a single commit. An existing pre-commit hook is chained into rather than replaced; one that is not a shell script is left alone. Honors core.hooksPath."
         },
         "worktreeCompare.quickDeleteLandedWorktrees": {
           "type": "boolean",
@@ -177,7 +177,7 @@
         "worktreeCompare.previewAutoRebuild": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically rebuild the preview worktree when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Preview command or external hooks."
+          "description": "Automatically rebuild the preview when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Preview command or external hooks."
         },
         "worktreeCompare.remotePrLimit": {
           "type": "number",
@@ -345,7 +345,7 @@
       },
       {
         "command": "worktreeCompare.rebuildPreview",
-        "title": "Rebuild Preview Worktree",
+        "title": "Rebuild Preview",
         "icon": "$(sync)",
         "category": "Git Workflow"
       },

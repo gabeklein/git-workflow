@@ -3,11 +3,11 @@ import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
-import type { Preview } from './identity';
 import {
   autoResolveArgs,
   conflictResolverMode,
   currentPreview,
+  type Preview,
   WIP_SUBJECT,
 } from './config';
 import {
@@ -182,8 +182,8 @@ export function forgetChainCache(workingPath?: string): void {
 export async function rebuildPreview(
   workingPath: string,
   baseRef: string,
-  /** Which preview this is. Defaults to the configured one; pass it
-   *  explicitly and the engine never consults the workspace setting. */
+  /** Pass it explicitly and the engine never touches the workspace
+   *  setting — which is what lets these tests run without one. */
   preview: Preview = currentPreview(),
 ): Promise<RebuildResult> {
   const previewBranch = preview.branch;

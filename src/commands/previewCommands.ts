@@ -5,7 +5,6 @@ import { pickBaseRef } from '../compare/pickBaseRef';
 import { git, gitOk } from '../git/exec';
 import {
   clearBasePin,
-  createPreviewWorktree,
   deletePreviewBranch,
   previewBaseRef,
   previewBranch,
@@ -18,7 +17,7 @@ import {
   suggestWorktreePath,
 } from '../git/branches';
 import { isWorktreeDirty } from '../git/plumbing';
-import { listWorktreeAdmin, removeWorktree } from '../git/worktreeAdmin';
+import { listWorktreeAdmin } from '../git/worktreeAdmin';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
 /** Branch the root checkout was on before enabling preview on it. */
@@ -51,61 +50,36 @@ export function registerPreviewCommands(
         const workspaceRoot =
           vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? repoCwd;
 
-        const mode = await vscode.window.showQuickPick(
+        const confirm = await vscode.window.showInformationMessage(
           [
-            {
-              label: 'Use this checkout',
-              description: `switch ${path.basename(workspaceRoot)} to ${branch}`,
-              detail:
-                'The workspace root becomes the preview surface — checked lanes appear right here.',
-              id: 'main' as const,
-            },
-            {
-              label: 'Create a separate worktree…',
-              description: 'keep this checkout on its branch',
-              detail: `A new worktree on ${branch} holds the combined lanes.`,
-              id: 'worktree' as const,
-            },
-          ],
-          { placeHolder: 'Enable preview mode' },
+            `Switch ${path.basename(workspaceRoot)} to ${branch}?`,
+            '',
+            'The workspace root becomes the preview: checked lanes appear',
+            'right here, and the tree is rebuilt from the base on every',
+            'change. Nothing can be committed here — a pre-commit hook',
+            'refuses, and uncommitted edits are moved onto a real branch',
+            'by Absorb Preview Edits.',
+          ].join('\n'),
+          { modal: true },
+          'Enable Preview',
         );
-        if (!mode) return;
+        if (confirm !== 'Enable Preview') return;
 
         try {
           // Enabling re-freezes the base at NOW — a stale pin from a
           // previous session must not resurrect an old base.
           await clearBasePin(repoCwd).catch(() => {});
-          if (mode.id === 'main') {
-            if (await isWorktreeDirty(workspaceRoot)) {
-              void vscode.window.showErrorMessage(
-                `Git Workflow: this checkout has uncommitted changes — commit or stash before switching to ${branch}`,
-              );
-              return;
-            }
-            const previous = await switchToPreviewBranch(
-              workspaceRoot,
-              baseRef,
+          if (await isWorktreeDirty(workspaceRoot)) {
+            void vscode.window.showErrorMessage(
+              `Git Workflow: this checkout has uncommitted changes — commit or stash before switching to ${branch}`,
             );
-            await context.workspaceState.update(
-              PREVIEW_RETURN_KEY,
-              previous,
-            );
-            log.appendLine(
-              `Preview mode on: ${workspaceRoot} switched ${previous ?? '(detached)'} → ${branch}`,
-            );
-          } else {
-            const suggested = suggestWorktreePath(workspaceRoot, 'working');
-            const dest = await vscode.window.showInputBox({
-              prompt: `Create a worktree on ${branch}`,
-              value: suggested,
-              ignoreFocusOut: true,
-              validateInput: (v) =>
-                v.trim() ? undefined : 'Destination path is required',
-            });
-            if (!dest?.trim()) return;
-            await createPreviewWorktree(repoCwd, dest.trim(), baseRef);
-            log.appendLine(`Preview worktree created at ${dest.trim()}`);
+            return;
           }
+          const previous = await switchToPreviewBranch(workspaceRoot, baseRef);
+          await context.workspaceState.update(PREVIEW_RETURN_KEY, previous);
+          log.appendLine(
+            `Preview mode on: ${workspaceRoot} switched ${previous ?? '(detached)'} → ${branch}`,
+          );
           treeProvider.refresh();
           void vscode.window.showInformationMessage(
             'Git Workflow: preview mode on — add worktrees via their context menu, then check lanes under Preview',
@@ -124,17 +98,11 @@ export function registerPreviewCommands(
       async () => {
         const preview = treeProvider.getPreview();
         if (!preview) return;
-        const wt = treeProvider.getWorktree(preview.path);
-        const onMainCheckout = Boolean(
-          wt?.isRootCheckout || wt?.isMainWorktree,
-        );
         const confirm = await vscode.window.showWarningMessage(
           [
             'Disable preview mode?',
             '',
-            onMainCheckout
-              ? `This switches ${preview.path} off ${preview.branch} (back to your previous branch), discarding derived state.`
-              : `This removes the ${preview.branch} worktree at:\n${preview.path}`,
+            `This switches ${preview.path} off ${preview.branch} (back to your previous branch), discarding derived state.`,
             '',
             `The ${preview.branch} branch is deleted (it is derived state). The lane list is kept — enabling again restores the same lanes.`,
           ].join('\n'),
@@ -143,42 +111,22 @@ export function registerPreviewCommands(
         );
         if (confirm !== 'Disable') return;
         try {
-          if (onMainCheckout) {
-            const baseRef = previewBaseRef();
-            const returned = await switchAwayFromPreview(
-              preview.path,
-              context.workspaceState.get<string>(PREVIEW_RETURN_KEY),
-              baseRef,
-              preview.branch,
-            );
-            await context.workspaceState.update(
-              PREVIEW_RETURN_KEY,
-              undefined,
-            );
-            log.appendLine(
-              `Preview mode off: ${preview.path} switched back to ${returned}`,
-            );
-          } else {
-            // Preview tree contents are always derived — force is safe
-            const result = await removeWorktree(preview.path, {
-              force: true,
-            });
-            if (!result.ok) throw new Error(result.message);
-            log.appendLine(
-              `Preview worktree removed: ${preview.path}`,
-            );
-          }
-          // Branch is derived state — delete so nothing straggles.
-          // (Best-effort; cwd must be a surviving checkout.)
-          const repoCwd = treeProvider.getRepoCwd();
-          const cwd = onMainCheckout
-            ? preview.path
-            : repoCwd !== preview.path
-              ? repoCwd
-              : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-          if (cwd && (await deletePreviewBranch(cwd)))
+          const returned = await switchAwayFromPreview(
+            preview.path,
+            context.workspaceState.get<string>(PREVIEW_RETURN_KEY),
+            previewBaseRef(),
+            preview.branch,
+          );
+          await context.workspaceState.update(PREVIEW_RETURN_KEY, undefined);
+          log.appendLine(
+            `Preview mode off: ${preview.path} switched back to ${returned}`,
+          );
+          // Branch is derived state — delete so nothing straggles. The
+          // checkout survives the switch-away, so it is a valid cwd.
+          const cwd = preview.path;
+          if (await deletePreviewBranch(cwd))
             log.appendLine(`Preview branch deleted: ${preview.branch}`);
-          if (cwd) await clearBasePin(cwd).catch(() => {});
+          await clearBasePin(cwd).catch(() => {});
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Disable preview failed: ${message}`);
@@ -440,7 +388,7 @@ export function registerPreviewCommands(
       async () => {
         if (!treeProvider.getPreview()) {
           void vscode.window.showInformationMessage(
-            'Git Workflow: no preview worktree — check out the preview branch (default focus/working) in a worktree first',
+            'Git Workflow: preview mode is off — enable it to rebuild (Git Workflow: Enable Preview Mode)',
           );
           return;
         }
@@ -539,7 +487,7 @@ export function reportPreviewResult(
   }
   if (result.code === 'conflict') {
     void vscode.window.showWarningMessage(
-      `Git Workflow: lane ${result.lane ?? ''} conflicts — resolve in the preview worktree or run Abort Preview Merge. ${result.message}`,
+      `Git Workflow: lane ${result.lane ?? ''} conflicts — resolve in the preview checkout or run Abort Preview Merge. ${result.message}`,
     );
     return;
   }

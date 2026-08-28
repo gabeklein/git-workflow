@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import type { Preview } from './identity';
 
 /**
  * Subject prefix of the ephemeral wip snapshot commits rebuilds overlay.
@@ -9,12 +8,23 @@ import type { Preview } from './identity';
 export const WIP_SUBJECT = 'wip(gw):';
 
 /**
- * The configured preview for this workspace.
+ * Which preview is being talked about — there is exactly one, and this is
+ * it, resolved from the workspace settings.
  *
- * The one place the setting is read. Below the view layer nothing consults
- * it — see identity.ts for why — so this exists to be resolved once and
- * passed down.
+ * The type exists even at cardinality one because the git layer must not
+ * read the setting itself: it used to answer "is this THE preview branch?"
+ * by calling previewBranch() from 25 call sites, which is what made the
+ * layer untestable without a workspace. Views and commands resolve the
+ * preview once here and pass it down.
  */
+export interface Preview {
+  /** The derived preview branch, e.g. `preview/main`. */
+  readonly branch: string;
+  /** What it is built from, e.g. `origin/main`. */
+  readonly baseRef: string;
+}
+
+/** The one place the preview settings are read. */
 export function currentPreview(): Preview {
   return { branch: previewBranch(), baseRef: previewBaseRef() };
 }

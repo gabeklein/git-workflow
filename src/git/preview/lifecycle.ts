@@ -1,30 +1,8 @@
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { ensureExcludedFromStatus } from '../exclude';
 import { git, GitError, gitOk } from '../exec';
 import { previewBranch } from './config';
 import { forgetChainCache } from './engine';
 import { ensurePreviewPushBlocked } from './lanes';
 import { resolveBaseSha } from './status';
-
-export async function createPreviewWorktree(
-  repoCwd: string,
-  destDir: string,
-  baseRef: string,
-  branch = previewBranch(),
-): Promise<void> {
-  await fs.mkdir(path.dirname(destDir), { recursive: true });
-  // Repo-local ignore before creation, so status never flashes dirty
-  await ensureExcludedFromStatus(destDir).catch(() => undefined);
-  if (await gitOk(repoCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])) {
-    await git(repoCwd, ['worktree', 'add', destDir, branch]);
-  } else {
-    const baseSha = await resolveBaseSha(repoCwd, baseRef);
-    if (!baseSha) throw new Error(`base ref ${baseRef} does not resolve`);
-    await git(repoCwd, ['worktree', 'add', '-b', branch, destDir, baseSha]);
-  }
-  await ensurePreviewPushBlocked(repoCwd);
-}
 
 async function currentBranch(cwd: string): Promise<string | undefined> {
   try {

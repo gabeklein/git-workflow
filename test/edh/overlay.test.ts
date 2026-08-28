@@ -1,5 +1,5 @@
 /**
- * The focus/working overlay core: activation, candidate enrollment, apply,
+ * The focus/previewRoot overlay core: activation, candidate enrollment, apply,
  * selection behavior, and the wip (uncommitted edits) overlay.
  */
 import * as assert from 'node:assert/strict';
@@ -16,7 +16,7 @@ import {
   readLanes,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -51,11 +51,11 @@ describe('preview basics', () => {
   it('applies the lane into a clean preview checkout', async () => {
     await run('worktreeCompare.applyToPreview', { worktreePath: laneA });
     await poll('preview checkout contains a.txt after apply', 20000, () =>
-      fs.existsSync(path.join(working, 'a.txt')),
+      fs.existsSync(path.join(previewRoot, 'a.txt')),
     );
     assert.ok(applied().includes('feat/a'), 'feat/a is applied');
     assert.equal(
-      git(working, ['status', '--porcelain']).length,
+      git(previewRoot, ['status', '--porcelain']).length,
       0,
       'preview checkout is clean after rebuild',
     );
@@ -92,7 +92,7 @@ describe('wip overlay', () => {
     fs.writeFileSync(path.join(laneA, 'wip.txt'), 'uncommitted v1\n');
     await run('worktreeCompare.includeWipInPreview', { branch: 'feat/a' });
     await poll('preview checkout contains uncommitted wip.txt', 20000, () =>
-      fs.existsSync(path.join(working, 'wip.txt')),
+      fs.existsSync(path.join(previewRoot, 'wip.txt')),
     );
     assert.equal(
       git(repo, ['rev-parse', 'feat/a']),
@@ -101,10 +101,10 @@ describe('wip overlay', () => {
     );
     assert.ok(
       git(laneA, ['status', '--porcelain']).includes('?? wip.txt'),
-      'lane working tree still shows wip.txt as uncommitted',
+      'lane previewRoot tree still shows wip.txt as uncommitted',
     );
     assert.ok(
-      git(working, ['log', '--format=%s', 'HEAD', '-4']).includes(
+      git(previewRoot, ['log', '--format=%s', 'HEAD', '-4']).includes(
         'wip(gw): feat/a',
       ),
       'preview chain contains the ephemeral wip snapshot commit',
@@ -128,7 +128,7 @@ describe('wip overlay', () => {
     assert.ok(await doc.save(), 'document saved (fires onDidSaveTextDocument)');
     await poll('save in the lane re-rebuilds the preview tree', 30000, () =>
       fs
-        .readFileSync(path.join(working, 'wip.txt'), 'utf8')
+        .readFileSync(path.join(previewRoot, 'wip.txt'), 'utf8')
         .includes('uncommitted v2'),
     );
   });
@@ -136,14 +136,14 @@ describe('wip overlay', () => {
   it('exclude drops the wip overlay; hide resets to base', async () => {
     await run('worktreeCompare.excludeWipFromPreview', { branch: 'feat/a' });
     await poll('wip.txt leaves the preview tree on exclude', 20000, () =>
-      !fs.existsSync(path.join(working, 'wip.txt')),
+      !fs.existsSync(path.join(previewRoot, 'wip.txt')),
     );
 
     await run('worktreeCompare.hideFromPreview', { worktreePath: laneA });
     await poll('preview checkout resets to base on hide', 20000, () => {
-      const head = git(working, ['rev-parse', 'HEAD']);
+      const head = git(previewRoot, ['rev-parse', 'HEAD']);
       const main = git(repo, ['rev-parse', 'main']);
-      return head === main && !fs.existsSync(path.join(working, 'a.txt'));
+      return head === main && !fs.existsSync(path.join(previewRoot, 'a.txt'));
     });
     assert.equal(
       git(repo, ['rev-parse', 'feat/a']),

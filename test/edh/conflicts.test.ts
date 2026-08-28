@@ -14,7 +14,7 @@ import {
   readLanes,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -50,7 +50,7 @@ describe('petty conflicts (best-effort resolver)', () => {
       });
     }
     await poll('both appends survive in the preview tree (union)', 20000, () => {
-      const news = path.join(working, 'news.txt');
+      const news = path.join(previewRoot, 'news.txt');
       if (!fs.existsSync(news)) return false;
       const content = fs.readFileSync(news, 'utf8');
       return content.includes('- p1 note') && content.includes('- p2 note');
@@ -80,7 +80,7 @@ describe('petty conflicts (best-effort resolver)', () => {
     }
     await run('worktreeCompare.rebuildPreview');
     await poll('divergent same-line edit builds best-effort (lane wins)', 20000, () => {
-      const news = path.join(working, 'news.txt');
+      const news = path.join(previewRoot, 'news.txt');
       return (
         fs.existsSync(news) &&
         fs.readFileSync(news, 'utf8').startsWith('p2 headline')
@@ -160,7 +160,7 @@ describe('dead lane prune', () => {
     // deterministically (the prune itself was asserted above).
     await poll('preview tree drops the dead lane content', 30000, async () => {
       await run('worktreeCompare.rebuildPreview');
-      return !fs.existsSync(path.join(working, 'dead.txt'));
+      return !fs.existsSync(path.join(previewRoot, 'dead.txt'));
     });
     assert.ok(!api.preview()?.error, 'no preview error state after prune');
   });

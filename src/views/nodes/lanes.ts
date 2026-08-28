@@ -181,12 +181,11 @@ export class PreviewLaneItem extends vscode.TreeItem {
 }
 
 /**
- * One preview preview, as a row in Lanes.
+ * The preview, as the leading row of Lanes.
  *
- * The preview used to be a whole panel, which made it look like a peer of
- * "your branches" when it is really one derived branch built from some of
- * them. As a row it sits in the same tree as its lanes, which is also what
- * makes a SECOND preview cost nothing structurally: the group is a list.
+ * It used to be a whole panel, which made it look like a peer of "your
+ * branches" when it is really one derived branch built from some of them.
+ * As a row it sits in the same tree as its lanes, directly above them.
  *
  * Its children are the lanes; everything the panel's title menu used to
  * carry (Rebuild, Change Base, Disable, Absorb) moves to this row's

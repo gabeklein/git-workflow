@@ -74,16 +74,10 @@ function buildFixture() {
   git(landing, ['config', 'user.email', 'edh@test']);
   git(landing, ['config', 'user.name', 'edh']);
 
-  // Preview checkout on the default branch name (preview/main)
-  git(repo, [
-    'worktree',
-    'add',
-    '-q',
-    '.worktrees/working',
-    '-b',
-    'preview/main',
-    'main',
-  ]);
+  // Preview mode on, the only way it can be: the ROOT checkout switched
+  // to the default preview branch name. main becomes a ref with no
+  // checkout of its own, which is what the shape actually looks like.
+  git(repo, ['checkout', '-q', '-b', 'preview/main', 'main']);
 
   // Keep checkouts out of status, like the extension's creation paths do
   writeFileSync(

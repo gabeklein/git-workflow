@@ -61,8 +61,6 @@ export class LanesTreeProvider
       if (!cwd) return [];
       const plan = this.plan();
       switch (element.group) {
-        case 'preview':
-          return this.previewRows();
         case 'working':
           return plan.working.length > 0
             ? plan.working.map((wt) => this.worktrees.buildCheckoutRow(wt))
@@ -103,7 +101,7 @@ export class LanesTreeProvider
       return [new MessageItem('Loading…', undefined, 'loading~spin')];
     const group = (
       label: string,
-      key: 'preview' | 'working' | 'local' | 'remote' | 'landed',
+      key: 'working' | 'local' | 'remote' | 'landed',
       count: number,
       open: boolean,
     ) =>
@@ -116,11 +114,12 @@ export class LanesTreeProvider
         count > 0 ? String(count) : 'none',
       );
     const rows: TreeNode[] = [
-      // Preview leads: it is what the lanes below are being combined INTO,
-      // and it is where the panel's only derived state lives. Present even
-      // when off, because a hidden group is how a feature goes undiscovered
-      // — the row inside offers to turn it on.
-      group('Preview', 'preview', this.worktrees.getPreview() ? 1 : 0, true),
+      // The preview leads, and it is a ROW rather than a group: there is
+      // exactly one, so a heading over it would be a list that can never
+      // hold a second entry and a count that only ever reads 1. Present
+      // even when off — a hidden feature is an undiscovered one — where it
+      // is the row that offers to turn it on.
+      this.previewRow(),
       group('Working', 'working', plan.working.length, true),
       // Closed by default: Local is where branches wait, and the list grows
       // without bound in a busy repo. Working is what you are doing.
@@ -139,15 +138,12 @@ export class LanesTreeProvider
     return rows;
   }
 
-  /**
-   * The preview itself. One row today; the group is a list so a second
-   * preview is a row rather than a redesign.
-   */
-  private previewRows(): TreeNode[] {
+  /** The preview, or the row that offers to create it. */
+  private previewRow(): TreeNode {
     const preview = this.worktrees.getPreview();
     if (!preview) {
-      // What the removed panel's welcome content used to say. A group that
-      // vanishes when off is a feature nobody finds.
+      // What the removed panel's welcome content used to say — the one
+      // place preview mode is discoverable while it is off.
       const row = new MessageItem(
         'Create Preview',
         'preview lanes merged together',
@@ -157,17 +153,14 @@ export class LanesTreeProvider
         command: 'worktreeCompare.enablePreview',
         title: 'Enable Preview Mode',
       };
-      return [row];
+      return row;
     }
-    const applied = preview.lanes.length;
-    return [
-      new PreviewItem(preview.branch, previewBaseRef(), {
-        laneCount: applied,
-        wip: preview.wip.some((l) => preview.lanes.includes(l)),
-        error: preview.error,
-        mergePaused: preview.mergePaused,
-      }),
-    ];
+    return new PreviewItem(preview.branch, previewBaseRef(), {
+      laneCount: preview.lanes.length,
+      wip: preview.wip.some((l) => preview.lanes.includes(l)),
+      error: preview.error,
+      mergePaused: preview.mergePaused,
+    });
   }
 
   /**

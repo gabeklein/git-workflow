@@ -42,7 +42,6 @@ export class GroupItem extends vscode.TreeItem {
   constructor(
     label: string,
     readonly group:
-      | 'preview'
       | 'working'
       | 'local'
       | 'remote'
@@ -59,9 +58,7 @@ export class GroupItem extends vscode.TreeItem {
     this.worktreePath = opts?.worktreePath;
     this.baseRef = opts?.baseRef;
     this.iconPath = new vscode.ThemeIcon(
-      group === 'preview'
-        ? 'beaker'
-        : group === 'working'
+      group === 'working'
         ? 'repo'
         : group === 'ahead'
           ? 'git-commit'

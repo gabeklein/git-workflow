@@ -71,7 +71,6 @@ export {
 // lifecycle
 export {
   alignPreviewBranchName,
-  createPreviewWorktree,
   deletePreviewBranch,
   switchAwayFromPreview,
   switchToPreviewBranch,
