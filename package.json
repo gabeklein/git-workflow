@@ -244,6 +244,12 @@
         "category": "Git Workflow"
       },
       {
+        "command": "worktreeCompare.openWorktreeTerminal",
+        "title": "Open in Terminal",
+        "icon": "$(terminal)",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.deleteWorktree",
         "title": "Delete Worktree\u2026",
         "icon": "$(trash)",
@@ -566,6 +572,16 @@
           "command": "worktreeCompare.openWorktree",
           "when": "view == worktreeCompare.lanes && viewItem =~ /^worktreeListItem/",
           "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.openWorktreeTerminal",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /^worktreeListItem/",
+          "group": "navigation@2"
+        },
+        {
+          "command": "worktreeCompare.openWorktreeTerminal",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /HasWorktree/",
+          "group": "navigation@2"
         },
         {
           "command": "worktreeCompare.changeBaseRef",
