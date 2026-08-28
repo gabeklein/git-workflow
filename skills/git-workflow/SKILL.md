@@ -12,18 +12,57 @@ produce. Almost everything it manages is plain git plus a few files in the git
 common dir, so you can drive it headlessly — but a handful of things it owns are
 destroyed on every rebuild, and committing into them loses work.
 
-## First: find out what you are in
+None of that is true of an ordinary repo, and this skill may well have loaded in
+one. Check first; the rules below assume evidence you have not gathered yet.
+
+## First: find out how much of this applies
+
+This skill is usually installed per machine, so it will load in repos that have
+nothing to do with the extension. **Most of it is then wrong.** Establish which
+tier you are in before acting on anything below:
 
 ```sh
-dir=$(git rev-parse --git-common-dir); case "$dir" in /*) ;; *) dir="$PWD/$dir";; esac
-git worktree list                 # the lanes
-cat "$dir/focus-base"   2>/dev/null   # integration ON if present (pinned base sha)
-cat "$dir/focus-guard"  2>/dev/null   # the branch commits are refused on
-ls    "$dir/gw-lane"    2>/dev/null   # headless lane CLI, present while integration is on
+dir=$(git rev-parse --git-common-dir 2>/dev/null) || exit   # not a git repo at all
+case "$dir" in /*) ;; *) dir="$PWD/$dir";; esac
+git worktree list                       # >1 line = linked worktrees exist
+ls    "$dir/gw-lane"    2>/dev/null     # the reliable "integration is ON" signal
+cat   "$dir/focus-guard" 2>/dev/null    # branch whose commits are refused
+cat   "$dir/focus-base"  2>/dev/null    # pinned base sha (may exist but be EMPTY)
+ls    "$dir"/focus-*     2>/dev/null    # lane state, current or leftover
 ```
 
-Multiple linked worktrees → treat this as a lane repo even if integration is
-off. `focus-base` present → integration is on; the rules below are load-bearing.
+| What you find | Tier | What applies |
+|---|---|---|
+| One worktree, no `focus-*` | **Not this repo** | **Nothing below.** Stop reading and work normally. |
+| Linked worktrees, no `focus-*` | Plain worktrees | Worktree hygiene only — the lane/preview half is inert |
+| `focus-*` present, no `gw-lane` | Integration **off** | Worktree hygiene; lane files are leftover, leave them alone |
+| `gw-lane` present | Integration **on** | All of it |
+
+**Do not test integration by the presence of `focus-base` alone.** It can exist
+and be empty — leftover state from a session where integration was on and then
+turned off. `gw-lane` is written when integration is enabled and removed when it
+is disabled, so it is the signal that tracks reality.
+
+### If this is not a lane repo
+
+Say nothing about it and work the way the repo already works. In particular:
+
+- **Do not introduce the worktree workflow to a repo that does not use it.**
+  Branching in place is correct in most repos, and a stray `.worktrees/` folder
+  in someone's project is a mess you made, not a convention you followed.
+- Do not create `focus-*` files, install hooks, or suggest installing the
+  extension unless asked. A skill loading is not a request to adopt a workflow.
+- Never describe the extension as if it is running. If you have not seen
+  `gw-lane` or a `focus-*` file, you have no evidence a preview exists, and
+  telling the user their lane is "in the preview" would be an invention.
+
+### If the extension is installed but the editor is not open
+
+Everything here is plain git plus files in the git common dir, so it all works
+headlessly — that is the design. The one part that degrades is the command
+table at the end: naming a menu item is useless to someone on SSH. Prefer the
+shell equivalent where one exists (`gw-lane`, `git worktree`), and name the
+command only as the thing to do back in the editor.
 
 ## Pick the lane before you write, not before you commit
 
@@ -66,7 +105,7 @@ puts them; the extension excludes that folder from git for you. Discovery is by
 `git worktree list`, so anywhere on disk works. Remove a lane with
 `git worktree remove`, never `rm -rf`.
 
-## Never commit on the integration branch
+## Never commit on the integration branch  *(integration on)*
 
 The integration branch (default `integration/{base}`, sometimes
 `focus/working`) is **derived**: every rebuild recreates it with `reset --hard`
@@ -87,7 +126,7 @@ rewriting them:
 `focus-excluded` · `focus-wip` · `focus-base` (pinned base) ·
 `focus-guard` · `focus-working.lock`
 
-## Joining the preview is deliberate — and yours to do
+## Joining the preview is deliberate — and yours to do  *(integration on)*
 
 A worktree cut from the integration base becomes a **candidate** automatically,
 but nothing of yours merges into anyone's preview until it is applied. That is
@@ -149,7 +188,11 @@ clean up.** The extension's **Prune Landed Branches** proves a branch landed
 three ways (ancestry, content, reproducing the squash it landed as) and is
 revert-aware. Ask for it rather than deleting by hand.
 
-## Conflicts in the preview are not real conflicts
+Without the extension the reasoning still holds, but the tool does not exist:
+say the branch *looks* landed and let the user decide, rather than reaching for
+`-D` because nothing stopped you.
+
+## Conflicts in the preview are not real conflicts  *(integration on)*
 
 The integration tree is a *best-effort preview of unlanded work*. Rows may be
 tagged `auto-resolved` (a same-line clash resolved toward the incoming lane,
@@ -160,8 +203,11 @@ unchecked lane restores a working preview immediately.
 
 ## Reporting to the user
 
-The user drives most of this from the sidebar; when the right move is a command
-rather than a shell line, name it:
+**Only when the extension is actually in play.** These are sidebar commands;
+naming one at a repo that does not have the extension — or at someone working
+over SSH with no editor open — is noise at best and a phantom instruction at
+worst. When in doubt, describe the git state and let the user find their own way
+to it.
 
 | Situation | Tell them |
 |---|---|
@@ -174,6 +220,8 @@ rather than a shell line, name it:
 
 ## Quick rules
 
+0. Check the tier first. No `focus-*` and no linked worktrees → none of this
+   applies; do not import the workflow into a repo that does not use it.
 1. Decide the worktree **before the first edit**, not at commit time. Never
    switch a branch out from under an existing checkout.
 2. Never commit on the integration branch; never `--no-verify` past the guard.
