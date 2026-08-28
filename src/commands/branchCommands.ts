@@ -5,7 +5,7 @@ import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
 import { syncBranchWithRemote } from '../git/syncRemote';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { removeWorktree } from '../git/worktreeAdmin';
-import { integrationBaseRef, integrationBranch } from '../git/integration';
+import { previewBaseRef, previewBranch } from '../git/preview';
 import {
   findLandedBranches,
   pruneLandedBranches,
@@ -79,10 +79,10 @@ export function registerBranchCommands(
           );
           return;
         }
-        const baseRef = integrationBaseRef();
-        // The integration branch is derived, and the base is the thing we
+        const baseRef = previewBaseRef();
+        // The preview branch is derived, and the base is the thing we
         // are measuring against — neither is a unit of work.
-        const protect = [integrationBranch()];
+        const protect = [previewBranch()];
         let scan: Awaited<ReturnType<typeof findLandedBranches>>;
         try {
           scan = await findLandedBranches(repoCwd, baseRef, protect);

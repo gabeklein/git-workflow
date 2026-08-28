@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkoutLabel,
+  findPreviewCheckout,
   orderLaneRows,
   planLaneRows,
   type LanesPlanInput,
@@ -106,12 +107,12 @@ describe('planLaneRows', () => {
     expect(result.remote.map((b) => b.name)).toEqual(['feat/remote']);
   });
 
-  it('keeps the integration branch out of the list entirely', () => {
+  it('keeps the preview branch out of the list entirely', () => {
     const result = plan({
-      worktrees: [wt('integration/main', { path: '/repo/working' })],
-      branches: [br('integration/main', 300), br('feat/a', 200)],
-      integrationBranch: 'integration/main',
-      integrationPath: '/repo/working',
+      worktrees: [wt('preview/main', { path: '/repo/working' })],
+      branches: [br('preview/main', 300), br('feat/a', 200)],
+      previewBranch: 'preview/main',
+      previewPath: '/repo/working',
     });
     expect(result.working).toEqual([]);
     expect(result.local.map((b) => b.name)).toEqual(['feat/a']);
@@ -309,5 +310,48 @@ describe('branch sync state', () => {
     });
     expect(result.local.map((x) => x.name)).toEqual(['feat/x']);
     expect(result.remote).toEqual([]);
+  });
+});
+
+/**
+ * Which checkout is the preview. There is one answer or none: the root
+ * checkout on the preview branch. Anything else holding that branch is a
+ * manual `git switch` the extension deliberately does not adopt — it must
+ * not be rebuilt (reset --hard on somebody's checkout) or guarded.
+ */
+describe('findPreviewCheckout', () => {
+  const PREVIEW = 'preview/main';
+
+  it('finds the root checkout on the preview branch', () => {
+    const root = wt(PREVIEW, { path: '/repo', isRootCheckout: true });
+    expect(findPreviewCheckout([root, wt('feat/a')], PREVIEW)).toBe(root);
+  });
+
+  it('accepts the main worktree even when it is not a workspace root', () => {
+    // Multi-root workspaces, or a folder opened below the checkout: the
+    // main worktree is still the one sitting on the base.
+    const main = wt(PREVIEW, { path: '/repo', isMainWorktree: true });
+    expect(findPreviewCheckout([main], PREVIEW)).toBe(main);
+  });
+
+  it('IGNORES the preview branch checked out in a linked worktree', () => {
+    // The costly failure this prevents: adopting it would rebuild that
+    // checkout with reset --hard.
+    const linked = wt(PREVIEW, { path: '/repo/.worktrees/preview' });
+    expect(findPreviewCheckout([linked, wt('feat/a')], PREVIEW)).toBeUndefined();
+  });
+
+  it('is off when the root is on any other branch', () => {
+    const root = wt('main', { path: '/repo', isRootCheckout: true });
+    expect(findPreviewCheckout([root, wt('feat/a')], PREVIEW)).toBeUndefined();
+  });
+
+  it('never adopts a detached root, whatever it is sitting on', () => {
+    const root = wt(PREVIEW, {
+      path: '/repo',
+      isRootCheckout: true,
+      detached: true,
+    });
+    expect(findPreviewCheckout([root], PREVIEW)).toBeUndefined();
   });
 });

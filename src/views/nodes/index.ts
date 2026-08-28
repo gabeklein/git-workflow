@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { BranchItem, RemotePrFileItem } from './branches';
 import type { FileItem, FolderItem } from './files';
-import type { BaseDriftItem, IntegrationLaneItem, PreviewItem } from './lanes';
+import type { BaseDriftItem, PreviewLaneItem, PreviewItem } from './lanes';
 import type {
   CommitItem,
   ConflictWarningItem,
@@ -20,7 +20,7 @@ import type {
 export type TreeNode =
   | GroupItem
   | BaseDriftItem
-  | IntegrationLaneItem
+  | PreviewLaneItem
   | WorktreeListItem
   | ConflictWarningItem
   | PreviewItem
@@ -42,7 +42,6 @@ export class GroupItem extends vscode.TreeItem {
   constructor(
     label: string,
     readonly group:
-      | 'preview'
       | 'working'
       | 'local'
       | 'remote'
@@ -59,9 +58,7 @@ export class GroupItem extends vscode.TreeItem {
     this.worktreePath = opts?.worktreePath;
     this.baseRef = opts?.baseRef;
     this.iconPath = new vscode.ThemeIcon(
-      group === 'preview'
-        ? 'beaker'
-        : group === 'working'
+      group === 'working'
         ? 'repo'
         : group === 'ahead'
           ? 'git-commit'

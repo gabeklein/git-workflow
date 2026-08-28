@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import { integrationBaseRef, integrationBranch } from '../git/integration';
+import { previewBaseRef, previewBranch } from '../git/preview';
 import { GroupItem, MessageItem, type TreeNode } from './nodes';
 import { BranchItem } from './nodes/branches';
-import { BaseDriftItem, IntegrationLaneItem, PreviewItem } from './nodes/lanes';
+import { BaseDriftItem, PreviewItem, PreviewLaneItem } from './nodes/lanes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
@@ -20,7 +20,7 @@ import type { WorktreeTreeProvider } from './worktreeTree';
  * has a checkout reaches the group whose whole purpose is cleaning it up.
  *
  * State stays where it already lives: WorktreeTreeProvider owns discovery,
- * selection and integration; BranchesTreeProvider owns the branch list, PR
+ * selection and preview; BranchesTreeProvider owns the branch list, PR
  * association and the landed set. This provider only decides what the rows
  * are.
  */
@@ -61,8 +61,6 @@ export class LanesTreeProvider
       if (!cwd) return [];
       const plan = this.plan();
       switch (element.group) {
-        case 'preview':
-          return this.previewRows();
         case 'working':
           return plan.working.length > 0
             ? plan.working.map((wt) => this.worktrees.buildCheckoutRow(wt))
@@ -91,8 +89,8 @@ export class LanesTreeProvider
       worktrees: this.worktrees.getWorktrees(),
       branches: this.branches.getBranches(),
       prHeads: this.branches.getPrHeads(),
-      integrationBranch: integrationBranch(),
-      integrationPath: this.worktrees.getIntegration()?.path,
+      previewBranch: previewBranch(),
+      previewPath: this.worktrees.getPreview()?.path,
       landed: this.branches.getLanded(),
     });
   }
@@ -103,7 +101,7 @@ export class LanesTreeProvider
       return [new MessageItem('Loading…', undefined, 'loading~spin')];
     const group = (
       label: string,
-      key: 'preview' | 'working' | 'local' | 'remote' | 'landed',
+      key: 'working' | 'local' | 'remote' | 'landed',
       count: number,
       open: boolean,
     ) =>
@@ -116,11 +114,12 @@ export class LanesTreeProvider
         count > 0 ? String(count) : 'none',
       );
     const rows: TreeNode[] = [
-      // Preview leads: it is what the lanes below are being combined INTO,
-      // and it is where the panel's only derived state lives. Present even
-      // when off, because a hidden group is how a feature goes undiscovered
-      // — the row inside offers to turn it on.
-      group('Preview', 'preview', this.worktrees.getIntegration() ? 1 : 0, true),
+      // The preview leads, and it is a ROW rather than a group: there is
+      // exactly one, so a heading over it would be a list that can never
+      // hold a second entry and a count that only ever reads 1. Present
+      // even when off — a hidden feature is an undiscovered one — where it
+      // is the row that offers to turn it on.
+      this.previewRow(),
       group('Working', 'working', plan.working.length, true),
       // Closed by default: Local is where branches wait, and the list grows
       // without bound in a busy repo. Working is what you are doing.
@@ -139,35 +138,29 @@ export class LanesTreeProvider
     return rows;
   }
 
-  /**
-   * The preview itself. One row today; the group is a list so a second
-   * integration is a row rather than a redesign.
-   */
-  private previewRows(): TreeNode[] {
-    const integration = this.worktrees.getIntegration();
-    if (!integration) {
-      // What the removed panel's welcome content used to say. A group that
-      // vanishes when off is a feature nobody finds.
+  /** The preview, or the row that offers to create it. */
+  private previewRow(): TreeNode {
+    const preview = this.worktrees.getPreview();
+    if (!preview) {
+      // What the removed panel's welcome content used to say — the one
+      // place preview mode is discoverable while it is off.
       const row = new MessageItem(
-        'Create Integration',
+        'Create Preview',
         'preview lanes merged together',
         'beaker',
       );
       row.command = {
-        command: 'worktreeCompare.enableIntegration',
-        title: 'Enable Integration Mode',
+        command: 'worktreeCompare.enablePreview',
+        title: 'Enable Preview Mode',
       };
-      return [row];
+      return row;
     }
-    const applied = integration.lanes.length;
-    return [
-      new PreviewItem(integration.branch, integrationBaseRef(), {
-        laneCount: applied,
-        wip: integration.wip.some((l) => integration.lanes.includes(l)),
-        error: integration.error,
-        mergePaused: integration.mergePaused,
-      }),
-    ];
+    return new PreviewItem(preview.branch, previewBaseRef(), {
+      laneCount: preview.lanes.length,
+      wip: preview.wip.some((l) => preview.lanes.includes(l)),
+      error: preview.error,
+      mergePaused: preview.mergePaused,
+    });
   }
 
   /**
@@ -181,14 +174,14 @@ export class LanesTreeProvider
    * one tree — the thing the ladder exists to prevent.
    */
   private laneRows(): TreeNode[] {
-    const integration = this.worktrees.getIntegration();
-    if (!integration) return [];
+    const preview = this.worktrees.getPreview();
+    if (!preview) return [];
     const rows: TreeNode[] = [];
-    if (integration.baseDrift) {
+    if (preview.baseDrift) {
       rows.push(
         new BaseDriftItem(
-          integrationBaseRef().replace(/^origin\//, ''),
-          integration.baseDrift,
+          previewBaseRef().replace(/^origin\//, ''),
+          preview.baseDrift,
         ),
       );
     }
@@ -198,8 +191,8 @@ export class LanesTreeProvider
         .filter((w) => !w.detached)
         .map((w) => [w.branch, w.path] as const),
     );
-    const lanes = integration.candidates.filter(
-      (b) => !integration.landed.includes(b),
+    const lanes = preview.candidates.filter(
+      (b) => !preview.landed.includes(b),
     );
     if (lanes.length === 0) {
       return rows.length > 0
@@ -214,17 +207,17 @@ export class LanesTreeProvider
     rows.push(
       ...lanes.map(
         (branch) =>
-          new IntegrationLaneItem(branch, integration.lanes.includes(branch), {
+          new PreviewLaneItem(branch, preview.lanes.includes(branch), {
             conflicted:
-              (integration.error?.code === 'conflict' &&
-                integration.error.lane === branch) ||
-              integration.conflicts.includes(branch),
+              (preview.error?.code === 'conflict' &&
+                preview.error.lane === branch) ||
+              preview.conflicts.includes(branch),
             worktreePath: branchToPath.get(branch),
-            wip: integration.wip.includes(branch),
+            wip: preview.wip.includes(branch),
             landed: false,
-            resolving: integration.resolving.includes(branch),
-            auto: !integration.explicit.includes(branch),
-            autoResolved: integration.autoResolved.find(
+            resolving: preview.resolving.includes(branch),
+            auto: !preview.explicit.includes(branch),
+            autoResolved: preview.autoResolved.find(
               (r) => r.lane === branch,
             ),
           }),

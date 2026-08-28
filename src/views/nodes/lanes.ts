@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
  * row disappears.
  */
 export class BaseDriftItem extends vscode.TreeItem {
-  readonly kind = 'integrationBaseDrift' as const;
+  readonly kind = 'previewBaseDrift' as const;
 
   constructor(
     readonly baseName: string,
@@ -20,7 +20,7 @@ export class BaseDriftItem extends vscode.TreeItem {
     },
   ) {
     super(baseName, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'integrationBaseDrift';
+    this.contextValue = 'previewBaseDrift';
     this.description = `+${drift.ahead} unpushed`;
     this.checkboxState = {
       state: drift.included
@@ -35,23 +35,23 @@ export class BaseDriftItem extends vscode.TreeItem {
       drift.included ? new vscode.ThemeColor('charts.yellow') : undefined,
     );
     this.tooltip = [
-      `${baseName} has ${drift.ahead} unpushed commit(s). The integration base stays frozen — unpushed base work is unlanded work, so it rides along as a lane instead of silently becoming the floor.`,
+      `${baseName} has ${drift.ahead} unpushed commit(s). The preview base stays frozen — unpushed base work is unlanded work, so it rides along as a lane instead of silently becoming the floor.`,
       '',
       drift.included
         ? 'Included in the preview. Uncheck to leave it out (the choice persists across future commits).'
         : 'Excluded from the preview. Check to merge it in.',
       'Pushing the base lands it — the frozen base advances and this row disappears.',
-      'Context menu: Move New Base Commits to a Branch… (make it real feature work) · Catch Up Integration Base (make it the floor on purpose).',
+      'Context menu: Move New Base Commits to a Branch… (make it real feature work) · Catch Up Preview Base (make it the floor on purpose).',
     ].join('\n');
   }
 }
 
 /**
- * One candidate lane under the Integration row. Checked = the branch is
- * merged into the integration tree; unchecked = candidate only.
+ * One candidate lane under the Preview row. Checked = the branch is
+ * merged into the preview tree; unchecked = candidate only.
  */
-export class IntegrationLaneItem extends vscode.TreeItem {
-  readonly kind = 'integrationLane' as const;
+export class PreviewLaneItem extends vscode.TreeItem {
+  readonly kind = 'previewLane' as const;
 
   constructor(
     readonly branch: string,
@@ -69,7 +69,7 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       landed?: boolean;
       /** A base merge is paused in the lane's worktree */
       resolving?: boolean;
-      /** Auto member (its base matches the integration base), or a lane
+      /** Auto member (its base matches the preview base), or a lane
        *  applied outside the extension — not an explicit add. */
       auto?: boolean;
       /** The last rebuild resolved this lane's clashes instead of failing. */
@@ -89,14 +89,14 @@ export class IntegrationLaneItem extends vscode.TreeItem {
       : opts?.conflicted && opts?.worktreePath
         ? 'Conflicted'
         : '';
-    this.contextValue = `${applied ? 'integrationLaneApplied' : 'integrationLane'}${wipFlag}${conflictFlag}`;
+    this.contextValue = `${applied ? 'previewLaneApplied' : 'previewLane'}${wipFlag}${conflictFlag}`;
     this.checkboxState = {
       state: applied
         ? vscode.TreeItemCheckboxState.Checked
         : vscode.TreeItemCheckboxState.Unchecked,
       tooltip: applied
-        ? `${branch} is merged into the integration tree — uncheck to remove`
-        : `Merge ${branch} into the integration tree`,
+        ? `${branch} is merged into the preview tree — uncheck to remove`
+        : `Merge ${branch} into the preview tree`,
     };
     if (opts?.resolving) {
       this.description = 'resolving merge';
@@ -142,7 +142,7 @@ export class IntegrationLaneItem extends vscode.TreeItem {
     this.tooltip = [
       branch,
       applied
-        ? 'Applied — merged into the integration tree (landed commits only).'
+        ? 'Applied — merged into the preview tree (landed commits only).'
         : 'Candidate — check to merge its landed commits in.',
       opts?.resolving
         ? 'A base merge is paused in the lane worktree — resolve the markers, then Complete Merge from Base.'
@@ -165,7 +165,7 @@ export class IntegrationLaneItem extends vscode.TreeItem {
         ? `Clashes auto-resolved losslessly (both sides kept): ${opts.autoResolved.lossless.join(', ')}.`
         : undefined,
       opts?.auto
-        ? 'Auto member — its base matches the integration base. Remove from Integration hides it until it is added back.'
+        ? 'Auto member — its base matches the preview base. Remove from Preview hides it until it is added back.'
         : undefined,
     ]
       .filter((x): x is string => Boolean(x))
@@ -181,12 +181,11 @@ export class IntegrationLaneItem extends vscode.TreeItem {
 }
 
 /**
- * One integration preview, as a row in Lanes.
+ * The preview, as the leading row of Lanes.
  *
- * The preview used to be a whole panel, which made it look like a peer of
- * "your branches" when it is really one derived branch built from some of
- * them. As a row it sits in the same tree as its lanes, which is also what
- * makes a SECOND preview cost nothing structurally: the group is a list.
+ * It used to be a whole panel, which made it look like a peer of "your
+ * branches" when it is really one derived branch built from some of them.
+ * As a row it sits in the same tree as its lanes, directly above them.
  *
  * Its children are the lanes; everything the panel's title menu used to
  * carry (Rebuild, Change Base, Disable, Absorb) moves to this row's

@@ -5,13 +5,13 @@ import {
   landedPrefix,
   laneNeverDiverged,
   resolveBaseSha,
-} from './integration/status';
+} from './preview/status';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from './plumbing';
 
 /**
  * Manual catch-up operations on a lane's own worktree: rebase onto the
  * base or merge the base in, with pause/continue/abort around conflicts.
- * These run REAL git in the user's checkout (unlike the integration
+ * These run REAL git in the user's checkout (unlike the preview
  * engine's off-tree merges) — so every entry point refuses to start when
  * an operation is already in progress, and only ever aborts an operation
  * it started itself.

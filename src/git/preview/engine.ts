@@ -3,11 +3,11 @@ import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { gitErrorMessage, isWorktreeDirty, revParseCommit } from '../plumbing';
 import { listWorktreeAdmin } from '../worktreeAdmin';
-import type { Integration } from './identity';
 import {
   autoResolveArgs,
   conflictResolverMode,
-  currentIntegration,
+  currentPreview,
+  type Preview,
   WIP_SUBJECT,
 } from './config';
 import {
@@ -25,11 +25,11 @@ import { findLandedLanes, findStrayCommits, resolveBaseSha } from './status';
 
 
 /**
- * Integration-worktree overlay (interop with agent-focus's
- * scripts/focus-working.sh): a checkout on the integration branch is never
+ * Preview-worktree overlay (interop with agent-focus's
+ * scripts/focus-working.sh): a checkout on the preview branch is never
  * worked in directly — it is rebuilt as <base> plus a merge of each
  * "applied" lane (feature branch). Lanes merge landed commits only; dirty
- * feature worktrees never affect the integration tree.
+ * feature worktrees never affect the preview tree.
  *
  * The merge chain is computed OFF-TREE (`git merge-tree --write-tree` +
  * `commit-tree`), then applied with a single `reset --hard`, so:
@@ -115,11 +115,11 @@ export type RebuildResult =
  * The branch a checkout currently has, or '' when detached.
  *
  * A rebuild ends by resetting `workingPath` HARD, which is only ever safe
- * while that checkout still holds the integration branch. Enabling
- * integration by switching the ROOT checkout in place makes this a live
+ * while that checkout still holds the preview branch. Enabling
+ * preview by switching the ROOT checkout in place makes this a live
  * hazard: pop out to the base to commit something, and a rebuild triggered
- * by that very commit would reset the BASE branch onto the integration
- * chain. The controller's cached integrationPath outlives the switch by
+ * by that very commit would reset the BASE branch onto the preview
+ * chain. The controller's cached previewPath outlives the switch by
  * however long it takes the next refresh to notice.
  */
 async function checkedOutBranch(workingPath: string): Promise<string> {
@@ -179,14 +179,14 @@ export function forgetChainCache(workingPath?: string): void {
   }
 }
 
-export async function rebuildIntegration(
+export async function rebuildPreview(
   workingPath: string,
   baseRef: string,
-  /** Which preview this is. Defaults to the configured one; pass it
-   *  explicitly and the engine never consults the workspace setting. */
-  integration: Integration = currentIntegration(),
+  /** Pass it explicitly and the engine never touches the workspace
+   *  setting — which is what lets these tests run without one. */
+  preview: Preview = currentPreview(),
 ): Promise<RebuildResult> {
-  const previewBranch = integration.branch;
+  const previewBranch = preview.branch;
   const common = await commonDir(workingPath);
   const lock = path.join(common, LOCK_DIR);
   try {
@@ -209,7 +209,7 @@ export async function rebuildIntegration(
       return {
         ok: false,
         code: 'dirty',
-        message: 'integration checkout is dirty; not rebuilding',
+        message: 'preview checkout is dirty; not rebuilding',
       };
     }
 
@@ -234,16 +234,16 @@ export async function rebuildIntegration(
     }
 
     // Unique-commit guard: refuse when work was committed DIRECTLY on the
-    // integration checkout. The tree is derived and about to be reset, so
+    // preview checkout. The tree is derived and about to be reset, so
     // those commits would simply vanish. Absorbing them into a real branch
     // is the exit (see absorb.ts) — this only refuses to destroy them.
-    const strays = await findStrayCommits(workingPath, baseSha);
+    const strays = await findStrayCommits(workingPath, baseSha, previewBranch);
     if (strays.length > 0) {
       return {
         ok: false,
         code: 'unique',
         message:
-          'integration checkout has commits that exist on no other branch; move them to a feature branch first',
+          'preview checkout has commits that exist on no other branch; move them to a feature branch first',
       };
     }
 
@@ -312,7 +312,7 @@ export async function rebuildIntegration(
     }
     const key = chainKey(baseSha, conflictResolverMode(), tips);
     const cached = chainCache.get(workingPath);
-    // Verify the tip still exists: disabling integration deletes the
+    // Verify the tip still exists: disabling preview deletes the
     // branch, after which gc can prune a commit nothing references.
     const reusable =
       cached?.key === key &&
@@ -625,12 +625,7 @@ async function rebuildInWorktree(
   return { ok: true, lanes: merged, skipped, landed, resolved: [] };
 }
 
-/**
- * Enable the overlay in a separate worktree: create one on the integration
- * branch. Reuses the branch when it already exists; else branches off base.
- */
-
-export async function abortIntegrationMerge(
+export async function abortPreviewMerge(
   workingPath: string,
 ): Promise<void> {
   await git(workingPath, ['merge', '--abort']);
@@ -638,6 +633,6 @@ export async function abortIntegrationMerge(
 
 /**
  * Change signal for auto-rebuild: base + applied lane tips. When this
- * moves, the integration tree is stale. The integration checkout's own
+ * moves, the preview tree is stale. The preview checkout's own
  * HEAD is deliberately excluded (the rebuild itself moves it).
  */

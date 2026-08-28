@@ -72,9 +72,9 @@ describe('prune landed branches', () => {
     commitOn('feat/x', 'e.txt', 'work\n');
     git(scratch.repo, ['merge', '-q', '--squash', 'feat/x']);
     git(scratch.repo, ['commit', '-qm', 'x (#3)']);
-    git(scratch.repo, ['branch', 'integration/main']);
+    git(scratch.repo, ['branch', 'preview/main']);
     const scan = await findLandedBranches(scratch.repo, 'main', [
-      'integration/main',
+      'preview/main',
     ]);
     expect(scan.landed.map((b) => b.name)).toEqual(['feat/x']);
   });

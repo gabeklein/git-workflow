@@ -7,7 +7,7 @@ import {
   guardedBranch,
   installCommitGuard,
   uninstallCommitGuard,
-} from '../../src/git/integration/commitGuard';
+} from '../../src/git/preview/commitGuard';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
@@ -16,7 +16,7 @@ import { git, makeRepo, type ScratchRepo } from './helpers';
  * worktree of the repo), and it never costs anyone the hook they already
  * had — a repo may only have one pre-commit, so ours chains into theirs.
  */
-describe('integration commit guard', () => {
+describe('preview commit guard', () => {
   let scratch: ScratchRepo;
   let hook: string;
   let lane: string;
@@ -26,7 +26,7 @@ describe('integration commit guard', () => {
     hook = path.join(scratch.repo, '.git', 'hooks', 'pre-commit');
     lane = path.join(scratch.root, 'lane');
     git(scratch.repo, ['worktree', 'add', '-q', lane, '-b', 'feat/x']);
-    git(scratch.repo, ['branch', 'integration/main']);
+    git(scratch.repo, ['branch', 'preview/main']);
   });
   afterEach(() => {
     scratch.cleanup();
@@ -57,24 +57,24 @@ describe('integration commit guard', () => {
 
   it('installs an executable hook and records the branch', async () => {
     expect(await commitGuardState(scratch.repo)).toBe('none');
-    expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+    expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
       'installed',
     );
     expect(await commitGuardState(scratch.repo)).toBe('ours');
-    expect(await guardedBranch(scratch.repo)).toBe('integration/main');
+    expect(await guardedBranch(scratch.repo)).toBe('preview/main');
     // eslint-disable-next-line no-bitwise
     expect(fs.statSync(hook).mode & 0o111).toBeTruthy();
     // eslint-disable-next-line no-bitwise
     expect(
       fs.statSync(
-        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-integration-guard'),
+        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-preview-guard'),
       ).mode & 0o111,
     ).toBeTruthy();
   });
 
   it('refuses a commit on the guarded branch', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     const before = git(scratch.repo, ['rev-parse', 'HEAD']);
     expect(tryCommit(scratch.repo, 'stray')).toBe(false);
     expect(git(scratch.repo, ['rev-parse', 'HEAD'])).toBe(before);
@@ -89,19 +89,25 @@ describe('integration commit guard', () => {
    * somewhere to learn the rule, not just the override that skips it.
    */
   it('points an agent at the skill, not just at --no-verify', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     const said = refusalText(scratch.repo, 'stray');
     expect(said).toContain('skills/git-workflow/SKILL.md');
     // Tool-agnostic: no agent's config path is hardcoded into a git hook
     expect(said).not.toMatch(/\.claude|\.cursor|~\/\./);
     // …and the escape hatch is still there to be found
     expect(said).toContain('--no-verify');
+    // The two exits that exist now that the preview IS the root checkout:
+    // absorb the edits, or commit in the lane's own worktree. Switching
+    // this checkout to another branch is not one of them — it would turn
+    // the preview off, which is why the message says so.
+    expect(said).toContain('Absorb Preview Edits');
+    expect(said).toContain('git worktree add');
   });
 
   it('lets --no-verify through — the deliberate case still works', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     fs.writeFileSync(path.join(scratch.repo, 'meant.txt'), 'meant it\n');
     git(scratch.repo, ['add', '-A']);
     git(scratch.repo, ['commit', '--no-verify', '-qm', 'meant it']);
@@ -109,18 +115,23 @@ describe('integration commit guard', () => {
   });
 
   it('is inert in every other worktree, though they share the hook', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     expect(tryCommit(lane, 'lane-work')).toBe(true);
     expect(tryCommit(scratch.repo, 'main-work')).toBe(true);
   });
 
   it('is inert on a DETACHED head, guarded branch or not', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
-    git(scratch.repo, ['checkout', '-q', '--detach', 'integration/main']);
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', '--detach', 'preview/main']);
     expect(tryCommit(scratch.repo, 'detached')).toBe(true);
   });
 
+  // The legacy name is deliberate: a repo that was on integration/main
+  // gets renamed to preview/main by alignPreviewBranchName, and the guard
+  // has to follow it — otherwise it keeps refusing commits on a branch
+  // that no longer exists and waves through the one that does.
   it('re-points at a renamed branch instead of guarding a dead name', async () => {
+    git(scratch.repo, ['branch', 'integration/main']);
     await installCommitGuard(scratch.repo, 'integration/main');
     expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
       'updated',
@@ -131,8 +142,8 @@ describe('integration commit guard', () => {
   });
 
   it('reports unchanged on a redundant install', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
-    expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+    await installCommitGuard(scratch.repo, 'preview/main');
+    expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
       'unchanged',
     );
   });
@@ -158,7 +169,7 @@ describe('integration commit guard', () => {
     it('is chained into, not replaced — and still runs', async () => {
       writeHook(theirs());
       expect(await commitGuardState(scratch.repo)).toBe('foreign');
-      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+      expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
         'chained',
       );
       expect(await commitGuardState(scratch.repo)).toBe('chained');
@@ -170,8 +181,8 @@ describe('integration commit guard', () => {
 
     it('refuses on the guarded branch, before their hook does any work', async () => {
       writeHook(theirs());
-      await installCommitGuard(scratch.repo, 'integration/main');
-      git(scratch.repo, ['checkout', '-q', 'integration/main']);
+      await installCommitGuard(scratch.repo, 'preview/main');
+      git(scratch.repo, ['checkout', '-q', 'preview/main']);
       expect(tryCommit(scratch.repo, 'stray')).toBe(false);
       // The chain sits above their body — no point running it for a commit
       // that is already rejected.
@@ -180,13 +191,13 @@ describe('integration commit guard', () => {
 
     it('keeps their veto working', async () => {
       writeHook(theirs('exit 1\n'));
-      await installCommitGuard(scratch.repo, 'integration/main');
+      await installCommitGuard(scratch.repo, 'preview/main');
       expect(tryCommit(scratch.repo, 'they-say-no')).toBe(false);
     });
 
     it('goes in below the shebang, so it is still a valid script', async () => {
       writeHook(theirs());
-      await installCommitGuard(scratch.repo, 'integration/main');
+      await installCommitGuard(scratch.repo, 'preview/main');
       const lines = fs.readFileSync(hook, 'utf8').split('\n');
       expect(lines[0]).toBe('#!/bin/sh');
       expect(lines[1]).toContain('git-workflow');
@@ -195,7 +206,7 @@ describe('integration commit guard', () => {
     it('uninstall removes our two lines and nothing else', async () => {
       const body = theirs();
       writeHook(body);
-      await installCommitGuard(scratch.repo, 'integration/main');
+      await installCommitGuard(scratch.repo, 'preview/main');
       await uninstallCommitGuard(scratch.repo);
       expect(fs.readFileSync(hook, 'utf8')).toBe(body);
       expect(await commitGuardState(scratch.repo)).toBe('foreign');
@@ -203,19 +214,19 @@ describe('integration commit guard', () => {
 
     it('does not chain twice', async () => {
       writeHook(theirs());
-      await installCommitGuard(scratch.repo, 'integration/main');
-      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+      await installCommitGuard(scratch.repo, 'preview/main');
+      expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
         'unchanged',
       );
       const body = fs.readFileSync(hook, 'utf8');
-      expect(body.split('git-workflow: integration commit guard').length - 1).toBe(1);
+      expect(body.split('git-workflow: preview commit guard').length - 1).toBe(1);
     });
 
     it('is left strictly alone when it is NOT a shell script', async () => {
       // Splicing sh into a python hook would break every commit in the repo
       const python = '#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n';
       writeHook(python);
-      expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+      expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
         'foreign',
       );
       expect(fs.readFileSync(hook, 'utf8')).toBe(python);
@@ -225,11 +236,11 @@ describe('integration commit guard', () => {
 
     it('survives a dangling guard script instead of failing every commit', async () => {
       writeHook(theirs());
-      await installCommitGuard(scratch.repo, 'integration/main');
+      await installCommitGuard(scratch.repo, 'preview/main');
       fs.rmSync(
-        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-integration-guard'),
+        path.join(scratch.repo, '.git', 'hooks', 'git-workflow-preview-guard'),
       );
-      git(scratch.repo, ['checkout', '-q', 'integration/main']);
+      git(scratch.repo, ['checkout', '-q', 'preview/main']);
       expect(tryCommit(scratch.repo, 'guard-gone')).toBe(true);
     });
   });
@@ -240,12 +251,12 @@ describe('integration commit guard', () => {
     const custom = path.join(scratch.repo, '.husky');
     fs.mkdirSync(custom, { recursive: true });
     git(scratch.repo, ['config', 'core.hooksPath', '.husky']);
-    expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+    expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
       'installed',
     );
     expect(fs.existsSync(path.join(custom, 'pre-commit'))).toBe(true);
     expect(fs.existsSync(hook)).toBe(false);
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     expect(tryCommit(scratch.repo, 'stray')).toBe(false);
   });
 
@@ -257,7 +268,7 @@ describe('integration commit guard', () => {
   it('keeps its in-tree files out of git status', async () => {
     const custom = path.join(scratch.repo, '.githooks');
     git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     expect(fs.existsSync(path.join(custom, 'pre-commit'))).toBe(true);
     expect(git(scratch.repo, ['status', '--porcelain']).trim()).toBe('');
 
@@ -283,8 +294,8 @@ describe('integration commit guard', () => {
   it('lets commits through when the guard script is missing', async () => {
     const custom = path.join(scratch.repo, '.githooks');
     git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
-    await installCommitGuard(scratch.repo, 'integration/main');
-    fs.rmSync(path.join(custom, 'git-workflow-integration-guard'));
+    await installCommitGuard(scratch.repo, 'preview/main');
+    fs.rmSync(path.join(custom, 'git-workflow-preview-guard'));
     expect(tryCommit(scratch.repo, 'on-lane')).toBe(true);
   });
 
@@ -294,40 +305,40 @@ describe('integration commit guard', () => {
    */
   it('finds its guard under a custom hooksPath and actually refuses', async () => {
     git(scratch.repo, ['config', 'core.hooksPath', '.githooks']);
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     expect(tryCommit(scratch.repo, 'unguarded')).toBe(true);
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     expect(tryCommit(scratch.repo, 'guarded')).toBe(false);
   });
 
   /** A hook written by an older version has to be repairable, not frozen. */
   it('rewrites a stale chain left by an earlier install', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     const stale = fs
       .readFileSync(hook, 'utf8')
       .replace(/^gw_guard=.*$/m, 'gw_guard="/nope"; [ -x "$gw_guard" ]');
     fs.writeFileSync(hook, stale);
-    expect(await installCommitGuard(scratch.repo, 'integration/main')).toBe(
+    expect(await installCommitGuard(scratch.repo, 'preview/main')).toBe(
       'updated',
     );
     expect(fs.readFileSync(hook, 'utf8')).not.toContain('/nope');
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     expect(tryCommit(scratch.repo, 'after-repair')).toBe(false);
   });
 
   it('uninstall removes our hook and stops refusing', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     await uninstallCommitGuard(scratch.repo);
     expect(await commitGuardState(scratch.repo)).toBe('none');
     expect(await guardedBranch(scratch.repo)).toBeUndefined();
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     expect(tryCommit(scratch.repo, 'after-uninstall')).toBe(true);
   });
 
   it('is inert if the state file goes but the hook stays', async () => {
-    await installCommitGuard(scratch.repo, 'integration/main');
+    await installCommitGuard(scratch.repo, 'preview/main');
     fs.rmSync(path.join(scratch.repo, '.git', 'focus-guard'));
-    git(scratch.repo, ['checkout', '-q', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
     expect(tryCommit(scratch.repo, 'orphan-hook')).toBe(true);
   });
 });

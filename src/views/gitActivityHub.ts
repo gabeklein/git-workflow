@@ -6,7 +6,7 @@ import {
 import { GitDirWatcher } from '../git/gitWatcher';
 
 /**
- * Worktree-list / integration check cadence. Primary signal is the .git
+ * Worktree-list / preview check cadence. Primary signal is the .git
  * fs.watch (GitDirWatcher); while that is active the poll is only a slow
  * fallback for filesystems that drop events. Without watchers (watch setup
  * failed) the poll carries detection alone at the fast interval.

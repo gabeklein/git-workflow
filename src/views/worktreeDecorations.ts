@@ -48,7 +48,7 @@ function fsPathFromWorktreeUri(uri: vscode.Uri): string {
 
 /**
  * Row decorations for checkouts: a blue tint on the selected one, and a
- * badge on those merged into the integration preview.
+ * badge on those merged into the preview preview.
  *
  * The badge is spent on lane membership rather than selection because
  * selection is already obvious — the list paints it — while "is this in the
@@ -114,7 +114,7 @@ export class WorktreeRowDecorationProvider
   ): vscode.ProviderResult<vscode.FileDecoration> {
     if (uri.scheme === BRANCH_URI_SCHEME) {
       return this.appliedBranches.has(branchFromUri(uri))
-        ? { badge: '●', tooltip: 'In the integration preview' }
+        ? { badge: '●', tooltip: 'In the preview preview' }
         : undefined;
     }
     if (uri.scheme !== WORKTREE_URI_SCHEME) return undefined;
@@ -125,7 +125,7 @@ export class WorktreeRowDecorationProvider
     return {
       badge: applied ? '●' : undefined,
       tooltip: [
-        applied ? 'In the integration preview' : undefined,
+        applied ? 'In the preview preview' : undefined,
         selected ? 'Selected worktree' : undefined,
       ]
         .filter(Boolean)

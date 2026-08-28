@@ -1,13 +1,13 @@
 ---
 name: git-workflow
-description: Working in a repo managed by the Git Workflow VS Code extension — worktree-per-branch lanes, a derived integration branch that must not be committed to, and the `gw-lane` headless opt-in. Load BEFORE THE FIRST EDIT of any feature or fix (not just before git commands), and before creating or switching branches, committing, rebasing onto a base, deleting branches, or resolving conflicts — in any repo with linked git worktrees or a `focus-*` / `gw-lane` file in its git common dir.
+description: Working in a repo managed by the Git Workflow VS Code extension — worktree-per-branch lanes, a derived preview branch that must not be committed to, and the `gw-lane` headless opt-in. Load BEFORE THE FIRST EDIT of any feature or fix (not just before git commands), and before creating or switching branches, committing, rebasing onto a base, deleting branches, or resolving conflicts — in any repo with linked git worktrees or a `focus-*` / `gw-lane` file in its git common dir.
 ---
 
 # Working in a Git Workflow repo
 
 [Git Workflow](https://github.com/gabeklein/git-workflow) models a repo as
 **lanes** — one branch, one worktree, one base — and builds a derived
-**integration** branch previewing what landing several lanes at once would
+**preview** branch previewing what landing several lanes at once would
 produce. It is all plain git plus files in the git common dir, so it drives
 headlessly; but what it owns is destroyed on every rebuild, so committing
 there loses work.
@@ -21,7 +21,7 @@ the extension, where most of it is wrong.
 dir=$(git rev-parse --git-common-dir 2>/dev/null) || exit    # not a git repo
 case "$dir" in /*) ;; *) dir="$PWD/$dir";; esac
 git worktree list                    # >1 line = linked worktrees
-ls  "$dir/gw-lane"       2>/dev/null # the reliable "integration ON" signal
+ls  "$dir/gw-lane"       2>/dev/null # the reliable "preview ON" signal
 cat "$dir/focus-guard"   2>/dev/null # branch whose commits are refused
 ls  "$dir"/focus-*       2>/dev/null # lane state, current or leftover
 ```
@@ -30,11 +30,11 @@ ls  "$dir"/focus-*       2>/dev/null # lane state, current or leftover
 |---|---|---|
 | One worktree, no `focus-*` | **not this repo** | **nothing below — stop reading, work normally** |
 | Worktrees, no `focus-*` | plain worktrees | §2–3 only; lanes/preview are inert |
-| `focus-*`, no `gw-lane` | integration **off** | §2–3; lane files are leftover, leave them |
-| `gw-lane` | integration **on** | all of it |
+| `focus-*`, no `gw-lane` | preview **off** | §2–3; lane files are leftover, leave them |
+| `gw-lane` | preview **on** | all of it |
 
 **`focus-base` is not the ON test** — it can exist and be empty, left from a
-session where integration was turned off. `gw-lane` is written on enable and
+session where preview was turned off. `gw-lane` is written on enable and
 removed on disable, so it tracks reality.
 
 **Not a lane repo?** Work the way the repo already works, silently.
@@ -57,10 +57,15 @@ base — and moving it is a manual copy-and-revert nothing verifies.
 
 > New feature or fix? Make the worktree, then work. Not after the edits.
 
-Use the **root checkout** only for what belongs to it: reading, running tests,
-edits the user pointed at there. The root sits on the base, so a feature written
-into it moves the base branch — surfaced as base drift (`main · +N unpushed`)
-and measured against by every other lane.
+**Preview on (`gw-lane` exists)? Never write in the root checkout at all.**
+The root *is* the preview — that is the only place it can be — so it is derived:
+`reset --hard` recreates it on every rebuild and a `pre-commit` hook refuses
+commits there. Read it, run tests in it, nothing else. (§4.)
+
+Preview off, the root is still the wrong home for a feature: it sits on the
+base, so work written into it moves the base branch — surfaced as base drift
+(`main · +N unpushed`) and measured against by every other lane. Use it only
+for reading, running tests, and edits the user pointed at there.
 
 Started in the wrong place? Say so, then move it: create the lane, copy the
 paths, **diff to prove they match**, then revert the originals. Never commit
@@ -81,15 +86,21 @@ git worktree add .worktrees/feat-x -b feat-x origin/main    # watchFolders layou
 them, and the extension git-excludes that folder; discovery is `git worktree
 list`, so anywhere works. Remove with `git worktree remove`, never `rm -rf`.
 
-## 4. Never commit on the integration branch  *(integration on)*
+## 4. Never commit on the preview branch  *(preview on)*
 
-`integration/{base}` (sometimes `focus/working`) is **derived** — every rebuild
+`preview/{base}` (sometimes `focus/working`) is **derived** — every rebuild
 recreates it via `reset --hard` as base + each applied lane merged. A commit
 there has no home, and the only rescue, Absorb, can aim only at the base, which
 is wrong if the work belonged to a lane.
 
+It lives in the **workspace root checkout and nowhere else**: preview mode is
+the root switched onto that branch. The same branch checked out in a linked
+worktree is somebody's manual `git switch` — the extension ignores it entirely
+(not rebuilt, not guarded, not shown), so do not create one and do not describe
+one as a preview.
+
 A `pre-commit` hook refuses it. **Do not reach for `--no-verify`** — that is a
-human's override. Check out the real lane, or ask for **Absorb Integration
+human's override. Check out the real lane, or ask for **Absorb Preview
 Edits**.
 
 Same for the files it owns: change them via `gw-lane`, never by hand, since
@@ -97,9 +108,9 @@ rebuilds hold `focus-working.lock` while rewriting them — `focus-applied`
 (membership) · `focus-candidates` (merge ORDER) · `focus-excluded` ·
 `focus-wip` · `focus-base` (pinned base) · `focus-guard`.
 
-## 5. Joining the preview is deliberate — and yours to do  *(integration on)*
+## 5. Joining the preview is deliberate — and yours to do  *(preview on)*
 
-A worktree cut from the integration base is a **candidate** automatically;
+A worktree cut from the preview base is a **candidate** automatically;
 nothing merges into anyone's preview until applied. A shared base says two lanes
 *can* merge, not that they belong side by side.
 
@@ -110,10 +121,10 @@ nothing merges into anyone's preview until applied. A shared base says two lanes
 ```
 
 Works with the editor closed, taking the same lock the rebuild does; in-editor
-this is **Add to Integration** (`worktreeCompare.addToIntegration`).
+this is **Add to Preview** (`worktreeCompare.addToPreview`).
 
 **You may add your own lane without asking** — that is what the CLI is for, and
-you know whether the work is worth previewing. Two conditions: integration is on
+you know whether the work is worth previewing. Two conditions: preview is on
 (`gw-lane` exists), and you **say so in your report**, since the preview changed
 and the row will not explain itself.
 
@@ -122,7 +133,7 @@ and the row will not explain itself.
   case. The question is whether the work belongs beside the others yet.
 - Stay out while mid-refactor, deliberately broken, or exploring something that
   would clash. Being out costs nothing; the row stays visible.
-- No `gw-lane` → integration is off. Do **not** hand-write `focus-applied` to
+- No `gw-lane` → preview is off. Do **not** hand-write `focus-applied` to
   simulate it; nothing will honour it.
 
 ## 6. Staying current with the base
@@ -149,12 +160,12 @@ reproducing the squash it landed as) and is revert-aware — ask for it. Without
 the extension the reasoning holds but the tool does not: say a branch *looks*
 landed and let the user decide.
 
-## 8. Preview conflicts, and what to tell the user  *(integration on)*
+## 8. Preview conflicts, and what to tell the user  *(preview on)*
 
-The integration tree is a best-effort preview of unlanded work. Lanes may be
+The preview tree is a best-effort preview of unlanded work. Lanes may be
 tagged `auto-resolved` (same-line clash resolved toward the incoming lane,
 dropped hunks listed) or `conflict`. Fix these **on the lane** by catching it up
-with the base — never on the integration branch, never by editing the preview. A
+with the base — never on the preview branch, never by editing the preview. A
 failed rebuild never touches the checkout, so unchecking a lane restores it.
 
 Name a sidebar command **only when the extension is in play** — to a repo
@@ -163,8 +174,8 @@ the git state.
 
 | Situation | Tell them |
 |---|---|
-| Work stranded on the integration branch | **Absorb Integration Edits…** |
-| Preview looks stale | **Rebuild Integration Worktree** |
+| Work stranded on the preview branch | **Absorb Preview Edits…** |
+| Preview looks stale | **Rebuild Preview** |
 | Lane conflicts with base | **Resolve Conflict with Base…** / **Catch Up with Base…** |
 | Rebased a pushed lane | **Force Push (with lease)** — their call |
 | Branch list has grown | **Prune Landed Branches** |

@@ -88,6 +88,9 @@ async function appendExclude(
  * No-op for anything outside a working tree — the ordinary `.git/hooks`
  * case reaches here and correctly does nothing.
  */
+const MANAGED_HEADER =
+  '# Git Workflow: files it manages inside the working tree';
+
 export async function excludeManagedFiles(files: string[]): Promise<string[]> {
   const patterns: string[] = [];
   let common: string | undefined;
@@ -98,12 +101,73 @@ export async function excludeManagedFiles(files: string[]): Promise<string[]> {
     patterns.push(where.pattern);
   }
   if (!common || patterns.length === 0) return [];
-  await appendExclude(
-    common,
-    '# Git Workflow: files it manages inside the working tree',
-    patterns,
-  );
+  await appendExclude(common, MANAGED_HEADER, patterns);
   return patterns;
+}
+
+/**
+ * `<root>/.vscode/settings.json`, kept out of the preview's status.
+ *
+ * VS Code writes workspace-scoped settings there, and with preview mode on
+ * the root IS the preview — so changing any workspace setting (the
+ * extension's own **Change Preview Base** included) leaves a file in a
+ * derived tree, and from then on every rebuild refuses with "preview
+ * checkout is dirty". It is the editor's own file, not somebody's work in
+ * the preview, so it is excluded repo-locally like everything else the
+ * extension causes to appear in a working tree.
+ *
+ * A repo that TRACKS its settings is unaffected — exclude patterns never
+ * apply to tracked paths — and there, editing it in the preview stays the
+ * real edit it is, refused and absorbable like any other.
+ */
+export async function excludeWorkspaceSettings(
+  root: string,
+): Promise<string[]> {
+  const where = await locateIn(root, SETTINGS_REL);
+  if (!where) return [];
+  await appendExclude(where.common, MANAGED_HEADER, [where.pattern]);
+  return [where.pattern];
+}
+
+/** Stop excluding it — preview mode is off, the root is a normal checkout. */
+export async function unexcludeWorkspaceSettings(root: string): Promise<void> {
+  const where = await locateIn(root, SETTINGS_REL);
+  if (where) await dropExcludes(where.common, new Set([where.pattern]));
+}
+
+const SETTINGS_REL = '.vscode/settings.json';
+
+/**
+ * Where `rel` sits relative to the working tree containing `root`.
+ *
+ * Resolved from `root`, which exists, rather than from the file's own
+ * parent directory the way `locate` does — `.vscode/` is typically absent
+ * at the moment preview mode is enabled, and a `git` call with a
+ * non-existent cwd fails, which silently produced no exclude line at all.
+ */
+async function locateIn(
+  root: string,
+  rel: string,
+): Promise<{ pattern: string; common: string } | undefined> {
+  try {
+    const top = path.normalize(
+      (await git(root, ['rev-parse', '--show-toplevel'])).trim(),
+    );
+    const abs = path.resolve(root, rel);
+    const fromTop = path.relative(top, abs);
+    if (!fromTop || fromTop.startsWith('..') || path.isAbsolute(fromTop))
+      return undefined;
+    const common = path.resolve(
+      root,
+      (await git(root, ['rev-parse', '--git-common-dir'])).trim(),
+    );
+    return {
+      pattern: `/${fromTop.split(path.sep).join('/')}`,
+      common,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /** Drop the lines `excludeManagedFiles` added for `files`. */
@@ -117,13 +181,20 @@ export async function unexcludeManagedFiles(files: string[]): Promise<void> {
     drop.add(where.pattern);
   }
   if (!common || drop.size === 0) return;
+  await dropExcludes(common, drop);
+}
+
+/** Remove `drop` from info/exclude, and the header if nothing is left. */
+async function dropExcludes(
+  common: string,
+  drop: ReadonlySet<string>,
+): Promise<void> {
   const file = path.join(common, 'info', 'exclude');
   const text = await read(file);
   if (!text) return;
   const kept = text.split('\n').filter((l) => !drop.has(l.trim()));
   // A header left with nothing under it is litter — take it out too.
-  const header = '# Git Workflow: files it manages inside the working tree';
-  const at = kept.indexOf(header);
+  const at = kept.indexOf(MANAGED_HEADER);
   const next = kept[at + 1]?.trim();
   if (at >= 0 && (next === undefined || next === '' || next.startsWith('#')))
     kept.splice(at, 1);

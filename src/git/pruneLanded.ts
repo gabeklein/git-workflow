@@ -1,5 +1,5 @@
 import { git } from './exec';
-import { resolveBaseSha } from './integration/status';
+import { resolveBaseSha } from './preview/status';
 import { landedVia } from './landedProbe';
 import { revParseCommit } from './plumbing';
 import { listWorktreeAdmin } from './worktreeAdmin';
@@ -42,7 +42,7 @@ interface LandedScan {
  * Local branches already contained in `baseRef`.
  *
  * `protect` names branches that must never be offered whatever the probe
- * says — the base itself, the integration branch, anything the caller
+ * says — the base itself, the preview branch, anything the caller
  * knows is structural rather than a unit of work.
  */
 export async function findLandedBranches(

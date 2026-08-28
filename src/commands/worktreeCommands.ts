@@ -10,7 +10,7 @@ import {
 import { pickBaseRef } from '../compare/pickBaseRef';
 import { pickWorktree } from '../compare/pickWorktree';
 import { commitStaged, commitUnstagedPaths } from '../git/commit';
-import { findLandedLanes, isQuickDeleteLandedEnabled } from '../git/integration';
+import { findLandedLanes, isQuickDeleteLandedEnabled } from '../git/preview';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
@@ -148,7 +148,7 @@ export function registerWorktreeCommands(
         dirty = await isWorktreeDirty(target);
 
         // Landed hint: merging this branch into its base changes nothing
-        // (ancestry or content — same predicate as integration retirement),
+        // (ancestry or content — same predicate as preview retirement),
         // so its COMMITS are safe. Deliberately not "nothing will be lost":
         // gitignored files in the checkout are invisible to the dirty probe.
         let landedIn: string | undefined;

@@ -1,17 +1,19 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { absorbStrayCommits } from '../../src/git/integration/absorb';
-import { findStrayCommits } from '../../src/git/integration/status';
+import { absorbStrayCommits } from '../../src/git/preview/absorb';
+import { findStrayCommits } from '../../src/git/preview/status';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
  * Absorbing when the base has NO worktree — the shape you get by enabling
- * integration on a checkout in place, where the base branch is a ref and
+ * preview on a checkout in place, where the base branch is a ref and
  * nothing more. The replay happens off-tree and lands as one guarded
  * update-ref.
  */
 describe('absorbStrayCommits onto a ref', () => {
+  const PREVIEW = 'preview/main';
+
   let scratch: ScratchRepo;
 
   const target = () => ({ kind: 'ref', branch: 'main' }) as const;
@@ -20,15 +22,15 @@ describe('absorbStrayCommits onto a ref', () => {
 
   beforeEach(() => {
     scratch = makeRepo({ withOrigin: true });
-    // A lane with content, then integration ON THE ROOT CHECKOUT itself —
+    // A lane with content, then preview ON THE ROOT CHECKOUT itself —
     // so main exists only as a ref from here on.
     git(scratch.repo, ['checkout', '-q', '-b', 'feat/lane']);
     fs.writeFileSync(path.join(scratch.repo, 'app.txt'), 'line1\nLANE\nline3\n');
     git(scratch.repo, ['commit', '-qam', 'lane rewrites app.txt']);
     git(scratch.repo, ['checkout', '-q', 'main']);
-    git(scratch.repo, ['checkout', '-q', '-b', 'integration/main']);
+    git(scratch.repo, ['checkout', '-q', '-b', 'preview/main']);
     git(scratch.repo, [
-      'merge', '-q', '--no-ff', '-m', 'integration/main: feat/lane', 'feat/lane',
+      'merge', '-q', '--no-ff', '-m', 'preview/main: feat/lane', 'feat/lane',
     ]);
   });
   afterEach(() => {
@@ -49,15 +51,15 @@ describe('absorbStrayCommits onto a ref', () => {
 
   it('replays a stray commit and advances the ref', async () => {
     const mainBefore = git(scratch.repo, ['rev-parse', 'main']);
-    strayCommit('stray.txt', 'agent work\n', 'agent commits on integration');
+    strayCommit('stray.txt', 'agent work\n', 'agent commits on preview');
 
-    const result = await absorbStrayCommits(scratch.repo, 'origin/main', target());
+    const result = await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW);
 
     expect(result).toMatchObject({ ok: true, commits: 1, target: 'main' });
     expect(git(scratch.repo, ['rev-parse', 'main'])).not.toBe(mainBefore);
     expect(read('main', 'stray.txt')).toBe('agent work');
     expect(git(scratch.repo, ['log', '-1', '--format=%s', 'main'])).toBe(
-      'agent commits on integration',
+      'agent commits on preview',
     );
   });
 
@@ -68,7 +70,7 @@ describe('absorbStrayCommits onto a ref', () => {
       'agent appends',
     );
     expect(
-      await absorbStrayCommits(scratch.repo, 'origin/main', target()),
+      await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW),
     ).toMatchObject({ ok: true });
     // The lane's own rewrite of line2 must NOT have ridden along
     expect(read('main', 'app.txt')).toBe('line1\nline2\nline3\nagent appended');
@@ -80,7 +82,7 @@ describe('absorbStrayCommits onto a ref', () => {
       'commit', '--amend', '-q', '--no-edit',
       '--author', 'Someone Else <someone@example.com>',
     ]);
-    await absorbStrayCommits(scratch.repo, 'origin/main', target());
+    await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW);
     expect(git(scratch.repo, ['log', '-1', '--format=%an <%ae>', 'main'])).toBe(
       'Someone Else <someone@example.com>',
     );
@@ -89,12 +91,12 @@ describe('absorbStrayCommits onto a ref', () => {
   it('records where the commit was absorbed from', async () => {
     strayCommit('trace.txt', 'x\n', 'work that needs a paper trail');
     const strayTip = git(scratch.repo, ['rev-parse', 'HEAD']);
-    await absorbStrayCommits(scratch.repo, 'origin/main', target());
+    await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW);
     const body = git(scratch.repo, ['log', '-1', '--format=%B', 'main']);
-    // The source sha stops resolving as soon as integration rebuilds, so
+    // The source sha stops resolving as soon as preview rebuilds, so
     // the branch line is the half that still answers the question later.
     expect(body).toContain(`(cherry picked from commit ${strayTip})`);
-    expect(body).toContain('Absorbed-from: integration/main');
+    expect(body).toContain('Absorbed-from: preview/main');
     expect(git(scratch.repo, ['log', '-1', '--format=%s', 'main'])).toBe(
       'work that needs a paper trail',
     );
@@ -104,17 +106,17 @@ describe('absorbStrayCommits onto a ref', () => {
     strayCommit('a.txt', 'first\n', 'stray one');
     strayCommit('b.txt', 'second\n', 'stray two');
     expect(
-      await absorbStrayCommits(scratch.repo, 'origin/main', target()),
+      await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW),
     ).toMatchObject({ ok: true, commits: 2 });
     expect(
       git(scratch.repo, ['log', '-2', '--format=%s', '--reverse', 'main']).split('\n'),
     ).toEqual(['stray one', 'stray two']);
   });
 
-  it('rewinds the integration branch so the guard clears', async () => {
+  it('rewinds the preview branch so the guard clears', async () => {
     strayCommit('stray.txt', 'agent work\n', 'agent commits');
-    await absorbStrayCommits(scratch.repo, 'origin/main', target());
-    expect(await findStrayCommits(scratch.repo, git(scratch.repo, ['rev-parse', 'origin/main']))).toEqual([]);
+    await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW);
+    expect(await findStrayCommits(scratch.repo, git(scratch.repo, ['rev-parse', 'origin/main']), PREVIEW)).toEqual([]);
   });
 
   it('a conflicting stray leaves the base ref exactly where it was', async () => {
@@ -122,11 +124,11 @@ describe('absorbStrayCommits onto a ref', () => {
     // Rewrites the very line the lane owns — cannot apply to the base
     strayCommit('app.txt', 'line1\nAGENT OWNS THIS NOW\nline3\n', 'agent rewrites');
 
-    const result = await absorbStrayCommits(scratch.repo, 'origin/main', target());
+    const result = await absorbStrayCommits(scratch.repo, 'origin/main', target(), PREVIEW);
 
     expect(result).toMatchObject({ ok: false, code: 'conflict' });
     expect(git(scratch.repo, ['rev-parse', 'main'])).toBe(mainBefore);
-    // And the work is still on integration, not lost
+    // And the work is still on preview, not lost
     expect(git(scratch.repo, ['log', '-1', '--format=%s'])).toBe('agent rewrites');
   });
 });

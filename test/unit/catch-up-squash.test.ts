@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { landedPrefix } from '../../src/git/integration/status';
+import { landedPrefix } from '../../src/git/preview/status';
 import { startBaseMerge, startLaneRebase } from '../../src/git/laneOps';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 

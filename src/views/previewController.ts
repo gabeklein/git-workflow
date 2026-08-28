@@ -1,10 +1,11 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { DiscoveredWorktree } from '../git/discovery';
-import { orderLaneRows } from './lanesPlan';
+import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
 import { revParseCommit } from '../git/plumbing';
 import { baseMergeInProgress, fastForwardEmptyLane } from '../git/laneOps';
+import { excludeWorkspaceSettings } from '../git/exclude';
 import {
   absorbDirtyEdits,
   absorbStrayCommits,
@@ -14,11 +15,11 @@ import {
   readBasePin,
   resolveBaseSha,
   writeBasePin,
-  abortIntegrationMerge,
+  abortPreviewMerge,
   addAppliedLane,
   addCandidateLane,
   addExcludedLane,
-  alignIntegrationBranchName,
+  alignPreviewBranchName,
   installCommitGuard,
   installLaneCli,
   laneCliPath,
@@ -28,16 +29,16 @@ import {
   baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
-  ensureIntegrationPushBlocked,
-  fetchIntegrationBase,
+  ensurePreviewPushBlocked,
+  fetchPreviewBase,
   findLandedLanes,
   findStaleLandedLanes,
   findStrayCommits,
-  integrationBaseRef,
-  integrationBranch,
-  integrationFingerprint,
-  isIntegrationAutoRebuildEnabled,
-  isIntegrationAbsorbEnabled,
+  previewBaseRef,
+  previewBranch,
+  previewFingerprint,
+  isPreviewAutoRebuildEnabled,
+  isPreviewAbsorbEnabled,
   isLaneBranch,
   laneNeverDiverged,
   listAppliedLanes,
@@ -47,17 +48,17 @@ import {
   listExcludedLanes,
   listWipLanes,
   pruneDeadLanes,
-  rebuildIntegration,
+  rebuildPreview,
   setWipLane,
   type AbsorbResult,
   type AbsorbTarget,
   type RebuildResult,
   type ResolvedLane,
-} from '../git/integration';
+} from '../git/preview';
 import { isPathInside, shouldIgnoreHotFollowPath } from './paths';
 
 /** What the controller needs from its host (the tree provider). */
-interface IntegrationHost {
+interface PreviewHost {
   readonly output: { appendLine(value: string): void };
   getWorktrees(): DiscoveredWorktree[];
   getRepoCwd(): string | undefined;
@@ -65,14 +66,14 @@ interface IntegrationHost {
   fireTreeData(): void;
   refresh(): void;
   refreshCompare(worktreePath: string): void;
-  /** Selection landed on the integration checkout — move it to a real lane. */
+  /** Selection landed on the preview checkout — move it to a real lane. */
   moveSelectionOff(worktreePath: string): void;
   /** Override ?? genuine inference for a worktree's base — undefined when
    *  there is no evidence (auto-membership must never enroll on a guess). */
   genuineBaseFor(worktreePath: string): Promise<string | undefined>;
 }
 
-export interface IntegrationState {
+export interface PreviewState {
   path: string;
   branch: string;
   lanes: string[];
@@ -91,25 +92,25 @@ export interface IntegrationState {
   /** Local <base> carries commits the frozen base does not — offer
    *  Convert-to-Branch / Catch Up instead of silently retargeting. */
   baseDrift?: { ahead: number; sha: string; resetTo: string; included: boolean };
-  /** A git merge is paused in the integration checkout itself (external
-   *  script / by hand) — Abort Integration Merge only applies then. */
+  /** A git merge is paused in the preview checkout itself (external
+   *  script / by hand) — Abort Preview Merge only applies then. */
   mergePaused: boolean;
   error?: { code: string; message: string; lane?: string };
 }
 
 /**
- * Integration overlay (focus/working) state machine: detection, lane
+ * Preview overlay (focus/working) state machine: detection, lane
  * files, auto-rebuild tick, wip-save reactivity, and the rebuild queue.
  * Owns no tree rendering — panels read getState().
  */
-export class IntegrationController implements vscode.Disposable {
-  private integrationPath: string | undefined;
+export class PreviewController implements vscode.Disposable {
+  private previewPath: string | undefined;
   /** Path:branch:enabled the pre-commit guard was last reconciled for. */
   private guardSyncedFor: string | undefined;
   /** Base sha + lane set the stale-landing sweep last ran for. */
   private staleSweptFor: string | undefined;
   private lanes: string[] = [];
-  /** Everything shown under Integration: explicit + applied + auto members. */
+  /** Everything shown under Preview: explicit + applied + auto members. */
   private candidates: string[] = [];
   /** Explicitly-added candidates (focus-candidates file). */
   private explicit: string[] = [];
@@ -135,19 +136,19 @@ export class IntegrationController implements vscode.Disposable {
   /** Reason of a rebuild requested while one was in flight — run once after. */
   private rebuildQueued: string | undefined;
   private wipDebounce: NodeJS.Timeout | undefined;
-  /** Integration HEAD of the last auto-absorb attempt — one try per tip,
+  /** Preview HEAD of the last auto-absorb attempt — one try per tip,
    *  so a target that keeps refusing never loops the rebuild queue. */
   private lastAbsorbHead: string | undefined;
   private lastBaseFetchAt = 0;
 
-  constructor(private readonly host: IntegrationHost) {}
+  constructor(private readonly host: PreviewHost) {}
 
-  /** Integration worktree + lanes, if one is checked out. */
-  getState(): IntegrationState | undefined {
-    if (!this.integrationPath) return undefined;
+  /** The preview and its lanes, if preview mode is on. */
+  getState(): PreviewState | undefined {
+    if (!this.previewPath) return undefined;
     return {
-      path: this.integrationPath,
-      branch: integrationBranch(),
+      path: this.previewPath,
+      branch: previewBranch(),
       lanes: this.lanes.slice(),
       candidates: this.candidates.slice(),
       explicit: this.explicit.slice(),
@@ -163,7 +164,7 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   getPath(): string | undefined {
-    return this.integrationPath;
+    return this.previewPath;
   }
 
   /**
@@ -176,18 +177,16 @@ export class IntegrationController implements vscode.Disposable {
    * membership has to be settled before the badges that describe members.
    */
   async refreshState(): Promise<void> {
-    const branch = integrationBranch();
-    const wt = this.host
-      .getWorktrees()
-      .find((w) => !w.detached && w.branch === branch);
+    const branch = previewBranch();
+    const wt = findPreviewCheckout(this.host.getWorktrees(), branch);
 
     if (!wt) {
-      this.forgetIntegration(branch);
+      this.forgetPreview(branch);
       return;
     }
 
-    if (this.integrationPath !== wt.path) this.adoptIntegration(wt.path, branch);
-    this.integrationPath = wt.path;
+    if (this.previewPath !== wt.path) this.adoptPreview(wt.path, branch);
+    this.previewPath = wt.path;
 
     const guardKey = `${wt.path}:${branch}:${isCommitGuardEnabled()}`;
     if (this.guardSyncedFor !== guardKey) {
@@ -199,7 +198,7 @@ export class IntegrationController implements vscode.Disposable {
       await this.dropDeadLanes(wt.path);
       await this.ensureBasePin(wt.path);
 
-      const baseRef = integrationBaseRef();
+      const baseRef = previewBaseRef();
       const effective = await resolveBaseSha(wt.path, baseRef);
       this.baseDrift = await this.readBaseDrift(wt.path, effective);
 
@@ -224,8 +223,8 @@ export class IntegrationController implements vscode.Disposable {
 
       this.conflicts = await this.conflictedLanes(wt.path, baseRef);
       this.resolving = await this.resolvingLanes(wt.path);
-      // MERGE_HEAD in the integration checkout itself (external script /
-      // by hand) — gates the Abort Integration Merge menu item, which
+      // MERGE_HEAD in the preview checkout itself (external script /
+      // by hand) — gates the Abort Preview Merge menu item, which
       // otherwise showed permanently for a state the off-tree engine
       // can no longer produce.
       this.mergePaused = await baseMergeInProgress(wt.path);
@@ -242,15 +241,15 @@ export class IntegrationController implements vscode.Disposable {
     }
   }
 
-  /** The integration checkout is gone — drop the overlay and the guard. */
-  private forgetIntegration(branch: string): void {
-    if (this.integrationPath)
-      this.host.output.appendLine('Integration worktree gone — overlay off');
+  /** The root checkout left the preview branch — drop overlay and guard. */
+  private forgetPreview(branch: string): void {
+    if (this.previewPath)
+      this.host.output.appendLine('Root checkout left the preview branch — overlay off');
     if (this.guardSyncedFor) {
       this.guardSyncedFor = undefined;
       void this.syncCommitGuard(undefined, branch);
     }
-    this.integrationPath = undefined;
+    this.previewPath = undefined;
     this.lanes = [];
     this.candidates = [];
     this.explicit = [];
@@ -264,62 +263,69 @@ export class IntegrationController implements vscode.Disposable {
     this.fingerprint = undefined;
   }
 
-  /** First sight of this integration checkout (enabled, moved, reloaded). */
-  private adoptIntegration(integrationPath: string, branch: string): void {
+  /** First sight of this preview checkout (enabled, moved, reloaded). */
+  private adoptPreview(previewPath: string, branch: string): void {
     this.error = undefined;
     this.fingerprint = undefined;
     this.host.output.appendLine(
-      `Integration worktree: ${integrationPath} (${branch})`,
+      `Preview: ${previewPath} (${branch})`,
     );
     // Covers checkouts created by the shell script or by hand too
-    ensureIntegrationPushBlocked(integrationPath).catch((err) => {
+    ensurePreviewPushBlocked(previewPath).catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       this.host.output.appendLine(`Push-block config failed: ${message}`);
     });
+    // The preview is the workspace root, so VS Code's own settings file
+    // lands inside a derived tree — and an untracked file there is enough
+    // to make every rebuild refuse as dirty.
+    excludeWorkspaceSettings(previewPath).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Excluding workspace settings failed: ${message}`);
+    });
     // Enabling must not hijack the compare focus: if the selected
-    // checkout just became the integration surface, move selection to a
-    // real worktree. Explicit clicks on the Integration row still focus it.
-    if (this.host.getSelectedPath() === integrationPath)
-      this.host.moveSelectionOff(integrationPath);
+    // checkout just became the preview surface, move selection to a
+    // real worktree. Explicit clicks on the Preview row still focus it.
+    if (this.host.getSelectedPath() === previewPath)
+      this.host.moveSelectionOff(previewPath);
   }
 
   /**
-   * Dead lanes: a branch deleted out from under Integration (its worktree
+   * Dead lanes: a branch deleted out from under Preview (its worktree
    * died — landed and cleaned up, agent teardown) leaves ghost rows in the
    * lane files. Prune before reading, so a lane that no longer exists never
    * renders or re-enters a rebuild.
    */
-  private async dropDeadLanes(integrationPath: string): Promise<void> {
-    const pruned = await pruneDeadLanes(integrationPath);
+  private async dropDeadLanes(previewPath: string): Promise<void> {
+    const pruned = await pruneDeadLanes(previewPath);
     if (pruned.length > 0) {
       this.host.output.appendLine(
-        `Integration lanes pruned (branch gone): ${pruned.join(', ')}`,
+        `Preview lanes pruned (branch gone): ${pruned.join(', ')}`,
       );
     }
   }
 
   /**
-   * Freeze the base on first sight of this integration checkout: the pin is
+   * Freeze the base on first sight of this preview checkout: the pin is
    * what rebuilds anchor to; only published (origin) movement or an explicit
    * Catch Up advances it. Enable/base-change clear it, so it re-pins fresh;
    * reloads keep it — that IS the freeze.
    */
-  private async ensureBasePin(integrationPath: string): Promise<void> {
-    if (await readBasePin(integrationPath)) return;
+  private async ensureBasePin(previewPath: string): Promise<void> {
+    if (await readBasePin(previewPath)) return;
     // Pin at the PUBLISHED tip when one exists: if local <base> is
-    // already ahead at first sight (commits made before integration
+    // already ahead at first sight (commits made before preview
     // loaded), that segment is drift to SURFACE as a lane — not floor
     // to swallow. The descendant-preferring legacy resolution would
     // pin the drifted tip and hide it forever. No origin → local.
-    const name = integrationBaseRef().replace(/^origin\//, '');
+    const name = previewBaseRef().replace(/^origin\//, '');
     const fresh =
-      (await revParseCommit(integrationPath, `origin/${name}`)) ??
-      (await revParseCommit(integrationPath, `refs/heads/${name}`)) ??
-      (await resolveBaseSha(integrationPath, integrationBaseRef()));
+      (await revParseCommit(previewPath, `origin/${name}`)) ??
+      (await revParseCommit(previewPath, `refs/heads/${name}`)) ??
+      (await resolveBaseSha(previewPath, previewBaseRef()));
     if (!fresh) return;
-    await writeBasePin(integrationPath, fresh);
+    await writeBasePin(previewPath, fresh);
     this.host.output.appendLine(
-      `Integration base pinned at ${fresh.slice(0, 10)} (${integrationBaseRef()})`,
+      `Preview base pinned at ${fresh.slice(0, 10)} (${previewBaseRef()})`,
     );
   }
 
@@ -334,18 +340,18 @@ export class IntegrationController implements vscode.Disposable {
    * drift persisted).
    */
   private async readBaseDrift(
-    integrationPath: string,
+    previewPath: string,
     effective: string | undefined,
   ): Promise<
     { ahead: number; sha: string; resetTo: string; included: boolean } | undefined
   > {
-    const baseName = integrationBaseRef().replace(/^origin\//, '');
+    const baseName = previewBaseRef().replace(/^origin\//, '');
     const localSha = await revParseCommit(
-      integrationPath,
+      previewPath,
       `refs/heads/${baseName}`,
     );
     if (!effective || !localSha || localSha === effective) return undefined;
-    const contained = await gitOk(integrationPath, [
+    const contained = await gitOk(previewPath, [
       'merge-base',
       '--is-ancestor',
       localSha,
@@ -356,7 +362,7 @@ export class IntegrationController implements vscode.Disposable {
     const ahead =
       Number(
         (
-          await git(integrationPath, [
+          await git(previewPath, [
             'rev-list',
             '--count',
             `${effective}..${localSha}`,
@@ -372,40 +378,40 @@ export class IntegrationController implements vscode.Disposable {
       // Included by default: unpushed base work is unlanded work, shown in
       // the preview like any lane. Uncheck persists the base name in
       // focus-excluded.
-      included: !(await listExcludedLanes(integrationPath)).includes(baseName),
+      included: !(await listExcludedLanes(previewPath)).includes(baseName),
     };
   }
 
   /**
    * Auto-membership: a worktree whose own base — override or GENUINE
-   * inference, never the configured fallback — matches the integration base
+   * inference, never the configured fallback — matches the preview base
    * is a candidate automatically. Stacked lanes (base = parent branch) stay
    * out, and so do branches whose base we merely guessed.
    */
   private async autoMembers(
-    integrationPath: string,
+    previewPath: string,
     explicit: string[],
     effective: string | undefined,
   ): Promise<string[]> {
-    const excluded = await listExcludedLanes(integrationPath);
-    const integBase = integrationBaseRef().replace(/^origin\//, '');
+    const excluded = await listExcludedLanes(previewPath);
+    const integBase = previewBaseRef().replace(/^origin\//, '');
     const auto: string[] = [];
 
     for (const w of this.host.getWorktrees()) {
       if (
         w.detached ||
-        w.path === integrationPath ||
+        w.path === previewPath ||
         explicit.includes(w.branch) ||
         this.lanes.includes(w.branch) ||
         excluded.includes(w.branch) ||
-        !isLaneBranch(w.branch, integrationBaseRef())
+        !isLaneBranch(w.branch, previewBaseRef())
       ) {
         continue;
       }
       const base = await this.host.genuineBaseFor(w.path);
       if (!base || base.replace(/^origin\//, '') !== integBase) continue;
       auto.push(w.branch);
-      await this.repointEmptyLane(integrationPath, w, effective);
+      await this.repointEmptyLane(previewPath, w, effective);
     }
     return auto;
   }
@@ -421,26 +427,26 @@ export class IntegrationController implements vscode.Disposable {
    * its first commit starts from the CURRENT base.
    */
   private async repointEmptyLane(
-    integrationPath: string,
+    previewPath: string,
     lane: DiscoveredWorktree,
     effective: string | undefined,
   ): Promise<void> {
     const laneSha = await revParseCommit(
-      integrationPath,
+      previewPath,
       `refs/heads/${lane.branch}`,
     );
     if (!effective || !laneSha || laneSha === effective) return;
-    const contained = await gitOk(integrationPath, [
+    const contained = await gitOk(previewPath, [
       'merge-base',
       '--is-ancestor',
       laneSha,
       effective,
     ]);
     if (!contained) return;
-    if (!(await laneNeverDiverged(integrationPath, laneSha, effective))) return;
+    if (!(await laneNeverDiverged(previewPath, laneSha, effective))) return;
 
-    const ff = await fastForwardEmptyLane(lane.path, integrationBaseRef());
-    const integBase = integrationBaseRef().replace(/^origin\//, '');
+    const ff = await fastForwardEmptyLane(lane.path, previewBaseRef());
+    const integBase = previewBaseRef().replace(/^origin\//, '');
     this.host.output.appendLine(
       ff.status === 'done'
         ? `Empty lane ${lane.branch} fast-forwarded to ${integBase}`
@@ -457,14 +463,14 @@ export class IntegrationController implements vscode.Disposable {
    * error memory.
    */
   private async conflictedLanes(
-    integrationPath: string,
+    previewPath: string,
     baseRef: string,
   ): Promise<string[]> {
     const conflicts: string[] = [];
     for (const lane of this.lanes) {
       if (this.landed.includes(lane)) continue;
       const st = await baseStatusFor(
-        integrationPath,
+        previewPath,
         `refs/heads/${lane}`,
         baseRef,
         this.probeMemo,
@@ -478,12 +484,12 @@ export class IntegrationController implements vscode.Disposable {
    * Paused base merges in candidate checkouts (started here or in a
    * terminal) — the lane row shows Complete/Abort either way.
    */
-  private async resolvingLanes(integrationPath: string): Promise<string[]> {
+  private async resolvingLanes(previewPath: string): Promise<string[]> {
     const resolving: string[] = [];
     for (const w of this.host.getWorktrees()) {
       if (
         !w.detached &&
-        w.path !== integrationPath &&
+        w.path !== previewPath &&
         this.candidates.includes(w.branch) &&
         (await baseMergeInProgress(w.path))
       ) {
@@ -498,7 +504,7 @@ export class IntegrationController implements vscode.Disposable {
    * (VS Code events only, per design) re-snapshots and rebuilds.
    */
   scheduleWipRebuildIfUnderWipLane(uri: vscode.Uri): void {
-    if (uri.scheme !== 'file' || !this.integrationPath) return;
+    if (uri.scheme !== 'file' || !this.previewPath) return;
     const wip = this.wip.filter((l) => this.lanes.includes(l));
     if (wip.length === 0) return;
     const hit = this.host
@@ -506,7 +512,7 @@ export class IntegrationController implements vscode.Disposable {
       .find(
         (w) =>
           !w.detached &&
-          w.path !== this.integrationPath &&
+          w.path !== this.previewPath &&
           wip.includes(w.branch) &&
           isPathInside(uri.fsPath, w.path),
       );
@@ -540,9 +546,9 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Toggle overlaying a lane's uncommitted edits; rebuild when applied. */
   async setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
-    if (!this.integrationPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    await setWipLane(this.integrationPath, branch, enabled);
+    if (!this.previewPath)
+      return { ok: false, code: 'error', message: 'preview mode is off' };
+    await setWipLane(this.previewPath, branch, enabled);
     await this.refreshState();
     this.host.fireTreeData();
     if (this.lanes.includes(branch))
@@ -551,12 +557,12 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   /**
-   * Auto-rebuild: rebuild the integration tree when the base or an applied
+   * Auto-rebuild: rebuild the preview tree when the base or an applied
    * lane tip moves (commit/amend/rebase anywhere — no git hook needed).
    */
   async tick(): Promise<void> {
-    if (!this.integrationPath || this.rebuildInFlight) return;
-    if (!isIntegrationAutoRebuildEnabled()) {
+    if (!this.previewPath || this.rebuildInFlight) return;
+    if (!isPreviewAutoRebuildEnabled()) {
       this.fingerprint = undefined;
       return;
     }
@@ -564,17 +570,17 @@ export class IntegrationController implements vscode.Disposable {
     // A moved tip changes the fingerprint below and triggers the rebuild.
     const fetchMs = vscode.workspace
       .getConfiguration('worktreeCompare')
-      .get<number>('integrationFetchIntervalMs', 300000);
+      .get<number>('previewFetchIntervalMs', 300000);
     if (fetchMs > 0 && Date.now() - this.lastBaseFetchAt > fetchMs) {
       this.lastBaseFetchAt = Date.now();
       // Fire-and-forget: never let a slow/hung remote stall the tick. A
       // moved tip is picked up by the fingerprint on the next tick.
-      void fetchIntegrationBase(this.integrationPath, integrationBaseRef())
+      void fetchPreviewBase(this.previewPath, previewBaseRef())
         .then((ok) =>
           this.host.output.appendLine(
             ok
-              ? `Fetched origin ${integrationBaseRef()} (integration base)`
-              : 'Integration base fetch failed (offline / no remote?)',
+              ? `Fetched origin ${previewBaseRef()} (preview base)`
+              : 'Preview base fetch failed (offline / no remote?)',
           ),
         )
         .catch(() => {});
@@ -583,13 +589,13 @@ export class IntegrationController implements vscode.Disposable {
     // retrying — a new commit on the conflicting lane may resolve it.
     let fp: string;
     try {
-      fp = await integrationFingerprint(
-        this.integrationPath,
-        integrationBaseRef(),
+      fp = await previewFingerprint(
+        this.previewPath,
+        previewBaseRef(),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.host.output.appendLine(`Integration fingerprint failed: ${message}`);
+      this.host.output.appendLine(`Preview fingerprint failed: ${message}`);
       return;
     }
     if (this.fingerprint === undefined) {
@@ -602,11 +608,11 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   /**
-   * Keep the pre-commit guard in step with integration state. Installed
-   * while integration is on, removed when it goes off, and re-pointed when
+   * Keep the pre-commit guard in step with preview state. Installed
+   * while preview is on, removed when it goes off, and re-pointed when
    * the branch is renamed — reconciled from refreshState rather than from
    * the enable/disable commands so it also covers checkouts made by hand
-   * and repos that had integration on before the guard existed.
+   * and repos that had preview on before the guard existed.
    *
    * Failure is logged, never surfaced: a repo where hooks cannot be written
    * (read-only .git, an unusual hooksPath) still works exactly as it did
@@ -625,7 +631,7 @@ export class IntegrationController implements vscode.Disposable {
         return;
       }
       // The lane CLI is how anything outside VS Code joins the preview, so
-      // it tracks integration being ON — not the guard's setting.
+      // it tracks preview being ON — not the guard's setting.
       if (await installLaneCli(cwd)) {
         this.host.output.appendLine(
           `Lane CLI installed: ${await laneCliPath(cwd)}`,
@@ -658,33 +664,33 @@ export class IntegrationController implements vscode.Disposable {
    * the checkout's branch to match, then rebuild onto the new base.
    */
   async handleBaseChange(): Promise<void> {
-    if (!this.integrationPath) {
+    if (!this.previewPath) {
       this.host.fireTreeData();
       return;
     }
     // The pin belongs to the OLD base — drop it so refreshState re-pins
     // fresh on the new one.
-    await clearBasePin(this.integrationPath).catch(() => {});
+    await clearBasePin(this.previewPath).catch(() => {});
     try {
-      const renamed = await alignIntegrationBranchName(this.integrationPath);
+      const renamed = await alignPreviewBranchName(this.previewPath);
       if (renamed) {
         this.host.output.appendLine(
-          `Integration branch renamed: ${renamed.from} → ${renamed.to}`,
+          `Preview branch renamed: ${renamed.from} → ${renamed.to}`,
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.host.output.appendLine(`Integration branch rename failed: ${message}`);
+      this.host.output.appendLine(`Preview branch rename failed: ${message}`);
     }
     await this.runRebuild('base changed');
     this.host.refresh();
   }
 
-  /** Run a rebuild and surface the outcome on the integration row. */
+  /** Run a rebuild and surface the outcome on the preview row. */
   async runRebuild(reason: string): Promise<RebuildResult> {
-    const workingPath = this.integrationPath;
+    const workingPath = this.previewPath;
     if (!workingPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     if (this.rebuildInFlight) {
       // Never drop intent (e.g. unchecking a lane mid-rebuild): queue one
       // follow-up run — it re-reads the lane files, so it applies whatever
@@ -704,9 +710,9 @@ export class IntegrationController implements vscode.Disposable {
         // includes(): the manual marker must survive queueing — both the
         // '(queued)' suffix and accumulation with other queued reasons.
         this.lastBaseFetchAt = Date.now();
-        await fetchIntegrationBase(workingPath, integrationBaseRef());
+        await fetchPreviewBase(workingPath, previewBaseRef());
       }
-      const result = await rebuildIntegration(workingPath, integrationBaseRef());
+      const result = await rebuildPreview(workingPath, previewBaseRef());
       if (result.ok) {
         this.error = undefined;
         this.autoResolved = result.resolved;
@@ -727,11 +733,11 @@ export class IntegrationController implements vscode.Disposable {
         // rows stay as candidates with the 'landed' tag
         for (const lane of result.landed) {
           this.host.output.appendLine(
-            `Lane ${lane} landed in ${integrationBaseRef()} — unapplied`,
+            `Lane ${lane} landed in ${previewBaseRef()} — unapplied`,
           );
         }
         this.host.output.appendLine(
-          `Integration rebuilt (${reason}): ${
+          `Preview rebuilt (${reason}): ${
             result.lanes.length > 0 ? result.lanes.join(', ') : 'base only'
           }${
             result.skipped.length > 0
@@ -741,9 +747,9 @@ export class IntegrationController implements vscode.Disposable {
         );
       } else if (result.code === 'busy') {
         // Script/hook holds the lock — not an error state for the row
-        this.host.output.appendLine(`Integration rebuild busy (${reason})`);
-      } else if (result.code === 'unique' && isIntegrationAbsorbEnabled()) {
-        // Work committed directly on the integration checkout. The rebuild
+        this.host.output.appendLine(`Preview rebuild busy (${reason})`);
+      } else if (result.code === 'unique' && isPreviewAbsorbEnabled()) {
+        // Work committed directly on the preview checkout. The rebuild
         // refuses rather than destroy it, which protects the commits but
         // deadlocks the preview — absorbing is the exit. On success the
         // work lands on the base as ordinary drift and the queued rebuild
@@ -757,7 +763,7 @@ export class IntegrationController implements vscode.Disposable {
         } else {
           this.error = { code: result.code, message: result.message };
           this.host.output.appendLine(
-            `Integration rebuild failed (${reason}, ${result.code}): ${result.message}`,
+            `Preview rebuild failed (${reason}, ${result.code}): ${result.message}`,
           );
         }
       } else {
@@ -767,7 +773,7 @@ export class IntegrationController implements vscode.Disposable {
           lane: result.lane,
         };
         this.host.output.appendLine(
-          `Integration rebuild failed (${reason}, ${result.code}${
+          `Preview rebuild failed (${reason}, ${result.code}${
             result.lane ? `, lane ${result.lane}` : ''
           }): ${result.message}`,
         );
@@ -786,29 +792,29 @@ export class IntegrationController implements vscode.Disposable {
     }
   }
 
-  /** Offer a branch under the Integration row (unchecked; no rebuild). */
+  /** Offer a branch under the Preview row (unchecked; no rebuild). */
   async addCandidate(branch: string): Promise<void> {
-    if (!this.integrationPath) return;
-    if (!isLaneBranch(branch, integrationBaseRef()))
-      throw new Error(`${branch} cannot be an integration lane`);
+    if (!this.previewPath) return;
+    if (!isLaneBranch(branch, previewBaseRef()))
+      throw new Error(`${branch} cannot be an preview lane`);
     // Re-adding is also how an excluded auto member comes back
-    await dropExcludedLane(this.integrationPath, branch);
-    await addCandidateLane(this.integrationPath, branch);
+    await dropExcludedLane(this.previewPath, branch);
+    await addCandidateLane(this.previewPath, branch);
     await this.refreshState();
     this.host.fireTreeData();
   }
 
   /**
-   * Drop a branch from the Integration row; rebuild if it was applied.
+   * Drop a branch from the Preview row; rebuild if it was applied.
    * Also records an exclusion — auto members (base matches) would just
    * reappear on the next refresh otherwise, and Remove must be a real
-   * exit for every row. Add to Integration clears the exclusion.
+   * exit for every row. Add to Preview clears the exclusion.
    */
   async removeCandidate(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    await dropCandidateLane(this.integrationPath, branch);
-    await addExcludedLane(this.integrationPath, branch);
+    if (!this.previewPath)
+      return { ok: false, code: 'error', message: 'preview mode is off' };
+    await dropCandidateLane(this.previewPath, branch);
+    await addExcludedLane(this.previewPath, branch);
     if (this.lanes.includes(branch)) return this.hide(branch);
     await this.refreshState();
     this.host.fireTreeData();
@@ -817,9 +823,9 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Add this branch as a lane and rebuild. */
   async apply(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    if (!isLaneBranch(branch, integrationBaseRef())) {
+    if (!this.previewPath)
+      return { ok: false, code: 'error', message: 'preview mode is off' };
+    if (!isLaneBranch(branch, previewBaseRef())) {
       return {
         ok: false,
         code: 'error',
@@ -828,17 +834,17 @@ export class IntegrationController implements vscode.Disposable {
     }
     // Persist candidacy too, so unchecking later keeps the row visible
     // (and applying an excluded branch is an explicit opt back in)
-    await dropExcludedLane(this.integrationPath, branch);
-    await addCandidateLane(this.integrationPath, branch);
-    await addAppliedLane(this.integrationPath, branch);
+    await dropExcludedLane(this.previewPath, branch);
+    await addCandidateLane(this.previewPath, branch);
+    await addAppliedLane(this.previewPath, branch);
     return this.runRebuild(`apply ${branch}`);
   }
 
   /** Drop this branch from the lanes and rebuild. */
   async hide(branch: string): Promise<RebuildResult> {
-    if (!this.integrationPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    await dropAppliedLane(this.integrationPath, branch);
+    if (!this.previewPath)
+      return { ok: false, code: 'error', message: 'preview mode is off' };
+    await dropAppliedLane(this.previewPath, branch);
     return this.runRebuild(`hide ${branch}`);
   }
 
@@ -852,13 +858,13 @@ export class IntegrationController implements vscode.Disposable {
    * "never show main's local noise" survives future commits.
    */
   async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
-    if (!this.integrationPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
-    const baseName = integrationBaseRef().replace(/^origin\//, '');
+    if (!this.previewPath)
+      return { ok: false, code: 'error', message: 'preview mode is off' };
+    const baseName = previewBaseRef().replace(/^origin\//, '');
     if (included) {
-      await dropExcludedLane(this.integrationPath, baseName);
+      await dropExcludedLane(this.previewPath, baseName);
     } else {
-      await addExcludedLane(this.integrationPath, baseName);
+      await addExcludedLane(this.previewPath, baseName);
     }
     await this.refreshState();
     this.host.fireTreeData();
@@ -874,9 +880,9 @@ export class IntegrationController implements vscode.Disposable {
    * so the rescue needs no escape hatches of its own.
    */
   private async absorbTarget(): Promise<AbsorbTarget | undefined> {
-    if (!this.integrationPath) return undefined;
-    const baseName = integrationBaseRef().replace(/^origin\//, '');
-    if (!(await gitOk(this.integrationPath, [
+    if (!this.previewPath) return undefined;
+    const baseName = previewBaseRef().replace(/^origin\//, '');
+    if (!(await gitOk(this.previewPath, [
       'rev-parse',
       '-q',
       '--verify',
@@ -884,9 +890,9 @@ export class IntegrationController implements vscode.Disposable {
     ]))) {
       return undefined; // no base branch at all — nothing to absorb into
     }
-    const path = await checkoutForBranch(this.integrationPath, baseName);
+    const path = await checkoutForBranch(this.previewPath, baseName);
     // Prefer a checkout so the replay leaves its working tree consistent;
-    // fall back to the ref, which is the ONLY option when integration was
+    // fall back to the ref, which is the ONLY option when preview was
     // enabled by switching a checkout in place — the base then has no
     // worktree of its own.
     return path
@@ -895,7 +901,7 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   /**
-   * Move commits made directly on the integration branch onto the base.
+   * Move commits made directly on the preview branch onto the base.
    * Runs unattended: a commit is an explicit act marking a unit of work
    * complete, so nothing is taken out from under anyone. Uncommitted edits
    * are deliberately NOT absorbed automatically — an agent may still be
@@ -905,9 +911,9 @@ export class IntegrationController implements vscode.Disposable {
   async absorbStrays(
     options: { confirmed?: boolean } = {},
   ): Promise<AbsorbResult | undefined> {
-    const workingPath = this.integrationPath;
+    const workingPath = this.previewPath;
     if (!workingPath) return undefined;
-    // One attempt per integration tip: a target that keeps refusing (dirty,
+    // One attempt per preview tip: a target that keeps refusing (dirty,
     // or a conflict needing a human) must not re-arm the rebuild queue on
     // every tick.
     const head = await revParseCommit(workingPath, 'HEAD');
@@ -917,7 +923,7 @@ export class IntegrationController implements vscode.Disposable {
     const target = await this.absorbTarget();
     if (!target) {
       this.host.output.appendLine(
-        'Integration strays: the base branch does not exist — cannot absorb',
+        'Preview strays: the base branch does not exist — cannot absorb',
       );
       return {
         ok: false,
@@ -927,13 +933,13 @@ export class IntegrationController implements vscode.Disposable {
     }
     // Added files are the one shape a replay cannot vet (see
     // addedPathsInCommits). They only carry that risk while lanes are
-    // merged in — with a base-only chain the integration tree IS the base,
+    // merged in — with a base-only chain the preview tree IS the base,
     // so there is no lane context for anything to depend on. In that case
     // ask instead of moving work unattended.
     if (!options.confirmed && this.lanes.length > 0) {
-      const baseSha = await resolveBaseSha(workingPath, integrationBaseRef());
+      const baseSha = await resolveBaseSha(workingPath, previewBaseRef());
       const strays = baseSha
-        ? await findStrayCommits(workingPath, baseSha)
+        ? await findStrayCommits(workingPath, baseSha, previewBranch())
         : [];
       const added = await addedPathsInCommits(
         workingPath,
@@ -941,18 +947,18 @@ export class IntegrationController implements vscode.Disposable {
       );
       if (added.length > 0) {
         this.host.output.appendLine(
-          `Integration strays add ${added.join(', ')} — not absorbed automatically (lanes applied)`,
+          `Preview strays add ${added.join(', ')} — not absorbed automatically (lanes applied)`,
         );
         void vscode.window
           .showWarningMessage(
-            `Git Workflow: the integration checkout has commits adding ${added.join(', ')}. Merged lanes are in this tree, so those files may depend on code the base does not have — absorbing is not automatic here.`,
+            `Git Workflow: the preview checkout has commits adding ${added.join(', ')}. Merged lanes are in this tree, so those files may depend on code the base does not have — absorbing is not automatic here.`,
             'Absorb Anyway',
             'Move to a Branch…',
           )
           .then((choice) => {
             if (choice === 'Absorb Anyway') {
               void vscode.commands.executeCommand(
-                'worktreeCompare.absorbIntegrationCommits',
+                'worktreeCompare.absorbPreviewCommits',
               );
             } else if (choice === 'Move to a Branch…') {
               void vscode.commands.executeCommand(
@@ -970,17 +976,18 @@ export class IntegrationController implements vscode.Disposable {
     }
     const result = await absorbStrayCommits(
       workingPath,
-      integrationBaseRef(),
+      previewBaseRef(),
       target,
+      previewBranch(),
     );
     if (result.ok) {
-      const baseName = integrationBaseRef().replace(/^origin\//, '');
+      const baseName = previewBaseRef().replace(/^origin\//, '');
       this.host.output.appendLine(
-        `Absorbed ${result.commits} stray commit(s) from the integration checkout into ${baseName}`,
+        `Absorbed ${result.commits} stray commit(s) from the preview checkout into ${baseName}`,
       );
       void vscode.window
         .showInformationMessage(
-          `Git Workflow: moved ${result.commits} commit(s) made on the integration checkout onto ${baseName} — they now show as unpushed base work.`,
+          `Git Workflow: moved ${result.commits} commit(s) made on the preview checkout onto ${baseName} — they now show as unpushed base work.`,
           'Move to a Branch…',
         )
         .then((choice) => {
@@ -996,11 +1003,11 @@ export class IntegrationController implements vscode.Disposable {
       // the guard lets the next tick try again, which is all this needs.
       this.lastAbsorbHead = undefined;
       this.host.output.appendLine(
-        `Absorbing integration strays deferred: ${result.message}`,
+        `Absorbing preview strays deferred: ${result.message}`,
       );
     } else if (result.code !== 'nothing') {
       this.host.output.appendLine(
-        `Absorbing integration strays failed (${result.code}): ${result.message}${
+        `Absorbing preview strays failed (${result.code}): ${result.message}${
           result.files?.length ? ` · ${result.files.join(', ')}` : ''
         }`,
       );
@@ -1015,9 +1022,9 @@ export class IntegrationController implements vscode.Disposable {
    * there is nothing to reconcile.
    */
   async reorderLane(lane: string, before?: string): Promise<void> {
-    if (!this.integrationPath) return;
+    if (!this.previewPath) return;
     const moved = await reorderLaneFile(
-      this.integrationPath,
+      this.previewPath,
       lane,
       before,
     ).catch(() => false);
@@ -1081,13 +1088,13 @@ export class IntegrationController implements vscode.Disposable {
   }
 
   /**
-   * Move UNCOMMITTED integration edits onto the base. Only ever runs from
+   * Move UNCOMMITTED preview edits onto the base. Only ever runs from
    * an explicit command — see absorbStrays for why this is never automatic.
    */
   async absorbEdits(): Promise<AbsorbResult> {
-    const workingPath = this.integrationPath;
+    const workingPath = this.previewPath;
     if (!workingPath)
-      return { ok: false, code: 'error', message: 'no integration worktree' };
+      return { ok: false, code: 'error', message: 'preview mode is off' };
     const target = await this.absorbTarget();
     // Uncommitted work has to land in a working tree, so unlike stray
     // COMMITS this one cannot fall back to the ref. Committing it on the
@@ -1101,27 +1108,31 @@ export class IntegrationController implements vscode.Disposable {
           : 'the base branch does not exist locally',
       };
     }
-    const result = await absorbDirtyEdits(workingPath, target.path);
+    const result = await absorbDirtyEdits(
+      workingPath,
+      target.path,
+      previewBranch(),
+    );
     if (result.ok) {
       this.host.output.appendLine(
-        `Absorbed uncommitted integration edits into ${target.path}`,
+        `Absorbed uncommitted preview edits into ${target.path}`,
       );
       // The checkout is clean again — the dirty guard no longer blocks
       await this.runRebuild('absorbed edits');
     } else {
       this.host.output.appendLine(
-        `Absorbing integration edits failed (${result.code}): ${result.message}`,
+        `Absorbing preview edits failed (${result.code}): ${result.message}`,
       );
     }
     return result;
   }
 
   async catchUpBase(): Promise<RebuildResult> {
-    if (!this.integrationPath || !this.baseDrift)
+    if (!this.previewPath || !this.baseDrift)
       return { ok: false, code: 'error', message: 'no base drift to catch up' };
-    await writeBasePin(this.integrationPath, this.baseDrift.sha);
+    await writeBasePin(this.previewPath, this.baseDrift.sha);
     this.host.output.appendLine(
-      `Integration base caught up to ${this.baseDrift.sha.slice(0, 10)}`,
+      `Preview base caught up to ${this.baseDrift.sha.slice(0, 10)}`,
     );
     const result = await this.runRebuild('base caught up');
     this.host.refresh();
@@ -1130,11 +1141,11 @@ export class IntegrationController implements vscode.Disposable {
 
   /** Abort a conflicted lane merge, leaving the tree at the last good state. */
   async abortMerge(): Promise<void> {
-    if (!this.integrationPath) return;
-    await abortIntegrationMerge(this.integrationPath);
+    if (!this.previewPath) return;
+    await abortPreviewMerge(this.previewPath);
     this.error = undefined;
     this.fingerprint = undefined;
-    this.host.refreshCompare(this.integrationPath);
+    this.host.refreshCompare(this.previewPath);
     this.host.fireTreeData();
   }
 

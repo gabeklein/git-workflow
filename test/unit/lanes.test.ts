@@ -8,7 +8,7 @@ import {
   pruneDeadLanes,
   readLaneFile,
   writeLaneFile,
-} from '../../src/git/integration/lanes';
+} from '../../src/git/preview/lanes';
 import { addBranch, makeRepo, type ScratchRepo } from './helpers';
 
 describe('lane files', () => {

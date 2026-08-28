@@ -1,5 +1,5 @@
 /**
- * The frozen integration base + the drift LANE: commits made directly on
+ * The frozen preview base + the drift LANE: commits made directly on
  * the local base branch never retarget the preview (the pin holds) — they
  * ride along as a checkable lane instead, included by default. Uncheck
  * persists; branchify / catch-up / push are the three ways the segment
@@ -16,9 +16,10 @@ import {
   getApi,
   git,
   poll,
+  mainTree,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -28,7 +29,7 @@ describe('base pin & drift lane', () => {
     api = await getApi();
   });
 
-  const drift = () => api.integration()?.baseDrift;
+  const drift = () => api.preview()?.baseDrift;
   const pin = () => {
     try {
       return fs
@@ -41,23 +42,26 @@ describe('base pin & drift lane', () => {
 
   it('a commit on local main joins the preview as a lane — the base stays frozen', async () => {
     const pinBefore = pin();
-    fs.writeFileSync(path.join(repo, 'mainwork.txt'), 'accidental main work\n');
-    git(repo, ['add', 'mainwork.txt']);
-    git(repo, ['commit', '-qm', 'oops: committed on main']);
+    fs.writeFileSync(
+      path.join(mainTree, 'mainwork.txt'),
+      'accidental main work\n',
+    );
+    git(mainTree, ['add', 'mainwork.txt']);
+    git(mainTree, ['commit', '-qm', 'oops: committed on main']);
     await poll('drift lane appears, included, and its work reaches the preview', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (
         (drift()?.ahead ?? 0) >= 1 &&
         drift()?.included === true &&
-        fs.existsSync(path.join(working, 'mainwork.txt'))
+        fs.existsSync(path.join(previewRoot, 'mainwork.txt'))
       );
     });
     assert.equal(pin(), pinBefore, 'the frozen base (pin) did not move');
 
     // Render-level: the drift LANE must actually be painted — a checked
     // checkbox row, not just controller state.
-    const row = (await api.integrationRows()).find(
-      (r) => r.kind === 'integrationBaseDrift',
+    const row = (await api.previewRows()).find(
+      (r) => r.kind === 'previewBaseDrift',
     );
     assert.ok(row, 'drift lane row is rendered under Preview');
     assert.equal(row!.label, 'main', 'row is labeled with the base branch');
@@ -71,7 +75,7 @@ describe('base pin & drift lane', () => {
       await run('worktreeCompare.refresh');
       return (
         drift()?.included === false &&
-        !fs.existsSync(path.join(working, 'mainwork.txt'))
+        !fs.existsSync(path.join(previewRoot, 'mainwork.txt'))
       );
     });
     await run('worktreeCompare.refresh');
@@ -83,7 +87,7 @@ describe('base pin & drift lane', () => {
 
     await api.setBaseDriftIncluded(true);
     await poll('re-including brings the work back', 30000, () =>
-      fs.existsSync(path.join(working, 'mainwork.txt')),
+      fs.existsSync(path.join(previewRoot, 'mainwork.txt')),
     );
   });
 
@@ -93,7 +97,7 @@ describe('base pin & drift lane', () => {
     await run('worktreeCompare.branchifyBaseDrift', 'feat/main-work');
     await poll('branchified commits reach the preview as a lane', 30000, () =>
       applied().includes('feat/main-work') &&
-      fs.existsSync(path.join(working, 'mainwork.txt')),
+      fs.existsSync(path.join(previewRoot, 'mainwork.txt')),
     );
     assert.equal(
       git(repo, ['rev-parse', 'feat/main-work']),
@@ -119,19 +123,22 @@ describe('base pin & drift lane', () => {
   });
 
   it('Catch Up advances the frozen base deliberately', async () => {
-    fs.writeFileSync(path.join(repo, 'mainwork2.txt'), 'deliberate main work\n');
-    git(repo, ['add', 'mainwork2.txt']);
-    git(repo, ['commit', '-qm', 'main advances on purpose']);
+    fs.writeFileSync(
+      path.join(mainTree, 'mainwork2.txt'),
+      'deliberate main work\n',
+    );
+    git(mainTree, ['add', 'mainwork2.txt']);
+    git(mainTree, ['commit', '-qm', 'main advances on purpose']);
     await poll('drift reappears for the second commit', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (drift()?.ahead ?? 0) >= 1;
     });
     const mainSha = git(repo, ['rev-parse', 'main']);
-    await run('worktreeCompare.catchUpIntegrationBase');
+    await run('worktreeCompare.catchUpPreviewBase');
     await poll('catch-up rebases the preview onto the new base', 30000, () => {
       try {
-        git(working, ['merge-base', '--is-ancestor', mainSha, 'HEAD']);
-        return fs.existsSync(path.join(working, 'mainwork2.txt'));
+        git(previewRoot, ['merge-base', '--is-ancestor', mainSha, 'HEAD']);
+        return fs.existsSync(path.join(previewRoot, 'mainwork2.txt'));
       } catch {
         return false;
       }
@@ -143,9 +150,9 @@ describe('base pin & drift lane', () => {
   });
 
   it('pushing main lands the drift lane — the frozen base advances', async () => {
-    fs.writeFileSync(path.join(repo, 'mainwork3.txt'), 'pushed main work\n');
-    git(repo, ['add', 'mainwork3.txt']);
-    git(repo, ['commit', '-qm', 'main work that gets published']);
+    fs.writeFileSync(path.join(mainTree, 'mainwork3.txt'), 'pushed main work\n');
+    git(mainTree, ['add', 'mainwork3.txt']);
+    git(mainTree, ['commit', '-qm', 'main work that gets published']);
     await poll('drift appears for the third commit', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (drift()?.ahead ?? 0) >= 1;
@@ -153,18 +160,18 @@ describe('base pin & drift lane', () => {
     git(repo, ['push', '-q', 'origin', 'main']);
     await poll('push clears drift and the work becomes base', 30000, async () => {
       await run('worktreeCompare.refresh');
-      return !drift() && fs.existsSync(path.join(working, 'mainwork3.txt'));
+      return !drift() && fs.existsSync(path.join(previewRoot, 'mainwork3.txt'));
     });
   });
 
   it('pin initialization surfaces PRE-EXISTING drift instead of swallowing it', async () => {
-    // Commits made on main BEFORE integration first pins (fresh install,
+    // Commits made on main BEFORE preview first pins (fresh install,
     // re-enable) must show as drift too: init pins at the published tip,
     // never the drifted local descendant.
     fs.rmSync(path.join(repo, '.git', 'focus-base'));
-    fs.writeFileSync(path.join(repo, 'mainwork4.txt'), 'pre-pin main work\n');
-    git(repo, ['add', 'mainwork4.txt']);
-    git(repo, ['commit', '-qm', 'main work before the pin existed']);
+    fs.writeFileSync(path.join(mainTree, 'mainwork4.txt'), 'pre-pin main work\n');
+    git(mainTree, ['add', 'mainwork4.txt']);
+    git(mainTree, ['commit', '-qm', 'main work before the pin existed']);
     await poll('re-initialized pin sits at origin; drift shows', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (

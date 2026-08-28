@@ -1,5 +1,5 @@
 /**
- * Integration resilience to messy lanes: petty conflicts resolved
+ * Preview resilience to messy lanes: petty conflicts resolved
  * best-effort instead of failing the rebuild, and dead lanes (deleted
  * branches) pruned from the state files instead of lingering as ghosts.
  */
@@ -14,7 +14,7 @@ import {
   readLanes,
   repo,
   run,
-  working,
+  previewRoot,
   type TestApi,
 } from './helpers';
 
@@ -42,15 +42,15 @@ describe('petty conflicts (best-effort resolver)', () => {
 
   it('resolves same-file appends losslessly (union)', async () => {
     for (const branch of ['feat/p1', 'feat/p2']) {
-      await poll(`${branch} applies to integration`, 30000, async () => {
-        await run('worktreeCompare.applyToIntegration', {
+      await poll(`${branch} applies to preview`, 30000, async () => {
+        await run('worktreeCompare.applyToPreview', {
           worktreePath: lanes[branch],
         });
         return applied().includes(branch);
       });
     }
-    await poll('both appends survive in the integration tree (union)', 20000, () => {
-      const news = path.join(working, 'news.txt');
+    await poll('both appends survive in the preview tree (union)', 20000, () => {
+      const news = path.join(previewRoot, 'news.txt');
       if (!fs.existsSync(news)) return false;
       const content = fs.readFileSync(news, 'utf8');
       return content.includes('- p1 note') && content.includes('- p2 note');
@@ -58,7 +58,7 @@ describe('petty conflicts (best-effort resolver)', () => {
     // Poll, don't assert: the tree content lands (reset --hard inside the
     // rebuild) a beat before the controller assigns autoResolved state.
     await poll('union resolution reported as lossless (no tag-worthy loss)', 15000, () => {
-      const r = (api.integration()?.autoResolved ?? []).find(
+      const r = (api.preview()?.autoResolved ?? []).find(
         (l) => l.lane === 'feat/p2',
       );
       return Boolean(r && r.lossless.includes('news.txt') && r.lossy.length === 0);
@@ -78,9 +78,9 @@ describe('petty conflicts (best-effort resolver)', () => {
       git(wt, ['add', '-A']);
       git(wt, ['commit', '-qm', `${branch} headline`]);
     }
-    await run('worktreeCompare.rebuildIntegration');
+    await run('worktreeCompare.rebuildPreview');
     await poll('divergent same-line edit builds best-effort (lane wins)', 20000, () => {
-      const news = path.join(working, 'news.txt');
+      const news = path.join(previewRoot, 'news.txt');
       return (
         fs.existsSync(news) &&
         fs.readFileSync(news, 'utf8').startsWith('p2 headline')
@@ -88,7 +88,7 @@ describe('petty conflicts (best-effort resolver)', () => {
     });
     // Same content-before-state window as the lossless case above
     await poll('dropped-hunk resolution is tagged lossy on the lane', 15000, () => {
-      const r = (api.integration()?.autoResolved ?? []).find(
+      const r = (api.preview()?.autoResolved ?? []).find(
         (l) => l.lane === 'feat/p2',
       );
       return Boolean(r && r.lossy.includes('news.txt'));
@@ -97,7 +97,7 @@ describe('petty conflicts (best-effort resolver)', () => {
       applied().includes('feat/p1') && applied().includes('feat/p2'),
       'both lanes stay applied — the rebuild did not fail',
     );
-    assert.ok(!api.integration()?.error, 'no integration error state');
+    assert.ok(!api.preview()?.error, 'no preview error state');
   });
 });
 
@@ -107,7 +107,7 @@ describe('dead lane prune', () => {
     api = await getApi();
   });
 
-  const candidates = () => api.integration()?.candidates ?? [];
+  const candidates = () => api.preview()?.candidates ?? [];
 
   it('drops a deleted branch from every state file', async () => {
     // A lane that will "die": applied, wip-flagged, then branch-deleted
@@ -119,8 +119,8 @@ describe('dead lane prune', () => {
     fs.writeFileSync(path.join(laneDead, 'dead.txt'), 'short-lived\n');
     git(laneDead, ['add', '-A']);
     git(laneDead, ['commit', '-qm', 'feat/dead work']);
-    await poll('feat/dead applies to integration', 30000, async () => {
-      await run('worktreeCompare.applyToIntegration', { worktreePath: laneDead });
+    await poll('feat/dead applies to preview', 30000, async () => {
+      await run('worktreeCompare.applyToPreview', { worktreePath: laneDead });
       return applied().includes('feat/dead');
     });
 
@@ -147,7 +147,7 @@ describe('dead lane prune', () => {
   });
 
   it('keeps live lanes and drops the dead content from the tree', async () => {
-    await poll('view state: dead lane leaves the Integration panel', 15000, () =>
+    await poll('view state: dead lane leaves the Preview panel', 15000, () =>
       !candidates().includes('feat/dead') &&
       !candidates().includes('feat/never-existed'),
     );
@@ -158,10 +158,10 @@ describe('dead lane prune', () => {
     // Nudge: the fingerprint-triggered rebuild after a prune is timing-
     // dependent on slow CI — a manual rebuild reads the pruned lane files
     // deterministically (the prune itself was asserted above).
-    await poll('integration tree drops the dead lane content', 30000, async () => {
-      await run('worktreeCompare.rebuildIntegration');
-      return !fs.existsSync(path.join(working, 'dead.txt'));
+    await poll('preview tree drops the dead lane content', 30000, async () => {
+      await run('worktreeCompare.rebuildPreview');
+      return !fs.existsSync(path.join(previewRoot, 'dead.txt'));
     });
-    assert.ok(!api.integration()?.error, 'no integration error state after prune');
+    assert.ok(!api.preview()?.error, 'no preview error state after prune');
   });
 });

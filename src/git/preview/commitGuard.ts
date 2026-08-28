@@ -5,7 +5,7 @@ import { excludeManagedFiles, unexcludeManagedFiles } from '../exclude';
 import { commonDir } from './lanes';
 
 /**
- * A `git commit` made while the integration branch is checked out is a
+ * A `git commit` made while the preview branch is checked out is a
  * silent trap: the branch is DERIVED — every rebuild recreates it with
  * `reset --hard` — so the commit has no home. The rebuild's unique guard
  * notices and absorb can rescue the work, but absorb can only ever aim at
@@ -26,7 +26,7 @@ import { commonDir } from './lanes';
  * COMMON dir, or wherever core.hooksPath points), so the script self-checks
  * HEAD and exits 0 instantly anywhere else. The guarded branch name is read
  * from a state file rather than baked into the script, so renaming the
- * integration branch cannot leave a hook guarding a name that no longer
+ * preview branch cannot leave a hook guarding a name that no longer
  * exists.
  */
 
@@ -51,10 +51,10 @@ const SKILL_URL =
 const GUARD_FILE = 'focus-guard';
 
 /** Standalone refusal, invoked by whatever pre-commit hook is in place. */
-const GUARD_SCRIPT = 'git-workflow-integration-guard';
+const GUARD_SCRIPT = 'git-workflow-preview-guard';
 
 /** Marks a hook — or an injected block — as ours. Only ours may be rewritten. */
-const SENTINEL = '# git-workflow: integration commit guard';
+const SENTINEL = '# git-workflow: preview commit guard';
 
 /**
  * The two lines chained into someone else's hook.
@@ -86,11 +86,11 @@ const SHELL_SHEBANG = /^#!\s*\/(usr\/bin\/env\s+)?\S*\b(sh|bash|dash|zsh|ksh)\b/
 const REFUSAL = `#!/bin/sh
 ${SENTINEL}
 #
-# Refuses commits made while the derived integration branch is checked out.
+# Refuses commits made while the derived preview branch is checked out.
 # That branch is rebuilt with \`reset --hard\`, so a commit on it has no home.
 #
 # This file is managed by the Git Workflow extension. Delete it, or turn off
-# worktreeCompare.integrationCommitGuard, to stop guarding.
+# worktreeCompare.previewCommitGuard, to stop guarding.
 
 dir=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
 [ -f "$dir/${GUARD_FILE}" ] || exit 0
@@ -108,11 +108,15 @@ echo "  That branch is a PREVIEW built by Git Workflow — the base branch with"
 echo "  the applied lanes merged on top. Every rebuild recreates it, so a"
 echo "  commit made here does not survive and does not belong to any lane."
 echo
+echo "  This checkout IS the preview — the workspace root. Do not switch it"
+echo "  to another branch to get around this: that turns the preview off."
+echo
 echo "  Your changes are untouched and still staged. Pick an exit:"
 echo
-echo "    * Check out the branch this work belongs to and commit there."
-echo "    * Run Git Workflow: Absorb Integration Edits to move the working"
-echo "      tree onto the base branch, then commit there."
+echo "    * Run Git Workflow: Absorb Preview Edits to move the working"
+echo "      tree onto a real branch's checkout, then commit there."
+echo "    * Commit in the lane this work belongs to — its own worktree:"
+echo "        git worktree add .worktrees/NAME -b BRANCH BASE"
 echo "    * git commit --no-verify   (you meant it; absorb can rescue it later)"
 echo
 echo "  Agent: this repo has a worktree workflow you likely do not know yet."

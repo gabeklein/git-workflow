@@ -16,18 +16,22 @@ describe('focus panel', () => {
   const labels = async (group?: 'working' | 'local' | 'remote' | 'landed') =>
     (await api.focusRows(group)).map((r) => r.label);
 
-  it('offers Preview, Working and Local, in order, and nothing loose', async () => {
-    await poll('lanes panel renders its groups', 30000, async () => {
+  it('leads with the preview row, then Working and Local', async () => {
+    await poll('lanes panel renders its rows', 30000, async () => {
       await run('worktreeCompare.refresh');
       return (await api.focusRows()).length >= 3;
     });
     const rows = await api.focusRows();
-    const groups = rows.filter((r) => r.kind === 'group').map((r) => r.group);
-    // Preview leads: it is what the lanes below are combined INTO.
-    assert.deepEqual(groups.slice(0, 3), ['preview', 'working', 'local']);
+    // The preview is a ROW, not a group: there is exactly one, so a
+    // heading over it could never hold a second entry.
+    assert.equal(rows[0]?.kind, 'preview', 'the preview leads the panel');
+    assert.deepEqual(
+      rows.filter((r) => r.kind === 'group').map((r) => r.group).slice(0, 2),
+      ['working', 'local'],
+    );
     assert.ok(
-      rows.every((r) => r.kind === 'group'),
-      'the root is groups only — every row lives in a section',
+      rows.slice(1).every((r) => r.kind === 'group'),
+      'below the preview the panel is groups only — every row is in a section',
     );
   });
 
@@ -147,15 +151,19 @@ describe('focus panel', () => {
     }
   });
 
-  it('keeps the integration branch out of every group', async () => {
-    const everything = [
-      ...(await labels('working')),
-      ...(await labels('local')),
-      ...(await labels('remote')),
-    ];
-    assert.ok(
-      !everything.some((l) => l.startsWith('integration/')),
-      'the integration branch is the panel subject, not a row',
+  it('keeps the preview branch out of every group', async () => {
+    const groups = {
+      working: await labels('working'),
+      local: await labels('local'),
+      remote: await labels('remote'),
+    };
+    const stragglers = Object.entries(groups).flatMap(([group, labels]) =>
+      labels.filter((l) => l.startsWith('preview/')).map((l) => `${group}/${l}`),
+    );
+    assert.deepEqual(
+      stragglers,
+      [],
+      'the preview is the leading row, never a row in a group',
     );
   });
 });

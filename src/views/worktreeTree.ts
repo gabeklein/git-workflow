@@ -13,11 +13,11 @@ import {
   type FileChange,
 } from '../git/compare';
 import {
-  integrationBaseRef,
+  previewBaseRef,
   isLaneBranch,
   type AbsorbResult,
   type RebuildResult,
-} from '../git/integration';
+} from '../git/preview';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
 import {
   prHasMergeConflicts,
@@ -29,16 +29,16 @@ import { GitActivityHub } from './gitActivityHub';
 import { HotFollowPoll } from './hotFollowPoll';
 import { PullRequestCache } from './pullRequestCache';
 import {
-  IntegrationController,
-  type IntegrationState,
-} from './integrationController';
+  PreviewController,
+  type PreviewState,
+} from './previewController';
 import { GroupItem, MessageItem, SectionItem, type TreeNode } from './nodes';
 import { FileItem, FolderItem } from './nodes/files';
 import {
   CommitItem,
   ConflictWarningItem,
   WorktreeListItem,
-  type IntegrationRowInfo,
+  type PreviewRowInfo,
 } from './nodes/worktrees';
 import {
   childrenAtPrefix,
@@ -58,7 +58,7 @@ interface WorktreeSnapshot {
 /**
  * Composition root for the Worktree panel:
  *   discovery + selection + compare snapshots (hot-follow) + PR badges,
- * with the integration overlay (IntegrationController), base badges
+ * with the preview overlay (PreviewController), base badges
  * (BaseStatusTracker), and .git change detection (GitActivityHub) as
  * dedicated modules. Also renders the Changes view via getChangesChildren.
  */
@@ -94,7 +94,7 @@ export class WorktreeTreeProvider
 
   private readonly poll: HotFollowPoll;
   private readonly prs: PullRequestCache;
-  private readonly integration: IntegrationController;
+  private readonly preview: PreviewController;
   private readonly baseStatus: BaseStatusTracker;
   private readonly activity: GitActivityHub;
 
@@ -108,7 +108,7 @@ export class WorktreeTreeProvider
     this.prs = new PullRequestCache(output, () =>
       this._onDidChangeTreeData.fire(),
     );
-    this.integration = new IntegrationController({
+    this.preview = new PreviewController({
       output,
       getWorktrees: () => this.worktrees,
       getRepoCwd: () => this.getRepoCwd(),
@@ -136,7 +136,7 @@ export class WorktreeTreeProvider
         this.refresh();
       },
       onTick: async () => {
-        await this.integration.tick();
+        await this.preview.tick();
         void this.baseStatus.refresh();
       },
       onActivity: () => this._onGitActivity.fire(),
@@ -147,7 +147,7 @@ export class WorktreeTreeProvider
     this.disposables.push(
       this.selectionDecorations,
       this.poll,
-      this.integration,
+      this.preview,
       this.activity,
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.activity.restart();
@@ -166,13 +166,13 @@ export class WorktreeTreeProvider
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
             e.affectsConfiguration('worktreeCompare.includeRootCheckout') ||
-            e.affectsConfiguration('worktreeCompare.integrationBranch')
+            e.affectsConfiguration('worktreeCompare.previewBranch')
           ) {
             this.refresh();
           } else if (
-            e.affectsConfiguration('worktreeCompare.integrationBaseRef')
+            e.affectsConfiguration('worktreeCompare.previewBaseRef')
           ) {
-            void this.integration.handleBaseChange();
+            void this.preview.handleBaseChange();
           } else if (
             e.affectsConfiguration('worktreeCompare.squashLayout') ||
             e.affectsConfiguration('worktreeCompare.defaultBaseRef')
@@ -190,20 +190,20 @@ export class WorktreeTreeProvider
           );
         }
         this.scheduleSoftRefreshIfUnderSelected(doc.uri);
-        this.integration.scheduleWipRebuildIfUnderWipLane(doc.uri);
+        this.preview.scheduleWipRebuildIfUnderWipLane(doc.uri);
       }),
       vscode.workspace.onDidCreateFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
-          this.integration.scheduleWipRebuildIfUnderWipLane(u);
+          this.preview.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidDeleteFiles((e) => {
         for (const u of e.files) {
           this.scheduleDiscoverIfWatchRootChild(u);
           this.scheduleSoftRefreshIfUnderSelected(u);
-          this.integration.scheduleWipRebuildIfUnderWipLane(u);
+          this.preview.scheduleWipRebuildIfUnderWipLane(u);
         }
       }),
       vscode.workspace.onDidRenameFiles((e) => {
@@ -212,8 +212,8 @@ export class WorktreeTreeProvider
           this.scheduleDiscoverIfWatchRootChild(f.oldUri);
           this.scheduleSoftRefreshIfUnderSelected(f.newUri);
           this.scheduleSoftRefreshIfUnderSelected(f.oldUri);
-          this.integration.scheduleWipRebuildIfUnderWipLane(f.newUri);
-          this.integration.scheduleWipRebuildIfUnderWipLane(f.oldUri);
+          this.preview.scheduleWipRebuildIfUnderWipLane(f.newUri);
+          this.preview.scheduleWipRebuildIfUnderWipLane(f.oldUri);
         }
       }),
     );
@@ -269,7 +269,7 @@ export class WorktreeTreeProvider
     this._onDidChangeWorktrees.fire();
   }
 
-  /** Selection landed on the integration checkout — move to a real lane. */
+  /** Selection landed on the preview checkout — move to a real lane. */
   private moveSelectionOff(worktreePath: string): void {
     const fallback = this.worktrees.find((w) => w.path !== worktreePath);
     this.selectedPath = fallback?.path;
@@ -279,7 +279,7 @@ export class WorktreeTreeProvider
       this.selectedPath,
     );
     this.output.appendLine(
-      `Selection moved off integration checkout → ${this.selectedPath ?? '(none)'}`,
+      `Selection moved off preview checkout → ${this.selectedPath ?? '(none)'}`,
     );
   }
 
@@ -293,9 +293,9 @@ export class WorktreeTreeProvider
       !this.selectedPath ||
       !this.worktrees.some((w) => w.path === this.selectedPath)
     ) {
-      // Prefer a real worktree; the integration checkout only via clicks
+      // Prefer a real worktree; the preview checkout only via clicks
       const first =
-        this.worktrees.find((w) => w.path !== this.integration.getPath()) ??
+        this.worktrees.find((w) => w.path !== this.preview.getPath()) ??
         this.worktrees[0]!;
       this.selectedPath = first.path;
       void this.context.workspaceState.update(
@@ -334,7 +334,7 @@ export class WorktreeTreeProvider
       this.worktrees = await discoverWorktrees(this.output);
       this.ensureValidSelection();
       this.prs.prune(this.worktrees);
-      await this.integration.refreshState();
+      await this.preview.refreshState();
       void this.baseStatus.refresh();
       this.output.appendLine(
         `Load done: ${this.worktrees.length} worktree(s), selected=${this.selectedPath ?? '(none)'} (${Date.now() - t0}ms)`,
@@ -347,7 +347,7 @@ export class WorktreeTreeProvider
     } finally {
       this.loading = false;
       // Paths changed, so the applied-lane badges have to be recomputed even
-      // when integration state itself did not move.
+      // when preview state itself did not move.
       this.syncAppliedDecorations();
       this._onDidChangeTreeData.fire();
       this._onDidChangeWorktrees.fire();
@@ -515,71 +515,71 @@ export class WorktreeTreeProvider
   }
 
   /**
-   * Fallback for compare-base inference. While integration is active,
-   * lanes land on the integration base, so it is the sane default —
+   * Fallback for compare-base inference. While preview is active,
+   * lanes land on the preview base, so it is the sane default —
    * per-worktree inference (reflog/upstream) and overrides still win.
    */
   private compareFallbackBaseRef(): string {
-    return this.integration.getPath()
-      ? integrationBaseRef()
+    return this.preview.getPath()
+      ? previewBaseRef()
       : this.defaultBaseRef();
   }
 
-  // ---- integration (delegates) ---------------------------------------------
+  // ---- preview (delegates) ---------------------------------------------
 
-  getIntegration(): IntegrationState | undefined {
-    return this.integration.getState();
+  getPreview(): PreviewState | undefined {
+    return this.preview.getState();
   }
 
-  runIntegrationRebuild(reason: string): Promise<RebuildResult> {
-    return this.integration.runRebuild(reason);
+  runPreviewRebuild(reason: string): Promise<RebuildResult> {
+    return this.preview.runRebuild(reason);
   }
 
-  catchUpIntegrationBase(): Promise<RebuildResult> {
-    return this.integration.catchUpBase();
+  catchUpPreviewBase(): Promise<RebuildResult> {
+    return this.preview.catchUpBase();
   }
 
   setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
-    return this.integration.setBaseDriftIncluded(included);
+    return this.preview.setBaseDriftIncluded(included);
   }
 
-  addIntegrationCandidate(branch: string): Promise<void> {
-    return this.integration.addCandidate(branch);
+  addPreviewCandidate(branch: string): Promise<void> {
+    return this.preview.addCandidate(branch);
   }
 
-  removeIntegrationCandidate(branch: string): Promise<RebuildResult> {
-    return this.integration.removeCandidate(branch);
+  removePreviewCandidate(branch: string): Promise<RebuildResult> {
+    return this.preview.removeCandidate(branch);
   }
 
-  applyToIntegration(branch: string): Promise<RebuildResult> {
-    return this.integration.apply(branch);
+  applyToPreview(branch: string): Promise<RebuildResult> {
+    return this.preview.apply(branch);
   }
 
-  hideFromIntegration(branch: string): Promise<RebuildResult> {
-    return this.integration.hide(branch);
+  hideFromPreview(branch: string): Promise<RebuildResult> {
+    return this.preview.hide(branch);
   }
 
   setLaneWip(branch: string, enabled: boolean): Promise<RebuildResult> {
-    return this.integration.setLaneWip(branch, enabled);
+    return this.preview.setLaneWip(branch, enabled);
   }
 
-  abortIntegrationMerge(): Promise<void> {
-    return this.integration.abortMerge();
+  abortPreviewMerge(): Promise<void> {
+    return this.preview.abortMerge();
   }
 
   /** Move a lane in the merge order (drag-and-drop), then rebuild. */
   reorderLane(lane: string, before?: string): Promise<void> {
-    return this.integration.reorderLane(lane, before);
+    return this.preview.reorderLane(lane, before);
   }
 
-  /** Absorb approved stray COMMITS from the integration checkout. */
-  absorbIntegrationCommits(): Promise<AbsorbResult | undefined> {
-    return this.integration.absorbStraysConfirmed();
+  /** Absorb approved stray COMMITS from the preview checkout. */
+  absorbPreviewCommits(): Promise<AbsorbResult | undefined> {
+    return this.preview.absorbStraysConfirmed();
   }
 
-  /** Move uncommitted integration-checkout edits onto the base. */
-  absorbIntegrationEdits(): Promise<AbsorbResult> {
-    return this.integration.absorbEdits();
+  /** Move uncommitted preview-checkout edits onto the base. */
+  absorbPreviewEdits(): Promise<AbsorbResult> {
+    return this.preview.absorbEdits();
   }
 
   // ---- rendering ------------------------------------------------------------
@@ -728,15 +728,13 @@ export class WorktreeTreeProvider
     return nodes;
   }
 
-  /** Worktrees shown in the list — the integration checkout lives under
-   *  the Integration row instead. */
   /**
    * Tell the decoration provider what is in the preview — checkout paths
    * for rows that have one, branch names for the rest, since a row keys its
    * decoration on whichever it carries.
    */
   private syncAppliedDecorations(): void {
-    const applied = new Set(this.integration.getState()?.lanes ?? []);
+    const applied = new Set(this.preview.getState()?.lanes ?? []);
     const withCheckout = this.worktrees.filter(
       (w) => !w.detached && applied.has(w.branch),
     );
@@ -750,7 +748,7 @@ export class WorktreeTreeProvider
 
   private listedWorktrees(): DiscoveredWorktree[] {
     return this.worktrees.filter(
-      (wt) => wt.path !== this.integration.getPath(),
+      (wt) => wt.path !== this.preview.getPath(),
     );
   }
 
@@ -765,13 +763,13 @@ export class WorktreeTreeProvider
    */
   buildCheckoutRow(wt: DiscoveredWorktree, landed = false): TreeNode {
     const selected = this.getSelectedPath();
-    const baseRef = integrationBaseRef();
-    const state = this.integration.getState();
+    const baseRef = previewBaseRef();
+    const state = this.preview.getState();
     return ((): TreeNode => {
       const pr = this.prs.get(wt.path, wt.branch);
-      let integration: IntegrationRowInfo | undefined;
+      let preview: PreviewRowInfo | undefined;
       if (state && !wt.detached && isLaneBranch(wt.branch, baseRef)) {
-        integration = {
+        preview = {
           role: 'lane',
           applied: state.lanes.includes(wt.branch),
           candidate: state.candidates.includes(wt.branch),
@@ -782,7 +780,7 @@ export class WorktreeTreeProvider
         wt,
         wt.path === selected,
         pr ?? undefined,
-        integration,
+        preview,
         baseStatus &&
         (baseStatus.behind > 0 ||
           baseStatus.conflicts ||
@@ -795,7 +793,7 @@ export class WorktreeTreeProvider
     })();
   }
 
-  /** Commits ahead of compare point (merge-base of integration tip by default). */
+  /** Commits ahead of compare point (merge-base of preview tip by default). */
   private async getAheadChildren(): Promise<TreeNode[]> {
     const selected = this.getSelected();
     if (!selected) return [new MessageItem('Select a worktree above')];

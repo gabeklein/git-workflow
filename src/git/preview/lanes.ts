@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from '../exec';
-import { integrationBranch } from './config';
+import { previewBranch } from './config';
 
 export const APPLIED_FILE = 'focus-applied';
 export const CANDIDATES_FILE = 'focus-candidates';
@@ -146,7 +146,7 @@ export async function dropAppliedLane(
   );
 }
 
-/** Candidates: lanes shown (checkable) under the Integration row. */
+/** Candidates: lanes shown (checkable) under the Preview row. */
 export async function listCandidateLanes(cwd: string): Promise<string[]> {
   return readLaneFile(cwd, CANDIDATES_FILE);
 }
@@ -178,11 +178,11 @@ export async function dropCandidateLane(
 }
 
 /**
- * Base pin: the sha integration rebuilds are FROZEN to. Written on enable
+ * Base pin: the sha preview rebuilds are FROZEN to. Written on enable
  * and kept across reloads; the effective base follows origin/<base> when
  * that is a descendant of the pin (published movement is always legit)
  * and holds the pin otherwise — so commits made directly on the local
- * base branch never silently retarget the preview. Catch Up Integration
+ * base branch never silently retarget the preview. Catch Up Preview
  * Base advances the pin deliberately.
  */
 const BASE_PIN_FILE = 'focus-base';
@@ -202,8 +202,8 @@ export async function clearBasePin(cwd: string): Promise<void> {
 }
 
 /**
- * Exclusions: branches the user removed from Integration that would
- * otherwise auto-enroll (their base matches the integration base). This
+ * Exclusions: branches the user removed from Preview that would
+ * otherwise auto-enroll (their base matches the preview base). This
  * is what gives every auto row a real exit — Remove persists here instead
  * of the row reappearing on the next refresh.
  */
@@ -235,7 +235,7 @@ export async function dropExcludedLane(
 }
 
 /**
- * Prune dead lanes: a branch deleted out from under Integration (its
+ * Prune dead lanes: a branch deleted out from under Preview (its
  * worktree died — landed and cleaned up, agent teardown, `git branch -D`)
  * must not linger as a ghost row. Drops every lane whose local branch no
  * longer exists from all four state files. The applied file is shared
@@ -282,16 +282,16 @@ export async function pruneDeadLanes(cwd: string): Promise<string[]> {
 }
 
 /**
- * Block accidental `git push` while on the integration branch: point its
+ * Block accidental `git push` while on the preview branch: point its
  * pushRemote at a remote that does not exist. Plain `git push` (simple/
  * current/upstream push.default) fails fast; an explicit
  * `git push origin <branch>` still works as the escape hatch. Repo-local,
  * so it covers every terminal/agent in the clone, not just the extension.
  */
 
-export async function ensureIntegrationPushBlocked(
+export async function ensurePreviewPushBlocked(
   cwd: string,
-  branch = integrationBranch(),
+  branch = previewBranch(),
 ): Promise<void> {
   const key = `branch.${branch}.pushRemote`;
   let current = '';

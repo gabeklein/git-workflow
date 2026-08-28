@@ -1,7 +1,7 @@
 import { git, gitOk } from './exec';
 
-/** Well-known integration-branch names used when inferring a compare base. */
-const INTEGRATION_NAMES = [
+/** Well-known preview-branch names used when inferring a compare base. */
+const PREVIEW_NAMES = [
   'main',
   'master',
   'staging',
@@ -55,7 +55,7 @@ async function baseFromReflog(
     if (source === 'HEAD') {
       const hashMatch = line.match(/^([0-9a-f]{7,40})\s/i);
       if (hashMatch?.[1])
-        return nameIntegrationRefAt(worktreePath, hashMatch[1]);
+        return namePreviewRefAt(worktreePath, hashMatch[1]);
       return undefined;
     }
     if (source === branch || source.endsWith(`/${branch}`)) return undefined;
@@ -116,12 +116,12 @@ async function baseFromReflog(
   }
 }
 
-/** If commit is exactly an integration branch tip, return that ref name. */
-async function nameIntegrationRefAt(
+/** If commit is exactly an preview branch tip, return that ref name. */
+async function namePreviewRefAt(
   worktreePath: string,
   commit: string,
 ): Promise<string | undefined> {
-  for (const ref of integrationCandidates()) {
+  for (const ref of previewCandidates()) {
     if (!(await refResolves(worktreePath, ref))) continue;
     try {
       const tip = (await git(worktreePath, ['rev-parse', ref])).trim();
@@ -134,12 +134,12 @@ async function nameIntegrationRefAt(
   return undefined;
 }
 
-function integrationCandidates(extra?: string): string[] {
-  const names = [...INTEGRATION_NAMES];
+function previewCandidates(extra?: string): string[] {
+  const names = [...PREVIEW_NAMES];
   if (extra && !names.includes(extra)) names.unshift(extra);
   const refs: string[] = [];
   for (const n of names) {
-    // Prefer remote tips first — local integration branches are often stale
+    // Prefer remote tips first — local preview branches are often stale
     refs.push(`origin/${n}`, n);
   }
   return refs;

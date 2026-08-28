@@ -112,7 +112,7 @@ function remotePrLimit(): number {
   return Math.max(1, Math.min(100, n || 30));
 }
 
-/** List open PRs for the repo (via gh). Empty if integration off / gh missing. */
+/** List open PRs for the repo (via gh). Empty if preview off / gh missing. */
 export async function listOpenRemotePullRequests(
   repoCwd: string,
 ): Promise<RemotePullRequest[]> {

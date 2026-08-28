@@ -5,7 +5,7 @@ import {
   findLandedLanes,
   findStaleLandedLanes,
   laneNeverDiverged,
-} from '../../src/git/integration/status';
+} from '../../src/git/preview/status';
 import { addBranch, git, makeRepo, type ScratchRepo } from './helpers';
 
 /**

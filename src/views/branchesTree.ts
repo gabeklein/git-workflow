@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { listBranches, type BranchInfo } from '../git/branches';
 import type { FileChange } from '../git/compare';
-import { integrationBaseRef, integrationBranch } from '../git/integration';
+import { previewBaseRef, previewBranch } from '../git/preview';
 import { findLandedBranches } from '../git/pruneLanded';
 import {
   isGithubPrIntegrationEnabled,
@@ -212,11 +212,11 @@ export class BranchesTreeProvider
         : [new MessageItem('No branches found')];
     }
 
-    const integration = integrationBranch();
+    const preview = previewBranch();
     const rows: TreeNode[] = [];
     const seen = new Set<string>();
     for (const b of this.branches) {
-      if (b.name === integration) continue;
+      if (b.name === preview) continue;
       if (rows.length >= MAX_ROWS) break;
       seen.add(b.name);
       rows.push(
@@ -233,7 +233,7 @@ export class BranchesTreeProvider
     }
     // PR heads with no local/remote ref (e.g. fork PRs)
     for (const [head, pr] of this.prsByHead) {
-      if (seen.has(head) || head === integration) continue;
+      if (seen.has(head) || head === preview) continue;
       rows.push(
         new BranchItem(cwd, head, false, false, '', this.worktreeByBranch.get(head), pr),
       );
@@ -285,8 +285,8 @@ export class BranchesTreeProvider
    */
   private async refreshLanded(cwd: string): Promise<void> {
     try {
-      const scan = await findLandedBranches(cwd, integrationBaseRef(), [
-        integrationBranch(),
+      const scan = await findLandedBranches(cwd, previewBaseRef(), [
+        previewBranch(),
       ]);
       const next = new Set(scan.landed.map((b) => b.name));
       const same =
