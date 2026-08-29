@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { DEFAULT_EXPENDABLE_IGNORED } from '../expendableIgnored';
 
 /**
  * Subject prefix of the ephemeral wip snapshot commits rebuilds overlay.
@@ -101,6 +102,22 @@ export function isPruneRemoteRefsEnabled(): boolean {
   return vscode.workspace
     .getConfiguration('worktreeCompare')
     .get<boolean>('pruneRemoteRefs', true);
+}
+
+/**
+ * Ignored paths a checkout may be removed over.
+ *
+ * The setting REPLACES the built-in list rather than extending it: a repo
+ * that needs to protect something the defaults call derived (a `dist` that
+ * is hand-maintained, say) has to be able to take it out, and there is no
+ * way to remove an entry from a list you can only append to. Empty array =
+ * every ignored file blocks, the behavior before this existed.
+ */
+export function expendableIgnoredPatterns(): readonly string[] {
+  const configured = vscode.workspace
+    .getConfiguration('worktreeCompare')
+    .get<string[]>('expendableIgnored');
+  return Array.isArray(configured) ? configured : DEFAULT_EXPENDABLE_IGNORED;
 }
 
 export function isAutoRemoveLandedEnabled(): boolean {

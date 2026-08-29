@@ -164,6 +164,24 @@
           "default": true,
           "description": "Remove the checkout of a landed branch as soon as it holds nothing of its own \u2014 clean, unlocked, no ignored files, no paused rebase/merge, nothing open in an editor. The branch REF is never deleted (that is Prune Landed Branches), so this only gives back a folder `git worktree add` recreates. Off keeps every folder and still badges the row `landed \u00b7 on disk`: seeing that the disk is reclaimable is not what this switches off."
         },
+        "worktreeCompare.expendableIgnored": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "node_modules", ".yarn/cache", ".pnpm-store", "bower_components",
+            "vendor/bundle", ".bundle", ".venv", "venv", "__pycache__", ".tox", "Pods",
+            "dist", "build", "out", "target", ".next", ".nuxt", ".svelte-kit",
+            ".astro", ".output", ".parcel-cache", ".docusaurus",
+            ".cache", ".turbo", ".vite", ".eslintcache", ".stylelintcache",
+            ".mypy_cache", ".ruff_cache", ".pytest_cache", ".gradle", ".terraform",
+            ".sass-cache",
+            "coverage", ".nyc_output", "test-results", "playwright-report",
+            "blob-report", ".vscode-test", "*.tsbuildinfo", "*.log",
+            "npm-debug.log*", "yarn-error.log",
+            ".DS_Store", "Thumbs.db"
+          ],
+          "markdownDescription": "Gitignored paths that are GENERATED, and so do not keep a landed checkout on disk. Ignored files are the one thing removing a worktree can destroy \u2014 the dirty probe cannot see them and `git worktree remove` takes them without complaint \u2014 so an ignored file normally blocks removal. Three things clear one: a symlink pointing out of the checkout (removing a link cannot touch its target), a file byte-identical to the root checkout's at the same path (the bytes survive one directory up), and a match against this list. The first two are evidence and need no configuration; this list is for what a build, install, or test run recreates \u2014 the case git collapses to a single directory entry, where comparing contents is unaffordable. Anything else still blocks: a `.env` the root does not have, a local dump, scratch notes. What a removal took is named, with its reason, in Output \u2192 Git Workflow. This REPLACES the built-in list rather than extending it, so an entry can be taken back out; `[]` leaves only the two evidence checks. Gitignore-shaped matching: a bare name matches at any depth, a pattern with `/` is anchored at the checkout root, `*` and `?` glob within a segment.\n\n**Do not add anything whose contents exist only in that folder.**"
+        },
         "worktreeCompare.pruneRemoteRefs": {
           "type": "boolean",
           "default": true,

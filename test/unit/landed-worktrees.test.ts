@@ -98,6 +98,14 @@ describe('sweepLandedWorktrees', () => {
 
   const never = () => false;
 
+  /** Commit a .gitignore on main and bring the lane up to it. */
+  const ignoreAndCommit = (body: string): void => {
+    fs.writeFileSync(path.join(scratch.repo, '.gitignore'), body);
+    git(scratch.repo, ['add', '-A']);
+    git(scratch.repo, ['commit', '-qm', 'ignore rules']);
+    git(lane, ['merge', '-q', '--ff-only', 'main']);
+  };
+
   beforeEach(() => {
     scratch = makeRepo();
     lane = path.join(scratch.root, 'lane');
@@ -148,10 +156,7 @@ describe('sweepLandedWorktrees', () => {
   });
 
   it('keeps a checkout holding ignored files — the one thing removal destroys', async () => {
-    fs.writeFileSync(path.join(scratch.repo, '.gitignore'), '.env\n');
-    git(scratch.repo, ['add', '-A']);
-    git(scratch.repo, ['commit', '-qm', 'ignore .env']);
-    git(lane, ['merge', '-q', '--ff-only', 'main']);
+    ignoreAndCommit('.env\n');
     fs.writeFileSync(path.join(lane, '.env'), 'SECRET=hunter2\n');
     // Precondition: invisible to the dirty probe, which is the whole point
     expect(git(lane, ['status', '--porcelain'])).toBe('');
@@ -165,6 +170,101 @@ describe('sweepLandedWorktrees', () => {
     expect(fs.readFileSync(path.join(lane, '.env'), 'utf8')).toBe(
       'SECRET=hunter2\n',
     );
+  });
+
+  it('removes a checkout whose only ignored files are derived', async () => {
+    // The case that made this rule fire on every landed lane: a repo that
+    // installs per worktree. node_modules is not what the ignored-files
+    // guard is protecting, and treating it as such kept every landed
+    // folder on disk forever.
+    ignoreAndCommit('node_modules/\ndist/\n');
+    fs.mkdirSync(path.join(lane, 'node_modules', 'left-pad'), {
+      recursive: true,
+    });
+    fs.writeFileSync(path.join(lane, 'node_modules', 'left-pad', 'i.js'), '');
+    fs.mkdirSync(path.join(lane, 'dist'));
+    fs.writeFileSync(path.join(lane, 'dist', 'main.js'), 'built\n');
+    expect(git(lane, ['status', '--porcelain'])).toBe('');
+
+    const lines: string[] = [];
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      { remove: true, isOpen: never, log: (line) => lines.push(line) },
+    );
+    expect(result.removed.map((r) => r.branch)).toEqual(['feat/landed']);
+    expect(fs.existsSync(lane)).toBe(false);
+    // Silently is the one way taking them unattended goes wrong.
+    expect(lines.join('\n')).toMatch(/also deleted ignored .*node_modules/);
+  });
+
+  it('keeps a checkout holding one precious file among derived ones', async () => {
+    ignoreAndCommit('node_modules/\n.env\n');
+    fs.mkdirSync(path.join(lane, 'node_modules'));
+    fs.writeFileSync(path.join(lane, 'node_modules', 'x.js'), '');
+    fs.writeFileSync(path.join(lane, '.env'), 'SECRET=hunter2\n');
+
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      { remove: true, isOpen: never },
+    );
+    expect(result.blocked.get(lane)?.blocker).toBe('ignored');
+    expect(fs.existsSync(path.join(lane, '.env'))).toBe(true);
+  });
+
+  it('blocks on any ignored file when the expendable list is emptied', async () => {
+    ignoreAndCommit('node_modules/\n');
+    fs.mkdirSync(path.join(lane, 'node_modules'));
+    fs.writeFileSync(path.join(lane, 'node_modules', 'x.js'), '');
+
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      { remove: true, isOpen: never, expendable: [] },
+    );
+    expect(result.blocked.get(lane)?.blocker).toBe('ignored');
+    expect(fs.existsSync(lane)).toBe(true);
+  });
+
+  it('clears a checkout whose ignored file the root has byte for byte', async () => {
+    // Copied out of the root so the lane's tests would run. The lane is
+    // going; the bytes are not.
+    ignoreAndCommit('.env\n');
+    fs.writeFileSync(path.join(scratch.repo, '.env'), 'API_KEY=abc\n');
+    fs.writeFileSync(path.join(lane, '.env'), 'API_KEY=abc\n');
+
+    const lines: string[] = [];
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      {
+        remove: true,
+        isOpen: never,
+        root: scratch.repo,
+        log: (line) => lines.push(line),
+      },
+    );
+    expect(result.removed.map((r) => r.branch)).toEqual(['feat/landed']);
+    expect(fs.readFileSync(path.join(scratch.repo, '.env'), 'utf8')).toBe(
+      'API_KEY=abc\n',
+    );
+    // The claim is auditable or it is not worth making.
+    expect(lines.join('\n')).toMatch(/\.env \(identical to the root/);
+  });
+
+  it('keeps one whose ignored file has drifted from the root', async () => {
+    ignoreAndCommit('.env\n');
+    fs.writeFileSync(path.join(scratch.repo, '.env'), 'API_KEY=abc\n');
+    fs.writeFileSync(path.join(lane, '.env'), 'API_KEY=abc\nFLAG=1\n');
+
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      { remove: true, isOpen: never, root: scratch.repo },
+    );
+    expect(result.blocked.get(lane)?.blocker).toBe('ignored');
+    expect(fs.readFileSync(path.join(lane, '.env'), 'utf8')).toContain('FLAG=1');
   });
 
   it('keeps a checkout with a file open in an editor', async () => {

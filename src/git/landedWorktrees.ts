@@ -1,4 +1,9 @@
 import { gitOk } from './exec';
+import {
+  classifyIgnored,
+  describeExpendable,
+  type ExpendableIgnored,
+} from './expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from './plumbing';
 import { listWorktreeAdmin, removeWorktree } from './worktreeAdmin';
 import type { DiscoveredWorktree } from './discovery';
@@ -44,10 +49,13 @@ export interface LandedWorktreeFacts {
   /** Uncommitted changes, staged or not, tracked or untracked. */
   dirty: boolean;
   /**
-   * Gitignored files present. The dirty probe cannot see them and
-   * `git worktree remove` takes them without complaint, so they are the
-   * one thing an unattended removal could actually destroy — a `.env`, a
-   * built artifact nobody has anywhere else.
+   * Gitignored files present that are NOT derived. The dirty probe cannot
+   * see them and `git worktree remove` takes them without complaint, so
+   * they are the one thing an unattended removal could actually destroy —
+   * a `.env`, a dump nobody has anywhere else. A `node_modules` or a
+   * `dist` is not one of them (see `expendableIgnored.ts`): holding a
+   * landed checkout hostage to a folder `npm install` recreates is how
+   * this rule ends up protecting nothing and clearing nothing.
    */
   ignored: boolean;
   /** An editor is open on a file inside it — someone is working here. */
@@ -118,7 +126,7 @@ export function explainBlocker(blocker: LandedBlocker, branch: string): string {
     case 'dirty':
       return `${landed}\nIt was kept because the working tree has uncommitted changes. Commit them somewhere they belong, or discard them, and the folder is cleared automatically.`;
     case 'ignored':
-      return `${landed}\nIt was kept because it holds gitignored files (a .env, build output) — the one thing removing the folder would actually destroy. Delete Worktree removes it and names them first.`;
+      return `${landed}\nIt was kept because it holds gitignored files that deleting would lose — a .env the root does not have, a local dump: the one thing removing the folder would actually destroy. Files the root checkout has byte for byte, symlinks pointing out of the checkout, and generated things (node_modules, dist) do not keep a folder; anything else does. Delete Worktree removes it and names them first.`;
     case 'open':
       return `${landed}\nIt was kept because a file inside it is open in an editor. Close it and the folder is cleared automatically.`;
     case 'busy':
@@ -157,6 +165,14 @@ export async function sweepLandedWorktrees(
     /** Off: probe and report blockers, remove nothing. */
     remove: boolean;
     isOpen: (path: string) => boolean;
+    /** Ignored paths a removal may take (default: the derived-file list). */
+    expendable?: readonly string[];
+    /**
+     * The checkout that survives, for the identical-to-root half. Defaults
+     * to whichever of `worktrees` is the root; passing it explicitly is for
+     * tests and for callers that know better than discovery does.
+     */
+    root?: string;
     log?: (line: string) => void;
   },
 ): Promise<LandedSweepResult> {
@@ -166,8 +182,17 @@ export async function sweepLandedWorktrees(
   );
   if (candidates.length === 0) return result;
 
+  // The checkout that will still be there afterwards, and so the only one
+  // a file can be compared against as evidence of its own survival.
+  const root =
+    options.root ??
+    worktrees.find((wt) => wt.isRootCheckout || wt.isMainWorktree)?.path;
+
   for (const wt of candidates) {
-    const facts = await landedFacts(wt, options.isOpen(wt.path));
+    const { facts, expendable } = await landedFacts(wt, options.isOpen(wt.path), {
+      patterns: options.expendable,
+      root,
+    });
     const verdict = landedWorktreeVerdict(facts);
     if (!verdict.remove) {
       result.blocked.set(wt.path, {
@@ -188,8 +213,15 @@ export async function sweepLandedWorktrees(
     const removal = await removeWorktree(wt.path, {});
     if (removal.ok) {
       result.removed.push({ path: wt.path, branch: wt.branch });
+      // Naming the derived files it took is the whole safety of taking
+      // them unattended: a wrong pattern shows up in the log as a folder
+      // somebody wanted, rather than as nothing at all.
+      const alsoTook =
+        expendable.length > 0
+          ? `; also deleted ignored ${describeExpendable(expendable)}`
+          : '';
       options.log?.(
-        `Removed landed checkout ${wt.path} (${wt.branch} is in the base; branch ref kept)`,
+        `Removed landed checkout ${wt.path} (${wt.branch} is in the base; branch ref kept${alsoTook})`,
       );
       continue;
     }
@@ -213,13 +245,22 @@ export async function sweepLandedWorktrees(
 async function landedFacts(
   wt: DiscoveredWorktree,
   open: boolean,
-): Promise<LandedWorktreeFacts> {
+  expendable: { patterns?: readonly string[]; root?: string },
+): Promise<{ facts: LandedWorktreeFacts; expendable: ExpendableIgnored[] }> {
   // Fresh probes: a cached isDirty is a snapshot, and this decides whether
   // a directory is deleted.
   const dirty = await isWorktreeDirty(wt.path).catch(() => true);
-  const ignored = await ignoredFiles(wt.path)
-    .then((files) => files.length > 0)
-    .catch(() => true);
+  // A probe that could not run must not be read as "nothing here": the
+  // fallback is a full stop, which is why it is `kept`, not `expendable`.
+  const split = await ignoredFiles(wt.path)
+    .then((files) =>
+      classifyIgnored(files, {
+        dir: wt.path,
+        root: expendable.root,
+        patterns: expendable.patterns,
+      }),
+    )
+    .catch(() => ({ expendable: [], kept: ['<probe failed>'] }));
   const busy = await mergeOrRebaseInProgress(wt.path);
   let locked = Boolean(wt.locked);
   let main = Boolean(wt.isRootCheckout || wt.isMainWorktree);
@@ -232,7 +273,18 @@ async function landedFacts(
   } catch {
     // The discovery flags stand; a probe that could not run adds nothing.
   }
-  return { dirty, ignored, open, busy, locked, main, detached: wt.detached };
+  return {
+    facts: {
+      dirty,
+      ignored: split.kept.length > 0,
+      open,
+      busy,
+      locked,
+      main,
+      detached: wt.detached,
+    },
+    expendable: split.expendable,
+  };
 }
 
 /** A paused rebase or merge, by the state files git leaves behind. */

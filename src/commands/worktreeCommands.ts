@@ -10,7 +10,16 @@ import {
 import { pickBaseRef } from '../compare/pickBaseRef';
 import { pickWorktree } from '../compare/pickWorktree';
 import { commitStaged, commitUnstagedPaths } from '../git/commit';
-import { findLandedLanes, isQuickDeleteLandedEnabled } from '../git/preview';
+import {
+  expendableIgnoredPatterns,
+  findLandedLanes,
+  isQuickDeleteLandedEnabled,
+} from '../git/preview';
+import {
+  classifyIgnored,
+  describeExpendable,
+  summarizeIgnored,
+} from '../git/expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
@@ -183,7 +192,13 @@ export function registerWorktreeCommands(
         // Ignored files are the one thing a delete can still destroy: the
         // dirty probe cannot see them and `git worktree remove` takes them
         // without complaint (untracked files make it refuse on their own).
-        const ignored = await ignoredFiles(target);
+        const ignored = await classifyIgnored(await ignoredFiles(target), {
+          dir: target,
+          // The checkout that survives this delete, and so the one a file
+          // can be compared against as evidence it is not the only copy.
+          root: treeProvider.getRepoCwd(),
+          patterns: expendableIgnoredPatterns(),
+        });
 
         // Landed + clean + unlocked: every commit is already contained in
         // the base, so the confirmation has nothing to protect and the
@@ -191,16 +206,24 @@ export function registerWorktreeCommands(
         // detached, or a checkout still holding ignored files — keeps the
         // full confirmed flow. A failed quick attempt falls through to it
         // too, so this can only ever save a click, never lose one.
+        //
+        // Derived ignored files (node_modules, dist) are not what the
+        // confirmation is for: they are recreated by the command that made
+        // them, and treating one as a reason to ask means the ask arrives
+        // on every landed lane in a repo that installs per worktree.
         if (
           landedIn &&
           !wt.locked &&
-          ignored.length === 0 &&
+          ignored.kept.length === 0 &&
           isQuickDeleteLandedEnabled()
         ) {
           const quick = await removeWorktree(target, {});
           if (quick.ok) {
             log.appendLine(
-              `Removed landed worktree ${target} (${wt.branch} landed in ${landedIn})`,
+              `Removed landed worktree ${target} (${wt.branch} landed in ${landedIn})` +
+                (ignored.expendable.length > 0
+                  ? ` (also deleted ignored ${describeExpendable(ignored.expendable)})`
+                  : ''),
             );
             treeProvider.refresh();
             void vscode.window.setStatusBarMessage(
@@ -235,14 +258,22 @@ export function registerWorktreeCommands(
             '⚠ Working tree has uncommitted changes — remove will need --force.',
           );
         }
-        if (ignored.length > 0) {
+        if (ignored.kept.length > 0) {
           // Named explicitly: these are exactly the files the "✓ Landed"
           // line above does NOT cover.
           warnings.push(
             '',
-            `⚠ ${ignored.length} ignored file(s) will be deleted with the folder (${ignored
-              .slice(0, 3)
-              .join(', ')}${ignored.length > 3 ? ', …' : ''}).`,
+            `⚠ ${ignored.kept.length} ignored file(s) will be deleted with the folder (${summarizeIgnored(ignored.kept)}).`,
+          );
+        }
+        if (ignored.expendable.length > 0) {
+          // Mentioned, not warned about: seeing that the folder is mostly
+          // node_modules is useful; being asked to weigh it is not. The
+          // reason travels with it — a file going because the root has the
+          // same bytes is a different claim from a build output going.
+          warnings.push(
+            '',
+            `Also deleted, nothing lost: ${describeExpendable(ignored.expendable)}.`,
           );
         }
         if (wt.locked) {
