@@ -164,9 +164,11 @@ The CHECKOUT is a separate question, and with the extension running it answers
 itself: a landed lane's worktree is removed as soon as it holds nothing of its
 own, keeping the ref. A row still under **Working** reading `landed · …` is one
 it could not clear — uncommitted changes, a paused merge, a lock, a file open
-in an editor, or ignored files it will not delete (a `.env`, a local dump;
-derived ones like `node_modules` and `dist` never block) — so resolve the named
-thing rather than forcing the removal. Never `rm -rf` a worktree (§3); `git
+in an editor, or ignored files it will not delete — so resolve the named thing
+rather than forcing the removal. An ignored file only blocks when deleting it
+would lose it: a symlink out of the checkout, a file the root checkout has byte
+for byte, and generated things (`node_modules`, `dist`, `coverage`) all go with
+the folder, and are named in the log. Never `rm -rf` a worktree (§3); `git
 worktree remove` it, and let a dirty one alone until whoever owns those changes
 has dealt with them.
 

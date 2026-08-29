@@ -1,8 +1,8 @@
 import { gitOk } from './exec';
 import {
-  DEFAULT_EXPENDABLE_IGNORED,
-  splitIgnored,
-  summarizeIgnored,
+  classifyIgnored,
+  describeExpendable,
+  type ExpendableIgnored,
 } from './expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from './plumbing';
 import { listWorktreeAdmin, removeWorktree } from './worktreeAdmin';
@@ -126,7 +126,7 @@ export function explainBlocker(blocker: LandedBlocker, branch: string): string {
     case 'dirty':
       return `${landed}\nIt was kept because the working tree has uncommitted changes. Commit them somewhere they belong, or discard them, and the folder is cleared automatically.`;
     case 'ignored':
-      return `${landed}\nIt was kept because it holds gitignored files that are not derived — a .env, a local dump: the one thing removing the folder would actually destroy. Build output and installs (node_modules, dist) do not keep a folder; anything else does. Delete Worktree removes it and names them first.`;
+      return `${landed}\nIt was kept because it holds gitignored files that deleting would lose — a .env the root does not have, a local dump: the one thing removing the folder would actually destroy. Files the root checkout has byte for byte, symlinks pointing out of the checkout, and generated things (node_modules, dist) do not keep a folder; anything else does. Delete Worktree removes it and names them first.`;
     case 'open':
       return `${landed}\nIt was kept because a file inside it is open in an editor. Close it and the folder is cleared automatically.`;
     case 'busy':
@@ -167,6 +167,12 @@ export async function sweepLandedWorktrees(
     isOpen: (path: string) => boolean;
     /** Ignored paths a removal may take (default: the derived-file list). */
     expendable?: readonly string[];
+    /**
+     * The checkout that survives, for the identical-to-root half. Defaults
+     * to whichever of `worktrees` is the root; passing it explicitly is for
+     * tests and for callers that know better than discovery does.
+     */
+    root?: string;
     log?: (line: string) => void;
   },
 ): Promise<LandedSweepResult> {
@@ -176,12 +182,17 @@ export async function sweepLandedWorktrees(
   );
   if (candidates.length === 0) return result;
 
+  // The checkout that will still be there afterwards, and so the only one
+  // a file can be compared against as evidence of its own survival.
+  const root =
+    options.root ??
+    worktrees.find((wt) => wt.isRootCheckout || wt.isMainWorktree)?.path;
+
   for (const wt of candidates) {
-    const { facts, expendable } = await landedFacts(
-      wt,
-      options.isOpen(wt.path),
-      options.expendable ?? DEFAULT_EXPENDABLE_IGNORED,
-    );
+    const { facts, expendable } = await landedFacts(wt, options.isOpen(wt.path), {
+      patterns: options.expendable,
+      root,
+    });
     const verdict = landedWorktreeVerdict(facts);
     if (!verdict.remove) {
       result.blocked.set(wt.path, {
@@ -207,7 +218,7 @@ export async function sweepLandedWorktrees(
       // somebody wanted, rather than as nothing at all.
       const alsoTook =
         expendable.length > 0
-          ? `; also deleted ignored ${summarizeIgnored(expendable)}`
+          ? `; also deleted ignored ${describeExpendable(expendable)}`
           : '';
       options.log?.(
         `Removed landed checkout ${wt.path} (${wt.branch} is in the base; branch ref kept${alsoTook})`,
@@ -234,15 +245,21 @@ export async function sweepLandedWorktrees(
 async function landedFacts(
   wt: DiscoveredWorktree,
   open: boolean,
-  expendablePatterns: readonly string[],
-): Promise<{ facts: LandedWorktreeFacts; expendable: string[] }> {
+  expendable: { patterns?: readonly string[]; root?: string },
+): Promise<{ facts: LandedWorktreeFacts; expendable: ExpendableIgnored[] }> {
   // Fresh probes: a cached isDirty is a snapshot, and this decides whether
   // a directory is deleted.
   const dirty = await isWorktreeDirty(wt.path).catch(() => true);
   // A probe that could not run must not be read as "nothing here": the
   // fallback is a full stop, which is why it is `kept`, not `expendable`.
   const split = await ignoredFiles(wt.path)
-    .then((files) => splitIgnored(files, expendablePatterns))
+    .then((files) =>
+      classifyIgnored(files, {
+        dir: wt.path,
+        root: expendable.root,
+        patterns: expendable.patterns,
+      }),
+    )
     .catch(() => ({ expendable: [], kept: ['<probe failed>'] }));
   const busy = await mergeOrRebaseInProgress(wt.path);
   let locked = Boolean(wt.locked);

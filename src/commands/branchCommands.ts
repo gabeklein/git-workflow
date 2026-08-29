@@ -3,7 +3,11 @@ import * as vscode from 'vscode';
 import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
 import { syncBranchWithRemote } from '../git/syncRemote';
-import { splitIgnored, summarizeIgnored } from '../git/expendableIgnored';
+import {
+  classifyIgnored,
+  describeExpendable,
+  summarizeIgnored,
+} from '../git/expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { removeWorktree } from '../git/worktreeAdmin';
 import {
@@ -39,13 +43,15 @@ import type { WorktreeTreeProvider } from '../views/worktreeTree';
 async function releaseHoldingWorktree(
   worktree: string,
   log: { appendLine(value: string): void },
+  root?: string,
 ): Promise<{ ok: true } | { ok: false; why: string }> {
   if (await isWorktreeDirty(worktree))
     return { ok: false, why: 'its checkout has uncommitted changes' };
-  const ignored = splitIgnored(
-    await ignoredFiles(worktree),
-    expendableIgnoredPatterns(),
-  );
+  const ignored = await classifyIgnored(await ignoredFiles(worktree), {
+    dir: worktree,
+    root,
+    patterns: expendableIgnoredPatterns(),
+  });
   if (ignored.kept.length > 0) {
     return {
       ok: false,
@@ -57,7 +63,7 @@ async function releaseHoldingWorktree(
   log.appendLine(
     `Removed landed worktree ${worktree}` +
       (ignored.expendable.length > 0
-        ? ` (also deleted ignored ${summarizeIgnored(ignored.expendable)})`
+        ? ` (also deleted ignored ${describeExpendable(ignored.expendable)})`
         : ''),
   );
   return { ok: true };
@@ -131,7 +137,11 @@ export function registerBranchCommands(
           (b) => b.worktree && chosen.includes(b.name),
         );
         for (const b of holding) {
-          const freed = await releaseHoldingWorktree(b.worktree as string, log);
+          const freed = await releaseHoldingWorktree(
+            b.worktree as string,
+            log,
+            repoCwd,
+          );
           if (!freed.ok) {
             log.appendLine(`Prune kept ${b.name}: ${freed.why}`);
             blocked.set(b.name, freed.why);
@@ -190,7 +200,11 @@ export function registerBranchCommands(
           (b) => b.worktree && chosen.includes(b.name),
         );
         for (const b of holding) {
-          const freed = await releaseHoldingWorktree(b.worktree as string, log);
+          const freed = await releaseHoldingWorktree(
+            b.worktree as string,
+            log,
+            repoCwd,
+          );
           if (!freed.ok) {
             log.appendLine(`Prune kept ${b.name}: ${freed.why}`);
             blocked.set(b.name, freed.why);

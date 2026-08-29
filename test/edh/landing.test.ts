@@ -132,6 +132,7 @@ describe('landed checkouts clear themselves', () => {
   const sweptPath = path.join(repo, '.worktrees', 'feat-swept');
   const heldPath = path.join(repo, '.worktrees', 'feat-held');
   const derivedPath = path.join(repo, '.worktrees', 'feat-derived');
+  const copiedPath = path.join(repo, '.worktrees', 'feat-copied');
   const excludeFile = path.join(repo, '.git', 'info', 'exclude');
   let excludeBefore = '';
   let api: TestApi;
@@ -167,10 +168,16 @@ describe('landed checkouts clear themselves', () => {
       vscode.ConfigurationTarget.Workspace,
     );
     fs.writeFileSync(excludeFile, excludeBefore);
-    for (const d of [sweptPath, heldPath, derivedPath]) {
+    fs.rmSync(path.join(repo, '.env'), { force: true });
+    for (const d of [sweptPath, heldPath, derivedPath, copiedPath]) {
       if (fs.existsSync(d)) git(repo, ['worktree', 'remove', '--force', d]);
     }
-    for (const b of ['feat/swept', 'feat/held', 'feat/derived']) {
+    for (const b of [
+      'feat/swept',
+      'feat/held',
+      'feat/derived',
+      'feat/copied',
+    ]) {
       try {
         git(repo, ['branch', '-D', b]);
       } catch {
@@ -212,6 +219,29 @@ describe('landed checkouts clear themselves', () => {
         await run('worktreeCompare.refresh');
         return !fs.existsSync(derivedPath);
       },
+    );
+  });
+
+  it('sweeps one whose ignored file the root checkout has too', async () => {
+    // No pattern could ever cover this one — a .env is exactly what the
+    // ignored-files rule protects. What clears it is evidence rather than
+    // policy: the same bytes are in the root, which is not going anywhere.
+    makeLanded('feat/copied', copiedPath);
+    fs.appendFileSync(excludeFile, '.env\n');
+    fs.writeFileSync(path.join(repo, '.env'), 'API_KEY=abc\n');
+    fs.writeFileSync(path.join(copiedPath, '.env'), 'API_KEY=abc\n');
+    assert.equal(
+      git(copiedPath, ['status', '--porcelain']).trim(),
+      '',
+      'precondition: the copy is ignored, so the checkout reads clean',
+    );
+    await poll('the landed checkout with a copied .env goes', 60000, async () => {
+      await run('worktreeCompare.refresh');
+      return !fs.existsSync(copiedPath);
+    });
+    assert.ok(
+      fs.existsSync(path.join(repo, '.env')),
+      "the root's copy — the reason it was safe — is untouched",
     );
   });
 

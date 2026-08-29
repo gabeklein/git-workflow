@@ -227,6 +227,46 @@ describe('sweepLandedWorktrees', () => {
     expect(fs.existsSync(lane)).toBe(true);
   });
 
+  it('clears a checkout whose ignored file the root has byte for byte', async () => {
+    // Copied out of the root so the lane's tests would run. The lane is
+    // going; the bytes are not.
+    ignoreAndCommit('.env\n');
+    fs.writeFileSync(path.join(scratch.repo, '.env'), 'API_KEY=abc\n');
+    fs.writeFileSync(path.join(lane, '.env'), 'API_KEY=abc\n');
+
+    const lines: string[] = [];
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      {
+        remove: true,
+        isOpen: never,
+        root: scratch.repo,
+        log: (line) => lines.push(line),
+      },
+    );
+    expect(result.removed.map((r) => r.branch)).toEqual(['feat/landed']);
+    expect(fs.readFileSync(path.join(scratch.repo, '.env'), 'utf8')).toBe(
+      'API_KEY=abc\n',
+    );
+    // The claim is auditable or it is not worth making.
+    expect(lines.join('\n')).toMatch(/\.env \(identical to the root/);
+  });
+
+  it('keeps one whose ignored file has drifted from the root', async () => {
+    ignoreAndCommit('.env\n');
+    fs.writeFileSync(path.join(scratch.repo, '.env'), 'API_KEY=abc\n');
+    fs.writeFileSync(path.join(lane, '.env'), 'API_KEY=abc\nFLAG=1\n');
+
+    const result = await sweepLandedWorktrees(
+      [wt()],
+      new Set(['feat/landed']),
+      { remove: true, isOpen: never, root: scratch.repo },
+    );
+    expect(result.blocked.get(lane)?.blocker).toBe('ignored');
+    expect(fs.readFileSync(path.join(lane, '.env'), 'utf8')).toContain('FLAG=1');
+  });
+
   it('keeps a checkout with a file open in an editor', async () => {
     const result = await sweepLandedWorktrees(
       [wt()],

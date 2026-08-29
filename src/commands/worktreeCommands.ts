@@ -15,7 +15,11 @@ import {
   findLandedLanes,
   isQuickDeleteLandedEnabled,
 } from '../git/preview';
-import { splitIgnored, summarizeIgnored } from '../git/expendableIgnored';
+import {
+  classifyIgnored,
+  describeExpendable,
+  summarizeIgnored,
+} from '../git/expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { getWorkingStatus } from '../git/status';
 import { stagePaths, unstagePaths } from '../git/stage';
@@ -188,10 +192,13 @@ export function registerWorktreeCommands(
         // Ignored files are the one thing a delete can still destroy: the
         // dirty probe cannot see them and `git worktree remove` takes them
         // without complaint (untracked files make it refuse on their own).
-        const ignored = splitIgnored(
-          await ignoredFiles(target),
-          expendableIgnoredPatterns(),
-        );
+        const ignored = await classifyIgnored(await ignoredFiles(target), {
+          dir: target,
+          // The checkout that survives this delete, and so the one a file
+          // can be compared against as evidence it is not the only copy.
+          root: treeProvider.getRepoCwd(),
+          patterns: expendableIgnoredPatterns(),
+        });
 
         // Landed + clean + unlocked: every commit is already contained in
         // the base, so the confirmation has nothing to protect and the
@@ -215,7 +222,7 @@ export function registerWorktreeCommands(
             log.appendLine(
               `Removed landed worktree ${target} (${wt.branch} landed in ${landedIn})` +
                 (ignored.expendable.length > 0
-                  ? ` (also deleted ignored ${summarizeIgnored(ignored.expendable)})`
+                  ? ` (also deleted ignored ${describeExpendable(ignored.expendable)})`
                   : ''),
             );
             treeProvider.refresh();
@@ -261,10 +268,12 @@ export function registerWorktreeCommands(
         }
         if (ignored.expendable.length > 0) {
           // Mentioned, not warned about: seeing that the folder is mostly
-          // node_modules is useful; being asked to weigh it is not.
+          // node_modules is useful; being asked to weigh it is not. The
+          // reason travels with it — a file going because the root has the
+          // same bytes is a different claim from a build output going.
           warnings.push(
             '',
-            `Derived files also deleted: ${summarizeIgnored(ignored.expendable)}.`,
+            `Also deleted, nothing lost: ${describeExpendable(ignored.expendable)}.`,
           );
         }
         if (wt.locked) {
