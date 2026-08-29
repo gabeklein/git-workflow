@@ -170,7 +170,8 @@
           "default": [
             "node_modules", ".yarn/cache", ".pnpm-store", "bower_components",
             "vendor/bundle", ".bundle", ".venv", "venv", "__pycache__", ".tox", "Pods",
-            "dist", "build", "out", "target", ".next", ".nuxt", ".svelte-kit",
+            "dist", "build", "out", "out-test", "target", ".next", ".nuxt",
+            ".svelte-kit",
             ".astro", ".output", ".parcel-cache", ".docusaurus",
             ".cache", ".turbo", ".vite", ".eslintcache", ".stylelintcache",
             ".mypy_cache", ".ruff_cache", ".pytest_cache", ".gradle", ".terraform",

@@ -74,6 +74,11 @@ export const DEFAULT_EXPENDABLE_IGNORED: readonly string[] = [
   'dist',
   'build',
   'out',
+  // Segment matching is exact, so `out` does not cover this one — and it
+  // is what this extension's own EDH suite compiles into, which is how the
+  // gap was found: two landed lanes of git-workflow kept their folders
+  // over 300K of tsc output.
+  'out-test',
   'target',
   '.next',
   '.nuxt',
