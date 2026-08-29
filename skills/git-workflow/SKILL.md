@@ -182,6 +182,7 @@ out; do it before telling anyone a branch is still published.
 
 ```sh
 "$dir/gw-lane" status         # leads with the last rebuild
+"$dir/gw-lane" check          # exit 0 ok · 1 failed · 2 nothing to go on
 cat "$dir/focus-status"       # the same record, raw
 ```
 
@@ -205,6 +206,38 @@ The record is `key: value` lines:
 
 No record, or `no rebuild recorded`, means nothing has rebuilt in this repo
 (preview off, or the editor has not run one) — not that the preview is clean.
+`check` says the same in an exit code, and answers **2** — never 0 — when the
+record cannot speak for the repo as it is now.
+
+### The failure names YOUR lane
+
+Fix it. That is ordinary work on your own branch, not an intervention:
+
+1. **Catch the lane up with its base**, in its own worktree, by §6's rules —
+   rebase unpushed, merge the base into pushed, resolve there.
+2. Or **take the lane out** (`gw-lane remove`): the rebuild stops failing
+   immediately and nobody else's preview stays blocked while you work. Being
+   out costs nothing (§5), and this is the right move when the fix is not
+   quick.
+3. **Report which you did.** The preview changed either way, and the row will
+   not explain itself.
+
+Then let it rebuild. With the editor open that is automatic — the rebuild
+watches lane tips, so your catch-up commit triggers one and the record
+refreshes within a tick; `check` returning 2 (`moved since`) means exactly
+that it has not happened yet. **You cannot rebuild headlessly**; with the
+editor closed, say the fix is in and the preview needs a rebuild rather than
+implying you verified one.
+
+What is NOT yours to fix, whatever the record says:
+
+- **Another lane.** Its worktree may be dirty or mid-rebase, and its author is
+  the one who knows what the resolution should be. Say which lane and what
+  `next:` advises.
+- **The preview branch itself.** Never resolve there, never commit there
+  (§4) — a conflict "fixed" on the preview is discarded by the next rebuild.
+- `dirty` / `unique` codes: those are somebody's uncommitted or stranded work
+  in the root checkout. Absorb is a human's call — report it.
 
 Lanes may also be tagged `auto-resolved` (same-line clash resolved toward the
 incoming lane, dropped hunks listed) or `conflict`. Fix these **on the lane** by

@@ -136,6 +136,13 @@ describe('petty conflicts (best-effort resolver)', () => {
       !cli.includes('moved since'),
       'no lane has moved since the rebuild that was just recorded',
     );
+
+    // …and the gateable form agrees: a lossy resolve is still a build
+    const check = execFileSync(path.join(repo, '.git', 'gw-lane'), ['check'], {
+      cwd: repo,
+      encoding: 'utf8',
+    });
+    assert.match(check, /^ok: preview holds /, 'check passes on a real build');
   });
 });
 

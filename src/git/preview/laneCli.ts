@@ -33,6 +33,7 @@ ${SENTINEL}
 # Join or leave the preview preview, without VS Code.
 #
 #   gw-lane status           how the preview built, what is applied
+#   gw-lane check            exit 0 ok · 1 failed · 2 nothing to go on
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -81,7 +82,7 @@ branch="\${2:-}"
 # Lanes whose tip has moved since the recorded rebuild ran. A conflict
 # that was already dealt with reads exactly like a live one otherwise,
 # and acting on a stale one means fixing something that never broke.
-moved_since() {
+moved_list() {
   [ -f "$built" ] || return 0
   out=""
   while read -r key name sha rest; do
@@ -89,9 +90,10 @@ moved_since() {
     now=$(git rev-parse -q --verify "refs/heads/$name^{commit}" 2>/dev/null) || now="gone"
     [ "$now" = "$sha" ] || out="$out $name"
   done < "$built"
-  [ -n "$out" ] && echo "  note: moved since this rebuild ran —$out (rebuild to re-check)"
-  return 0
+  printf '%s' "$out"
 }
+
+field() { sed -n "s/^$1: //p" "$built" 2>/dev/null | head -1; }
 
 if [ "$cmd" = "status" ]; then
   # Build outcome FIRST: when it failed, the checkout still holds the last
@@ -99,7 +101,10 @@ if [ "$cmd" = "status" ]; then
   echo "last rebuild:"
   if [ -s "$built" ]; then
     grep -v '^#' "$built" | sed 's/^/  /'
-    moved_since
+    moved=$(moved_list)
+    if [ -n "$moved" ]; then
+      echo "  note: moved since this rebuild ran —$moved (rebuild to re-check)"
+    fi
   else
     echo "  (no rebuild recorded — preview may be off, or VS Code has not run one)"
   fi
@@ -108,6 +113,36 @@ if [ "$cmd" = "status" ]; then
   echo "candidates:"
   [ -s "$candidates" ] && sed 's/^/  /' "$candidates" || echo "  (none)"
   exit 0
+fi
+
+# One question, answered as an exit status: is the preview tree currently
+# built from what is applied? Meant to be gated on — "status" stays exit 0
+# because printing a report is not a failure.
+if [ "$cmd" = "check" ]; then
+  if [ ! -s "$built" ]; then
+    echo "unknown: no rebuild recorded — preview may be off, or nothing has rebuilt yet"
+    exit 2
+  fi
+  moved=$(moved_list)
+  if [ -n "$moved" ]; then
+    # The record no longer describes the repo, so it can answer neither
+    # way. This is what an agent that just caught its lane up sees, and it
+    # is the reason a fix does not read back as a live failure.
+    echo "unknown: moved since this record —$moved (rebuild to re-check)"
+    exit 2
+  fi
+  if [ "$(field state)" = "ok" ]; then
+    echo "ok: preview holds $(field tree)"
+    exit 0
+  fi
+  on=$(field lane)
+  if [ -n "$on" ]; then on=" on lane $on"; fi
+  echo "failed: $(field code)$on"
+  detail=$(field detail)
+  if [ -n "$detail" ]; then echo "  $detail"; fi
+  step=$(field next)
+  if [ -n "$step" ]; then echo "  next: $step"; fi
+  exit 1
 fi
 
 if [ -z "$branch" ]; then
@@ -140,7 +175,7 @@ case "$cmd" in
     echo "$branch is out of the preview"
     ;;
   *)
-    echo "usage: gw-lane <status|add|remove> [branch]" >&2
+    echo "usage: gw-lane <status|check|add|remove> [branch]" >&2
     exit 2
     ;;
 esac

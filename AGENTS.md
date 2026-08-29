@@ -132,6 +132,7 @@ To opt in, once the work is worth previewing:
 "$(git rev-parse --git-common-dir)/gw-lane" add          # current branch
 "$(git rev-parse --git-common-dir)/gw-lane" status       # how it built, then what is in it
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
+"$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown
 ```
 
 `status` leads with the **last rebuild** (also readable raw as
@@ -140,7 +141,11 @@ a failed rebuild leaves the checkout on the last good chain, so the lane that
 broke it is missing from the preview while `focus-applied` still lists it.
 Read the record before concluding anything about the preview — `next:` names
 the move that clears it, and `tip:` is what makes a stale conflict
-recognisable as one already dealt with.
+recognisable as one already dealt with. When the failure names **your** lane,
+fixing it is ordinary work: catch the lane up in its own worktree, or
+`gw-lane remove` so nobody else's preview stays blocked. You cannot rebuild
+headlessly, so with the editor closed say the fix is in and a rebuild is
+needed — do not imply you verified one. The skill's §8 has the guardrails.
 
 Inside the editor the same thing is **Git Workflow: Add to Preview**
 (`worktreeCompare.addToPreview`).
