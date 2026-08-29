@@ -113,6 +113,57 @@ describe('lane CLI', () => {
     expect(state('focus-applied')).toEqual(['feat/a']);
   });
 
+  /**
+   * The rebuild record. Membership alone told an agent its lane was in the
+   * preview; when the rebuild had refused, the tree on disk did not hold
+   * it — and nothing headless said so.
+   */
+  describe('status reports how the preview last built', () => {
+    const writeRecord = (body: string) =>
+      fs.writeFileSync(path.join(scratch.repo, '.git', 'focus-status'), body);
+
+    it('says so plainly when no rebuild has been recorded', () => {
+      expect(run('status')).toContain('no rebuild recorded');
+    });
+
+    it('leads with the failure, not the membership list', () => {
+      writeRecord(
+        [
+          '# generated',
+          'state: failed',
+          'code: conflict',
+          'lane: feat/a',
+          'tree: feat/b',
+          'tree-current: no',
+          'next: catch feat/a up with origin/main, then rebuild',
+          '',
+        ].join('\n'),
+      );
+      const out = run('status');
+      expect(out).toContain('last rebuild:');
+      expect(out).toContain('code: conflict');
+      expect(out).toContain('tree-current: no');
+      // Comments are scaffolding for whoever opens the file, not output
+      expect(out).not.toContain('# generated');
+      expect(out.indexOf('last rebuild:')).toBeLessThan(out.indexOf('applied:'));
+    });
+
+    it('warns when a recorded lane has moved since — the failure may be dealt with', () => {
+      const stale = 'f'.repeat(40);
+      writeRecord(`state: failed\ncode: conflict\nlane: feat/a\ntip: feat/a ${stale}\n`);
+      expect(run('status')).toContain('moved since this rebuild ran — feat/a');
+    });
+
+    it('stays quiet when every recorded tip is still current', () => {
+      const tip = execFileSync('git', ['rev-parse', 'feat/a'], {
+        cwd: scratch.repo,
+        encoding: 'utf8',
+      }).trim();
+      writeRecord(`state: ok\ntree: feat/a\ntip: feat/a ${tip}\n`);
+      expect(run('status')).not.toContain('moved since');
+    });
+  });
+
   it('waits for the rebuild lock rather than corrupting state', async () => {
     // Hold the lock the rebuild uses, then release it mid-wait. Async on
     // purpose: execFileSync blocks the event loop, so a timer could never

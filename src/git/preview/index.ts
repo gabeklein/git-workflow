@@ -1,9 +1,9 @@
 /**
  * What the rest of the extension may use from the preview subsystem.
  *
- * Ten modules live behind this: the config it reads, the lane files it
- * keeps, the off-tree merge, the rebuild engine, the branch lifecycle,
- * absorb, the commit guard and the shell CLI. Views and commands want
+ * Eleven modules live behind this: the config it reads, the lane files it
+ * keeps, the off-tree merge, the rebuild engine, the record it leaves on
+ * disk, the branch lifecycle, absorb, the commit guard and the shell CLI. Views and commands want
  * about fifty things out of that, and an `export *` per module made the
  * other surface — every helper the engine and the merge use on each other
  * — look equally public, so nothing could be moved or renamed without
@@ -100,4 +100,11 @@ export {
   laneCliPath,
   uninstallLaneCli,
 } from './laneCli';
+
+// statusFile
+export {
+  STATUS_FILE,
+  clearPreviewStatus,
+  readPreviewStatus,
+} from './statusFile';
 

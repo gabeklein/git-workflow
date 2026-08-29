@@ -106,7 +106,9 @@ Edits**.
 Same for the files it owns: change them via `gw-lane`, never by hand, since
 rebuilds hold `focus-working.lock` while rewriting them — `focus-applied`
 (membership) · `focus-candidates` (merge ORDER) · `focus-excluded` ·
-`focus-wip` · `focus-base` (pinned base) · `focus-guard`.
+`focus-wip` · `focus-base` (pinned base) · `focus-guard`. `focus-status` is
+the exception in the other direction: it is a *record* of the last rebuild,
+rewritten by every one — read it, never write it (§8).
 
 ## 5. Joining the preview is deliberate — and yours to do  *(preview on)*
 
@@ -115,7 +117,7 @@ nothing merges into anyone's preview until applied. A shared base says two lanes
 *can* merge, not that they belong side by side.
 
 ```sh
-"$dir/gw-lane" status     # what is applied, and what could be
+"$dir/gw-lane" status     # how it last BUILT, then what is applied
 "$dir/gw-lane" add        # current branch (or: add feat-x)
 "$dir/gw-lane" remove     # out, and persistently kept out
 ```
@@ -176,11 +178,38 @@ out; do it before telling anyone a branch is still published.
 
 ## 8. Preview conflicts, and what to tell the user  *(preview on)*
 
-The preview tree is a best-effort preview of unlanded work. Lanes may be
-tagged `auto-resolved` (same-line clash resolved toward the incoming lane,
-dropped hunks listed) or `conflict`. Fix these **on the lane** by catching it up
-with the base — never on the preview branch, never by editing the preview. A
-failed rebuild never touches the checkout, so unchecking a lane restores it.
+**Applied ≠ in the tree. Check before you trust the preview.**
+
+```sh
+"$dir/gw-lane" status         # leads with the last rebuild
+cat "$dir/focus-status"       # the same record, raw
+```
+
+A failed rebuild never touches the checkout, so the tree on disk is the last
+*good* chain — the lane that broke it, and everything merged after it, are
+simply not there. `focus-applied` still lists them; that file is intent, not
+outcome. Reading membership and stopping is how a lane's own author ends up
+debugging a preview their work was never in, and "fixing" what never merged.
+
+The record is `key: value` lines:
+
+| Key | Means |
+|---|---|
+| `state:` | `ok` or `failed` |
+| `code:` | why it failed — `conflict` · `dirty` · `unique` · `moved` · `error` |
+| `lane:` | the lane it stopped on |
+| `tree:` / `tree-current:` | lanes the checkout holds, and whether that is this build |
+| `resolved:` | a lane the resolver settled — `lane-wins` means hunks were **dropped** |
+| `next:` | the move that clears it |
+| `tip:` | each lane's sha *at the time* — `gw-lane status` compares them and says which have moved since, i.e. which failures may already be dealt with |
+
+No record, or `no rebuild recorded`, means nothing has rebuilt in this repo
+(preview off, or the editor has not run one) — not that the preview is clean.
+
+Lanes may also be tagged `auto-resolved` (same-line clash resolved toward the
+incoming lane, dropped hunks listed) or `conflict`. Fix these **on the lane** by
+catching it up with the base — never on the preview branch, never by editing the
+preview. Unchecking a lane restores the preview immediately.
 
 Name a sidebar command **only when the extension is in play** — to a repo
 without it, or someone on SSH, it is a phantom instruction. Otherwise describe
@@ -193,4 +222,4 @@ the git state.
 | Lane conflicts with base | **Resolve Conflict with Base…** / **Catch Up with Base…** |
 | Rebased a pushed lane | **Force Push (with lease)** — their call |
 | Branch list has grown | **Prune Landed Branches** |
-| Diagnosing anything | **Output → Git Workflow** |
+| Diagnosing anything | **Output → Git Workflow** (or `focus-status`, headless) |

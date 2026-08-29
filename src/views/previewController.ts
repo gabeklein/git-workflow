@@ -24,6 +24,7 @@ import {
   installLaneCli,
   laneCliPath,
   isCommitGuardEnabled,
+  clearPreviewStatus,
   uninstallCommitGuard,
   uninstallLaneCli,
   baseStatusFor,
@@ -628,6 +629,10 @@ export class PreviewController implements vscode.Disposable {
       if (!workingPath) {
         await uninstallCommitGuard(cwd);
         await uninstallLaneCli(cwd);
+        // A recorded conflict outlasting the preview it described is worse
+        // than no record: it reads as a live failure in a repo that has no
+        // preview to fail.
+        await clearPreviewStatus(cwd);
         return;
       }
       // The lane CLI is how anything outside VS Code joins the preview, so

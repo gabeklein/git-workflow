@@ -130,9 +130,17 @@ To opt in, once the work is worth previewing:
 ```sh
 # works with VS Code closed; installed while preview is on
 "$(git rev-parse --git-common-dir)/gw-lane" add          # current branch
-"$(git rev-parse --git-common-dir)/gw-lane" status       # what is in the preview
+"$(git rev-parse --git-common-dir)/gw-lane" status       # how it built, then what is in it
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 ```
+
+`status` leads with the **last rebuild** (also readable raw as
+`focus-status`), because being applied is not the same as being in the tree:
+a failed rebuild leaves the checkout on the last good chain, so the lane that
+broke it is missing from the preview while `focus-applied` still lists it.
+Read the record before concluding anything about the preview — `next:` names
+the move that clears it, and `tip:` is what makes a stale conflict
+recognisable as one already dealt with.
 
 Inside the editor the same thing is **Git Workflow: Add to Preview**
 (`worktreeCompare.addToPreview`).

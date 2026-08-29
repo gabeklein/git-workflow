@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
+import { STATUS_FILE } from './statusFile';
 
 /**
  * A headless way to join or leave the preview.
@@ -31,7 +32,7 @@ ${SENTINEL}
 #
 # Join or leave the preview preview, without VS Code.
 #
-#   gw-lane status           what is applied, and what could be
+#   gw-lane status           how the preview built, what is applied
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -46,6 +47,7 @@ case "$dir" in /*) ;; *) dir="$(pwd)/$dir" ;; esac
 
 applied="$dir/${APPLIED_FILE}"
 candidates="$dir/${CANDIDATES_FILE}"
+built="$dir/${STATUS_FILE}"
 lock="$dir/${LOCK_DIR}"
 
 # The rebuild holds this while it rewrites the same files. It is held for
@@ -76,7 +78,31 @@ drop_line() {
 cmd="\${1:-status}"
 branch="\${2:-}"
 
+# Lanes whose tip has moved since the recorded rebuild ran. A conflict
+# that was already dealt with reads exactly like a live one otherwise,
+# and acting on a stale one means fixing something that never broke.
+moved_since() {
+  [ -f "$built" ] || return 0
+  out=""
+  while read -r key name sha rest; do
+    [ "$key" = "tip:" ] || continue
+    now=$(git rev-parse -q --verify "refs/heads/$name^{commit}" 2>/dev/null) || now="gone"
+    [ "$now" = "$sha" ] || out="$out $name"
+  done < "$built"
+  [ -n "$out" ] && echo "  note: moved since this rebuild ran —$out (rebuild to re-check)"
+  return 0
+}
+
 if [ "$cmd" = "status" ]; then
+  # Build outcome FIRST: when it failed, the checkout still holds the last
+  # good tree, so which lanes are "applied" is the less urgent fact.
+  echo "last rebuild:"
+  if [ -s "$built" ]; then
+    grep -v '^#' "$built" | sed 's/^/  /'
+    moved_since
+  else
+    echo "  (no rebuild recorded — preview may be off, or VS Code has not run one)"
+  fi
   echo "applied:"
   [ -s "$applied" ] && sed 's/^/  /' "$applied" || echo "  (none)"
   echo "candidates:"
