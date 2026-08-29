@@ -284,3 +284,39 @@ describe('describeExpendable', () => {
     );
   });
 });
+
+/**
+ * The list ships twice — once as code, once as the setting's default in
+ * package.json — and only the second one reaches a user who has never
+ * touched the setting. Drift between them is silent in both directions: a
+ * pattern only in the code never applies, and one only in package.json
+ * disappears the moment anything writes the setting.
+ */
+describe('the shipped default matches the code', () => {
+  const declared = (
+    JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'),
+    ) as {
+      contributes: {
+        configuration: {
+          properties: Record<string, { default?: string[] }>;
+        };
+      };
+    }
+  ).contributes.configuration.properties['worktreeCompare.expendableIgnored']
+    .default;
+
+  it('declares the same patterns, in the same order', () => {
+    expect(declared).toEqual([...DEFAULT_EXPENDABLE_IGNORED]);
+  });
+
+  it("covers this repo's own build output", () => {
+    // The gap that prompted it: segment matching is exact, so `out` does
+    // not cover `out-test`, and two landed lanes of this very repo kept
+    // their folders over the EDH suite's compiled output.
+    expect(splitIgnored(['out-test/']).expendable).toEqual([
+      { path: 'out-test/', why: 'derived' },
+    ]);
+    expect(splitIgnored(['out/']).expendable).toHaveLength(1);
+  });
+});
