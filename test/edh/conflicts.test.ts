@@ -4,6 +4,7 @@
  * branches) pruned from the state files instead of lingering as ghosts.
  */
 import * as assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -98,6 +99,50 @@ describe('petty conflicts (best-effort resolver)', () => {
       'both lanes stay applied — the rebuild did not fail',
     );
     assert.ok(!api.preview()?.error, 'no preview error state');
+  });
+
+  /**
+   * The record a real rebuild leaves behind, read the way anything outside
+   * the editor reads it. A dropped hunk is invisible in the tree — the file
+   * simply says one lane's version — so if it is not written down here, the
+   * only trace is a tooltip in a running VS Code.
+   */
+  it('records the build, dropped hunks and all, where a shell can read it', async () => {
+    const status = path.join(repo, '.git', 'focus-status');
+    await poll('focus-status records the successful build', 15000, () => {
+      if (!fs.existsSync(status)) return false;
+      const out = fs.readFileSync(status, 'utf8');
+      return out.includes('state: ok') && out.includes('tree-current: yes');
+    });
+    const out = fs.readFileSync(status, 'utf8');
+    assert.match(
+      out,
+      /resolved: feat\/p2 — lane-wins, hunks dropped in news\.txt/,
+      'the lossy resolution is named, with the file whose hunks were dropped',
+    );
+    assert.match(out, /tip: feat\/p2 [0-9a-f]{40}/, 'tips are recorded');
+
+    // …and the headless surface leads with it, before membership
+    const cli = execFileSync(path.join(repo, '.git', 'gw-lane'), ['status'], {
+      cwd: repo,
+      encoding: 'utf8',
+    });
+    assert.ok(
+      cli.indexOf('last rebuild:') < cli.indexOf('applied:'),
+      'gw-lane status reports the build before the lane lists',
+    );
+    assert.ok(cli.includes('state: ok'), 'the record is in the CLI output');
+    assert.ok(
+      !cli.includes('moved since'),
+      'no lane has moved since the rebuild that was just recorded',
+    );
+
+    // …and the gateable form agrees: a lossy resolve is still a build
+    const check = execFileSync(path.join(repo, '.git', 'gw-lane'), ['check'], {
+      cwd: repo,
+      encoding: 'utf8',
+    });
+    assert.match(check, /^ok: preview holds /, 'check passes on a real build');
   });
 });
 

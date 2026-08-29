@@ -22,6 +22,7 @@ import {
 } from './lanes';
 import { mergeOffTree, resolveConflictedTree } from './merge';
 import { findLandedLanes, findStrayCommits, resolveBaseSha } from './status';
+import { recordPreviewStatus } from './statusFile';
 
 
 /**
@@ -179,12 +180,42 @@ export function forgetChainCache(workingPath?: string): void {
   }
 }
 
+/**
+ * Rebuild, then leave the outcome on disk.
+ *
+ * The record is the only trace a rebuild leaves outside a running editor,
+ * and a FAILED one is what it is really for: the checkout is untouched, so
+ * the tree on disk is the last good chain and the offending lane is not in
+ * it. Anyone — increasingly an agent holding that very lane — who reads
+ * `focus-applied` and stops there concludes the opposite. See statusFile.
+ *
+ * Writing it here rather than in the controller means it is written for
+ * every caller, including tests and any future headless rebuild, and it is
+ * best-effort: recording an outcome must never change one.
+ */
 export async function rebuildPreview(
+  workingPath: string,
+  baseRef: string,
+  preview: Preview = currentPreview(),
+): Promise<RebuildResult> {
+  const result = await runRebuild(workingPath, baseRef, preview);
+  // 'busy' is somebody else's rebuild in flight — theirs is the outcome
+  // worth recording, and overwriting it would erase a live conflict.
+  if (result.ok || result.code !== 'busy') {
+    await recordPreviewStatus(workingPath, result, {
+      branch: preview.branch,
+      baseRef,
+    }).catch(() => {});
+  }
+  return result;
+}
+
+async function runRebuild(
   workingPath: string,
   baseRef: string,
   /** Pass it explicitly and the engine never touches the workspace
    *  setting — which is what lets these tests run without one. */
-  preview: Preview = currentPreview(),
+  preview: Preview,
 ): Promise<RebuildResult> {
   const previewBranch = preview.branch;
   const common = await commonDir(workingPath);

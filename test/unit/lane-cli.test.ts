@@ -113,6 +113,119 @@ describe('lane CLI', () => {
     expect(state('focus-applied')).toEqual(['feat/a']);
   });
 
+  /**
+   * The rebuild record. Membership alone told an agent its lane was in the
+   * preview; when the rebuild had refused, the tree on disk did not hold
+   * it — and nothing headless said so.
+   */
+  describe('status reports how the preview last built', () => {
+    const writeRecord = (body: string) =>
+      fs.writeFileSync(path.join(scratch.repo, '.git', 'focus-status'), body);
+
+    it('says so plainly when no rebuild has been recorded', () => {
+      expect(run('status')).toContain('no rebuild recorded');
+    });
+
+    it('leads with the failure, not the membership list', () => {
+      writeRecord(
+        [
+          '# generated',
+          'state: failed',
+          'code: conflict',
+          'lane: feat/a',
+          'tree: feat/b',
+          'tree-current: no',
+          'next: catch feat/a up with origin/main, then rebuild',
+          '',
+        ].join('\n'),
+      );
+      const out = run('status');
+      expect(out).toContain('last rebuild:');
+      expect(out).toContain('code: conflict');
+      expect(out).toContain('tree-current: no');
+      // Comments are scaffolding for whoever opens the file, not output
+      expect(out).not.toContain('# generated');
+      expect(out.indexOf('last rebuild:')).toBeLessThan(out.indexOf('applied:'));
+    });
+
+    it('warns when a recorded lane has moved since — the failure may be dealt with', () => {
+      const stale = 'f'.repeat(40);
+      writeRecord(`state: failed\ncode: conflict\nlane: feat/a\ntip: feat/a ${stale}\n`);
+      expect(run('status')).toContain('moved since this rebuild ran — feat/a');
+    });
+
+    it('stays quiet when every recorded tip is still current', () => {
+      const tip = execFileSync('git', ['rev-parse', 'feat/a'], {
+        cwd: scratch.repo,
+        encoding: 'utf8',
+      }).trim();
+      writeRecord(`state: ok\ntree: feat/a\ntip: feat/a ${tip}\n`);
+      expect(run('status')).not.toContain('moved since');
+    });
+
+    /**
+     * `check` is the same record as an exit status, so an agent can gate on
+     * it instead of parsing prose. `status` deliberately stays 0 — printing
+     * a report is not a failure, and a `set -e` script must not die of it.
+     */
+    describe('check answers with an exit code', () => {
+      const check = (): { code: number; out: string } => {
+        try {
+          return { code: 0, out: run('check') };
+        } catch (err) {
+          const e = err as { status?: number; stdout?: string };
+          return { code: e.status ?? -1, out: e.stdout ?? '' };
+        }
+      };
+      const tipOf = (branch: string) =>
+        execFileSync('git', ['rev-parse', branch], {
+          cwd: scratch.repo,
+          encoding: 'utf8',
+        }).trim();
+
+      it('exits 0 on a good build, and names what the preview holds', () => {
+        writeRecord(`state: ok\ntree: feat/a, feat/b\ntip: feat/a ${tipOf('feat/a')}\n`);
+        expect(check()).toMatchObject({ code: 0, out: expect.stringContaining('ok: preview holds feat/a, feat/b') });
+      });
+
+      it('exits 1 on a recorded failure, with the lane and the move that clears it', () => {
+        writeRecord(
+          [
+            'state: failed',
+            'code: conflict',
+            'lane: feat/a',
+            'detail: lane feat/a conflicts: app.txt (checkout untouched)',
+            'next: catch feat/a up with origin/main, then rebuild',
+            `tip: feat/a ${tipOf('feat/a')}`,
+            '',
+          ].join('\n'),
+        );
+        const { code, out } = check();
+        expect(code).toBe(1);
+        expect(out).toContain('failed: conflict on lane feat/a');
+        expect(out).toContain('next: catch feat/a up with origin/main');
+      });
+
+      it('exits 2 when there is nothing to go on — not 0, which would read as clean', () => {
+        expect(check()).toMatchObject({ code: 2, out: expect.stringContaining('no rebuild recorded') });
+      });
+
+      /**
+       * The case the whole `tip:` mechanism exists for: an agent that has
+       * just caught its lane up must not read its own dealt-with conflict
+       * back as a live one, and must not be told everything is fine either.
+       */
+      it('exits 2 once a recorded lane has moved — the record can answer neither way', () => {
+        writeRecord(
+          `state: failed\ncode: conflict\nlane: feat/a\ntip: feat/a ${'0'.repeat(40)}\n`,
+        );
+        const { code, out } = check();
+        expect(code).toBe(2);
+        expect(out).toContain('rebuild to re-check');
+      });
+    });
+  });
+
   it('waits for the rebuild lock rather than corrupting state', async () => {
     // Hold the lock the rebuild uses, then release it mid-wait. Async on
     // purpose: execFileSync blocks the event loop, so a timer could never
