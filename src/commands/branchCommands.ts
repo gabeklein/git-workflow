@@ -3,9 +3,14 @@ import * as vscode from 'vscode';
 import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
 import { syncBranchWithRemote } from '../git/syncRemote';
+import { splitIgnored, summarizeIgnored } from '../git/expendableIgnored';
 import { ignoredFiles, isWorktreeDirty } from '../git/plumbing';
 import { removeWorktree } from '../git/worktreeAdmin';
-import { previewBaseRef, previewBranch } from '../git/preview';
+import {
+  expendableIgnoredPatterns,
+  previewBaseRef,
+  previewBranch,
+} from '../git/preview';
 import {
   findLandedBranches,
   pruneLandedBranches,
@@ -25,10 +30,11 @@ import type { WorktreeTreeProvider } from '../views/worktreeTree';
  *
  * So prune removes the holding worktree first, under the same conditions
  * the landed quick-delete uses: clean, unlocked, attached, and holding no
- * ignored files. Ignored files are the one thing removal can still
- * destroy — the dirty probe cannot see them and `git worktree remove`
- * takes them without complaint — so a checkout holding any keeps its
- * folder, and says why.
+ * ignored files it would be a loss to delete. Ignored files are the one
+ * thing removal can still destroy — the dirty probe cannot see them and
+ * `git worktree remove` takes them without complaint — so a checkout
+ * holding one keeps its folder, and says why. Derived ones (node_modules,
+ * dist; `expendableIgnored.ts`) are not a loss and hold nothing.
  */
 async function releaseHoldingWorktree(
   worktree: string,
@@ -36,16 +42,24 @@ async function releaseHoldingWorktree(
 ): Promise<{ ok: true } | { ok: false; why: string }> {
   if (await isWorktreeDirty(worktree))
     return { ok: false, why: 'its checkout has uncommitted changes' };
-  const ignored = await ignoredFiles(worktree);
-  if (ignored.length > 0) {
+  const ignored = splitIgnored(
+    await ignoredFiles(worktree),
+    expendableIgnoredPatterns(),
+  );
+  if (ignored.kept.length > 0) {
     return {
       ok: false,
-      why: `its checkout holds ignored files (${ignored.slice(0, 3).join(', ')})`,
+      why: `its checkout holds ignored files (${summarizeIgnored(ignored.kept)})`,
     };
   }
   const removed = await removeWorktree(worktree, {});
   if (!removed.ok) return { ok: false, why: removed.message };
-  log.appendLine(`Removed landed worktree ${worktree}`);
+  log.appendLine(
+    `Removed landed worktree ${worktree}` +
+      (ignored.expendable.length > 0
+        ? ` (also deleted ignored ${summarizeIgnored(ignored.expendable)})`
+        : ''),
+  );
   return { ok: true };
 }
 

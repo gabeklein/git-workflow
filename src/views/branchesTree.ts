@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { listBranches, type BranchInfo } from '../git/branches';
 import type { FileChange } from '../git/compare';
 import {
+  expendableIgnoredPatterns,
   isAutoRemoveLandedEnabled,
   isPruneRemoteRefsEnabled,
   previewBaseRef,
@@ -399,6 +400,7 @@ export class BranchesTreeProvider
         // The one non-git fact: a folder somebody has a file open from is
         // not idle, whatever git says about it.
         isOpen: (dir) => hasOpenEditorIn(dir),
+        expendable: expendableIgnoredPatterns(),
         log: (line) => this.output.appendLine(line),
       });
       this.landedCheckouts = result.blocked;

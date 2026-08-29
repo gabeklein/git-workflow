@@ -20,6 +20,7 @@ export {
   catchUpStrategy,
   previewBaseRef,
   previewBranch,
+  expendableIgnoredPatterns,
   isAutoRemoveLandedEnabled,
   isCommitGuardEnabled,
   isPruneRemoteRefsEnabled,

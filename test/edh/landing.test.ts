@@ -131,6 +131,9 @@ describe('base badges', () => {
 describe('landed checkouts clear themselves', () => {
   const sweptPath = path.join(repo, '.worktrees', 'feat-swept');
   const heldPath = path.join(repo, '.worktrees', 'feat-held');
+  const derivedPath = path.join(repo, '.worktrees', 'feat-derived');
+  const excludeFile = path.join(repo, '.git', 'info', 'exclude');
+  let excludeBefore = '';
   let api: TestApi;
   const config = () => vscode.workspace.getConfiguration('worktreeCompare');
 
@@ -143,6 +146,11 @@ describe('landed checkouts clear themselves', () => {
       true,
       vscode.ConfigurationTarget.Workspace,
     );
+    // Shared across every worktree, and restored after — later scenarios
+    // in this sequential suite must not inherit an ignore rule.
+    excludeBefore = fs.existsSync(excludeFile)
+      ? fs.readFileSync(excludeFile, 'utf8')
+      : '';
   });
 
   /** Landed by CONTENT: an empty commit leaves the base tree unchanged. */
@@ -158,10 +166,11 @@ describe('landed checkouts clear themselves', () => {
       false,
       vscode.ConfigurationTarget.Workspace,
     );
-    for (const d of [sweptPath, heldPath]) {
+    fs.writeFileSync(excludeFile, excludeBefore);
+    for (const d of [sweptPath, heldPath, derivedPath]) {
       if (fs.existsSync(d)) git(repo, ['worktree', 'remove', '--force', d]);
     }
-    for (const b of ['feat/swept', 'feat/held']) {
+    for (const b of ['feat/swept', 'feat/held', 'feat/derived']) {
       try {
         git(repo, ['branch', '-D', b]);
       } catch {
@@ -179,6 +188,30 @@ describe('landed checkouts clear themselves', () => {
     assert.ok(
       git(repo, ['rev-parse', '-q', '--verify', 'refs/heads/feat/swept']),
       'the branch ref is kept — refs are Prune Landed Branches business',
+    );
+  });
+
+  it('sweeps one whose only ignored files are derived', async () => {
+    // The reason this exists: a repo that installs per worktree has a
+    // node_modules in every lane, so "any ignored file keeps the folder"
+    // kept every landed folder forever. Derived files are not what that
+    // rule protects.
+    makeLanded('feat/derived', derivedPath);
+    fs.appendFileSync(excludeFile, 'node_modules/\n');
+    fs.mkdirSync(path.join(derivedPath, 'node_modules'), { recursive: true });
+    fs.writeFileSync(path.join(derivedPath, 'node_modules', 'x.js'), '');
+    assert.equal(
+      git(derivedPath, ['status', '--porcelain']).trim(),
+      '',
+      'precondition: the install is ignored, so the checkout reads clean',
+    );
+    await poll(
+      'the landed checkout is swept, node_modules and all',
+      60000,
+      async () => {
+        await run('worktreeCompare.refresh');
+        return !fs.existsSync(derivedPath);
+      },
     );
   });
 
