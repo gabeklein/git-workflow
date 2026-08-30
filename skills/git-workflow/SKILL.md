@@ -187,6 +187,7 @@ out; do it before telling anyone a branch is still published.
 ```sh
 "$dir/gw-lane" status         # leads with the last rebuild
 "$dir/gw-lane" check          # exit 0 ok · 1 failed · 2 nothing to go on
+"$dir/gw-lane" rebuild        # rebuild now, and wait for the answer
 cat "$dir/focus-status"       # the same record, raw
 ```
 
@@ -226,12 +227,17 @@ Fix it. That is ordinary work on your own branch, not an intervention:
 3. **Report which you did.** The preview changed either way, and the row will
    not explain itself.
 
-Then let it rebuild. With the editor open that is automatic — the rebuild
-watches lane tips, so your catch-up commit triggers one and the record
-refreshes within a tick; `check` returning 2 (`moved since`) means exactly
-that it has not happened yet. **You cannot rebuild headlessly**; with the
-editor closed, say the fix is in and the preview needs a rebuild rather than
-implying you verified one.
+Then rebuild and confirm. `gw-lane rebuild` works with the editor closed —
+preview mutations are performed by a daemon that any client may start, so
+this is the same rebuild the sidebar runs, not an approximation of it. With
+the editor open one also happens on its own: the rebuild watches lane tips,
+so your catch-up commit triggers one.
+
+**Verify rather than predict.** `rebuild` waits for the answer and exits 0
+built · 1 the rebuild failed · 2 it could not run at all (no daemon could be
+started, preview is off, the settings are not recorded). Report what came
+back. Only a 2 justifies saying the fix is in and a rebuild is still needed —
+and say which of those it was.
 
 What is NOT yours to fix, whatever the record says:
 
@@ -260,3 +266,11 @@ the git state.
 | Rebased a pushed lane | **Force Push (with lease)** — their call |
 | Branch list has grown | **Prune Landed Branches** |
 | Diagnosing anything | **Output → Git Workflow** (or `focus-status`, headless) |
+
+**The preview has one writer.** A daemon performs every mutation, and the
+sidebar asks it through the same request directory `gw-lane` uses — no client
+is privileged. Two consequences worth holding onto: the preview can change
+under you at any moment unless you are the one who asked for the change, and
+`gw-lane owner` is how you find out who is driving. Never hand-edit anything
+under `focus-queue/`; submit through the CLI, which writes and renames so a
+half-written request is never read.

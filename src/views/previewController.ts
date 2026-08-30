@@ -1,5 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { asRebuildResult, submit, writeDaemonCommand } from '../daemon/client';
+import { queuePaths } from '../daemon/protocol';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
@@ -24,9 +26,11 @@ import {
   installLaneCli,
   laneCliPath,
   isCommitGuardEnabled,
+  clearPreviewSettings,
   clearPreviewStatus,
   uninstallCommitGuard,
   uninstallLaneCli,
+  writePreviewSettings,
   baseStatusFor,
   dropAppliedLane,
   dropCandidateLane,
@@ -72,6 +76,9 @@ interface PreviewHost {
   /** Override ?? genuine inference for a worktree's base — undefined when
    *  there is no evidence (auto-membership must never enroll on a guess). */
   genuineBaseFor(worktreePath: string): Promise<string | undefined>;
+  /** Where this extension is installed — the daemon bundle ships beside
+   *  it, and the recipe for starting it has to name a real path. */
+  extensionPath?(): string | undefined;
 }
 
 export interface PreviewState {
@@ -631,8 +638,18 @@ export class PreviewController implements vscode.Disposable {
         await uninstallLaneCli(cwd);
         // A recorded conflict outlasting the preview it described is worse
         // than no record: it reads as a live failure in a repo that has no
-        // preview to fail.
+        // preview to fail. The settings go for the same reason — a daemon
+        // started later must refuse rather than rebuild a preview that was
+        // turned off.
         await clearPreviewStatus(cwd);
+        await clearPreviewSettings(cwd);
+        // Ask any daemon to go; never start one to tell it to stop.
+        await submit(cwd, {
+          op: 'stop',
+          reason: 'preview off',
+          spawnIfIdle: false,
+          timeoutMs: 2000,
+        }).catch(() => undefined);
         return;
       }
       // The lane CLI is how anything outside VS Code joins the preview, so
@@ -642,6 +659,19 @@ export class PreviewController implements vscode.Disposable {
           `Lane CLI installed: ${await laneCliPath(cwd)}`,
         );
       }
+      // The settings the daemon (and its vscode shim) run on, plus how to
+      // start it. Both are rewritten here rather than at enable time so
+      // they follow a renamed branch, a changed base, and an extension
+      // that moved on disk after an update.
+      await writePreviewSettings(cwd, {
+        branch,
+        base: previewBaseRef(),
+        checkout: workingPath,
+        autoResolve: vscode.workspace
+          .getConfiguration('worktreeCompare')
+          .get<string>('previewAutoResolve'),
+      });
+      await this.recordDaemonCommand(cwd);
       if (!isCommitGuardEnabled()) {
         await uninstallCommitGuard(cwd);
         return;
@@ -691,6 +721,62 @@ export class PreviewController implements vscode.Disposable {
     this.host.refresh();
   }
 
+  /**
+   * Record how to start the daemon for this repo.
+   *
+   * Written into the git common dir, next to the state it serves, so a
+   * shell — which has no idea where a VS Code extension lives — can start
+   * one. It names the editor's own node (`process.execPath` run with
+   * ELECTRON_RUN_AS_NODE) because that is frequently the only node on the
+   * machine, and the bundle beside this extension, so an update moves both
+   * together. Rewritten on every reconcile: an extension that updated to a
+   * new version directory would otherwise leave a recipe pointing at a
+   * path that no longer exists.
+   */
+  private async recordDaemonCommand(cwd: string): Promise<void> {
+    const root = this.host.extensionPath?.();
+    if (!root) return;
+    const script = path.join(root, 'dist', 'daemon.js');
+    try {
+      await writeDaemonCommand(await queuePaths(cwd), {
+        node: process.execPath,
+        script,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Daemon command not recorded: ${message}`);
+    }
+  }
+
+  /**
+   * Ask the daemon to rebuild; run it here if there is no daemon to ask.
+   *
+   * The editor going through the same queue as `gw-lane` is the point of
+   * the daemon — one writer, and no privileged client. The fallback is not
+   * a hedge against that: it is what makes the change adoptable. A repo
+   * whose extension has not written a recipe yet, a machine where spawning
+   * fails, an EDH with no bundle on disk — all of those must still rebuild,
+   * and the engine's own lock (which the daemon takes too) keeps them
+   * correct if a daemon does turn up mid-flight.
+   */
+  private async rebuildVia(
+    workingPath: string,
+    reason: string,
+  ): Promise<RebuildResult> {
+    let unreachable: string | undefined;
+    try {
+      const result = await submit(workingPath, { op: 'rebuild', reason });
+      if (result.kind === 'answered') return asRebuildResult(result.response);
+      unreachable = result.message;
+    } catch (err) {
+      unreachable = err instanceof Error ? err.message : String(err);
+    }
+    this.host.output.appendLine(
+      `Preview daemon unavailable (${unreachable}) — rebuilding in-process`,
+    );
+    return rebuildPreview(workingPath, previewBaseRef());
+  }
+
   /** Run a rebuild and surface the outcome on the preview row. */
   async runRebuild(reason: string): Promise<RebuildResult> {
     const workingPath = this.previewPath;
@@ -717,7 +803,7 @@ export class PreviewController implements vscode.Disposable {
         this.lastBaseFetchAt = Date.now();
         await fetchPreviewBase(workingPath, previewBaseRef());
       }
-      const result = await rebuildPreview(workingPath, previewBaseRef());
+      const result = await this.rebuildVia(workingPath, reason);
       if (result.ok) {
         this.error = undefined;
         this.autoResolved = result.resolved;

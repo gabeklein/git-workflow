@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
 import { STATUS_FILE } from './statusFile';
+import { DAEMON_CMD_FILE, DAEMON_LOCK, QUEUE_DIR } from '../../daemon/protocol';
 
 /**
  * A headless way to join or leave the preview.
@@ -34,6 +35,8 @@ ${SENTINEL}
 #
 #   gw-lane status           how the preview built, what is applied
 #   gw-lane check            exit 0 ok · 1 failed · 2 nothing to go on
+#   gw-lane rebuild          ask the daemon to rebuild, and wait for it
+#   gw-lane owner            who is serving this repo, if anyone
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -50,6 +53,10 @@ applied="$dir/${APPLIED_FILE}"
 candidates="$dir/${CANDIDATES_FILE}"
 built="$dir/${STATUS_FILE}"
 lock="$dir/${LOCK_DIR}"
+queue="$dir/${QUEUE_DIR}"
+claim="$dir/${DAEMON_LOCK}"
+owner="$claim/owner"
+daemon_cmd="$dir/${DAEMON_CMD_FILE}"
 
 # The rebuild holds this while it rewrites the same files. It is held for
 # a second or two at most, so wait for it rather than failing.
@@ -94,8 +101,118 @@ moved_list() {
 }
 
 field() { sed -n "s/^$1: //p" "$built" 2>/dev/null | head -1; }
+value() { sed -n "s/^$2: //p" "$1" 2>/dev/null | head -1; }
+
+# Is somebody serving this repo? A claim from ANOTHER host is honoured
+# blind: we cannot read its process table, and guessing wrong would mean
+# two writers, which is the one thing the queue exists to prevent.
+daemon_alive() {
+  [ -f "$owner" ] || return 1
+  opid=$(value "$owner" pid)
+  ohost=$(value "$owner" host)
+  [ -n "$opid" ] || return 1
+  if [ -n "$ohost" ] && [ "$ohost" != "$(hostname)" ]; then
+    return 0
+  fi
+  kill -0 "$opid" 2>/dev/null
+}
+
+# Start one. Safe to call when another is already running: the loser of
+# the claim exits immediately, so a race costs a process that lives for a
+# few milliseconds rather than a lock nobody can resolve.
+spawn_daemon() {
+  [ -f "$daemon_cmd" ] || return 1
+  dnode=$(value "$daemon_cmd" node)
+  dscript=$(value "$daemon_cmd" script)
+  [ -n "$dnode" ] && [ -n "$dscript" ] && [ -f "$dscript" ] || return 1
+  ELECTRON_RUN_AS_NODE=1 nohup "$dnode" "$dscript" --common "$dir" \
+    >/dev/null 2>&1 &
+  n=0
+  while [ $n -lt 50 ]; do
+    daemon_alive && return 0
+    n=$((n + 1))
+    sleep 0.1
+  done
+  return 1
+}
+
+# Write, then rename: a request appears in req/ complete or not at all.
+submit() {
+  mkdir -p "$queue/tmp" "$queue/req" "$queue/res"
+  id=$(basename "$(mktemp -u "$queue/tmp/XXXXXXXX")")
+  printf 'op: %s\nreason: %s\nclient-pid: %s\nclient-host: %s\n' \
+    "$1" "$2" "$$" "$(hostname)" > "$queue/tmp/$id"
+  mv "$queue/tmp/$id" "$queue/req/$id"
+  echo "$id"
+}
+
+# $1 = id, $2 = seconds to wait. Prints the answer; 1 if none came.
+await() {
+  n=0
+  limit=$(( $2 * 10 ))
+  while [ $n -lt $limit ]; do
+    if [ -f "$queue/res/$1" ]; then
+      cat "$queue/res/$1"
+      rm -f "$queue/res/$1"
+      return 0
+    fi
+    n=$((n + 1))
+    sleep 0.1
+  done
+  return 1
+}
+
+if [ "$cmd" = "owner" ]; then
+  if daemon_alive; then
+    echo "serving: pid $(value "$owner" pid) on $(value "$owner" host) since $(value "$owner" started)"
+    exit 0
+  fi
+  if [ -f "$owner" ]; then
+    echo "stale claim: pid $(value "$owner" pid) on $(value "$owner" host) is gone (the next daemon sweeps it)"
+  else
+    echo "nobody is serving this repo"
+  fi
+  exit 1
+fi
+
+if [ "$cmd" = "rebuild" ]; then
+  if ! daemon_alive; then
+    if ! spawn_daemon; then
+      echo "cannot reach or start a preview daemon (focus-daemon-cmd missing or unusable) — is preview on?" >&2
+      exit 2
+    fi
+  fi
+  id=$(submit rebuild "gw-lane (pid $$)")
+  answer=$(await "$id" 180) || {
+    echo "no answer in 180s — the daemon may still be working; try: gw-lane status" >&2
+    exit 2
+  }
+  ok=$(echo "$answer" | sed -n 's/^ok: //p' | head -1)
+  code=$(echo "$answer" | sed -n 's/^code: //p' | head -1)
+  msg=$(echo "$answer" | sed -n 's/^message: //p' | head -1)
+  if [ "$ok" = "yes" ]; then
+    echo "rebuilt: $(echo "$answer" | sed -n 's/^tree: //p' | head -1)"
+    exit 0
+  fi
+  if [ -n "$msg" ]; then
+    echo "rebuild failed: $code — $msg" >&2
+  else
+    echo "rebuild failed: $code" >&2
+  fi
+  # Same three answers as check: a rebuild that never ran (no settings, an
+  # op this daemon does not know) is not a failed preview.
+  case "$code" in
+    unconfigured|unsupported|busy) exit 2 ;;
+    *) exit 1 ;;
+  esac
+fi
 
 if [ "$cmd" = "status" ]; then
+  if daemon_alive; then
+    echo "daemon: serving (pid $(value "$owner" pid))"
+  else
+    echo "daemon: not running (started on demand)"
+  fi
   # Build outcome FIRST: when it failed, the checkout still holds the last
   # good tree, so which lanes are "applied" is the less urgent fact.
   echo "last rebuild:"
@@ -175,7 +292,7 @@ case "$cmd" in
     echo "$branch is out of the preview"
     ;;
   *)
-    echo "usage: gw-lane <status|check|add|remove> [branch]" >&2
+    echo "usage: gw-lane <status|check|rebuild|owner|add|remove> [branch]" >&2
     exit 2
     ;;
 esac

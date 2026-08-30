@@ -122,6 +122,7 @@ export class WorktreeTreeProvider
       refreshCompare: (p) => this.refreshCompare(p),
       moveSelectionOff: (p) => this.moveSelectionOff(p),
       genuineBaseFor: (p) => this.baseStatus.genuineBaseFor(p),
+      extensionPath: () => context.extensionPath,
     });
     this.baseStatus = new BaseStatusTracker({
       output,

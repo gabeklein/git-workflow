@@ -133,7 +133,15 @@ To opt in, once the work is worth previewing:
 "$(git rev-parse --git-common-dir)/gw-lane" status       # how it built, then what is in it
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 "$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown
+"$(git rev-parse --git-common-dir)/gw-lane" rebuild      # rebuild, and wait for it
+"$(git rev-parse --git-common-dir)/gw-lane" owner        # who is serving this repo
 ```
+
+`rebuild` is real now: a daemon does every preview mutation, and both the
+editor and this CLI ask it through a request directory in the git common
+dir. So you can fix your lane and then rebuild to *verify* it, rather than
+reporting that a rebuild is needed. It starts one if none is running and
+exits when idle; `owner` says who is serving.
 
 `status` leads with the **last rebuild** (also readable raw as
 `focus-status`), because being applied is not the same as being in the tree:
@@ -143,9 +151,10 @@ Read the record before concluding anything about the preview — `next:` names
 the move that clears it, and `tip:` is what makes a stale conflict
 recognisable as one already dealt with. When the failure names **your** lane,
 fixing it is ordinary work: catch the lane up in its own worktree, or
-`gw-lane remove` so nobody else's preview stays blocked. You cannot rebuild
-headlessly, so with the editor closed say the fix is in and a rebuild is
-needed — do not imply you verified one. The skill's §8 has the guardrails.
+`gw-lane remove` so nobody else's preview stays blocked. Then
+`gw-lane rebuild` and check the result — verifying is the normal case now,
+so reporting "a rebuild is needed" is only honest when the rebuild itself
+could not run. The skill's §8 has the guardrails.
 
 Inside the editor the same thing is **Git Workflow: Add to Preview**
 (`worktreeCompare.addToPreview`).

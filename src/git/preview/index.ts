@@ -102,6 +102,15 @@ export {
   uninstallLaneCli,
 } from './laneCli';
 
+// settings
+export {
+  CONFIG_FILE,
+  type PreviewSettings,
+  clearPreviewSettings,
+  readPreviewSettings,
+  writePreviewSettings,
+} from './settings';
+
 // statusFile
 export {
   STATUS_FILE,
