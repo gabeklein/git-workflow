@@ -53,7 +53,7 @@ import {
   listExcludedLanes,
   listWipLanes,
   pruneDeadLanes,
-  rebuildPreview,
+  rebuildFromSettings,
   setWipLane,
   type AbsorbResult,
   type AbsorbTarget,
@@ -774,7 +774,18 @@ export class PreviewController implements vscode.Disposable {
     this.host.output.appendLine(
       `Preview daemon unavailable (${unreachable}) — rebuilding in-process`,
     );
-    return rebuildPreview(workingPath, previewBaseRef());
+    // The SAME operation the daemon performs, with the editor's live
+    // settings passed in rather than read back from the file it just
+    // wrote. Nothing about the rebuild is reimplemented here: if these two
+    // paths could differ, the preview would depend on who built it.
+    const outcome = await rebuildFromSettings(workingPath, {
+      branch: previewBranch(),
+      base: previewBaseRef(),
+      checkout: workingPath,
+    });
+    return outcome.kind === 'ran'
+      ? outcome.result
+      : { ok: false, code: 'error', message: outcome.message };
   }
 
   /** Run a rebuild and surface the outcome on the preview row. */

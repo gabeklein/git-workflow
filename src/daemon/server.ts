@@ -2,8 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { rebuildPreview } from '../git/preview/engine';
-import { readPreviewSettings } from '../git/preview/settings';
+import { rebuildFromSettings } from '../git/preview/rebuildOp';
 import {
   type PreviewRequest,
   type PreviewResponse,
@@ -49,13 +48,6 @@ export interface DaemonOptions {
   log?: (line: string) => void;
   /** Stop after this many requests — tests, mostly. */
   maxRequests?: number;
-  /**
-   * Called with the settings read for each request, before the engine
-   * runs. The bundle uses it to prime its `vscode` shim, so the editor
-   * rewriting focus-config takes effect on the very next request rather
-   * than at the next daemon start.
-   */
-  onSettings?: (settings: import('../git/preview/settings').PreviewSettings) => void;
 }
 
 export class PreviewDaemon {
@@ -238,24 +230,11 @@ export class PreviewDaemon {
 
   private async rebuild(req: PreviewRequest): Promise<PreviewResponse> {
     const base = { id: req.id, op: req.op };
-    const settings = await readPreviewSettings(this.opts.common);
-    if (!settings) {
-      // Not a failure of the rebuild — a repo where preview is off, or one
-      // whose editor has not written its settings yet. Saying so beats
-      // rebuilding against a guessed branch.
-      return {
-        ...base,
-        ok: false,
-        code: 'unconfigured',
-        message:
-          'no preview settings recorded (focus-config) — preview may be off',
-      };
+    const outcome = await rebuildFromSettings(this.opts.common);
+    if (outcome.kind === 'unconfigured') {
+      return { ...base, ok: false, code: 'unconfigured', message: outcome.message };
     }
-    this.opts.onSettings?.(settings);
-    const result = await rebuildPreview(settings.checkout, settings.base, {
-      branch: settings.branch,
-      baseRef: settings.base,
-    });
+    const result = outcome.result;
     if (result.ok) {
       return {
         ...base,

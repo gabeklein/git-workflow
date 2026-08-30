@@ -71,6 +71,9 @@ export {
   rebuildPreview,
 } from './engine';
 
+// rebuildOp — "rebuild this repo's preview", the one the daemon runs too
+export { type RebuildOutcome, rebuildFromSettings } from './rebuildOp';
+
 // lifecycle
 export {
   alignPreviewBranchName,
@@ -107,6 +110,7 @@ export {
   CONFIG_FILE,
   type PreviewSettings,
   clearPreviewSettings,
+  parsePreviewSettings,
   readPreviewSettings,
   writePreviewSettings,
 } from './settings';

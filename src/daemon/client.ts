@@ -29,6 +29,16 @@ import {
  * Every call can fail to reach a daemon at all, and that is a normal
  * answer rather than an exception — 'unreachable' means the caller should
  * say so (or fall back), never that the preview is fine.
+ *
+ * THIS PROTOCOL IS IMPLEMENTED TWICE — here, and in sh inside the `gw-lane`
+ * script (laneCli.ts: daemon_alive / spawn_daemon / submit / await). That
+ * is the price of the directory transport, and it is the right price: the
+ * alternative is sh calling a node client to reach a node daemon, which
+ * puts a runtime dependency at every call site and makes the shell a
+ * second-class client of a feature that exists to serve it. The duplicated
+ * surface is deliberately tiny — write-and-rename, poll for a file, read
+ * an owner — and both sides are covered by tests that drive the real
+ * script and the real bundle. Change one, change the other.
  */
 
 const WAIT_MS = 120_000;

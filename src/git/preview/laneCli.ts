@@ -103,6 +103,12 @@ moved_list() {
 field() { sed -n "s/^$1: //p" "$built" 2>/dev/null | head -1; }
 value() { sed -n "s/^$2: //p" "$1" 2>/dev/null | head -1; }
 
+# --- the preview protocol, in sh -----------------------------------------
+# The same four moves as src/daemon/client.ts, which is the point: the
+# transport is a directory precisely so that sh is a first-class client
+# rather than something that has to call node to reach node. Keep the two
+# in step — both are covered by tests that run the real script.
+#
 # Is somebody serving this repo? A claim from ANOTHER host is honoured
 # blind: we cannot read its process table, and guessing wrong would mean
 # two writers, which is the one thing the queue exists to prevent.

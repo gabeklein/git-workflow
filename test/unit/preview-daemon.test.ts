@@ -81,6 +81,35 @@ describe('preview daemon', () => {
     );
   });
 
+  /**
+   * The property the fallback depends on: the editor and the daemon do not
+   * merely call the same engine, they perform the same OPERATION. If these
+   * two ever diverged, the preview would depend on who built it — which is
+   * exactly the bug a single writer is supposed to make impossible.
+   */
+  it('is the same operation the editor runs in-process', async () => {
+    const { rebuildFromSettings } = await import(
+      '../../src/git/preview/rebuildOp'
+    );
+    // The editor's path: settings passed in, never read back from disk
+    const direct = await rebuildFromSettings(repo, {
+      branch: 'preview/main',
+      base: 'origin/main',
+      checkout: repo,
+    });
+    expect(direct).toMatchObject({ kind: 'ran', result: { ok: true } });
+    const tree = fs.readFileSync(path.join(repo, 'a.txt'), 'utf8');
+
+    // The daemon's path: the same operation, settings read from focus-config
+    git(repo, ['reset', '-q', '--hard', 'main']);
+    enqueue('r1', 'op: rebuild\n');
+    const daemon = new PreviewDaemon({ common, maxRequests: 1 });
+    await daemon.claim();
+    await daemon.serve();
+    expect(answer('r1').get('ok')).toBe('yes');
+    expect(fs.readFileSync(path.join(repo, 'a.txt'), 'utf8')).toBe(tree);
+  });
+
   it('answers an op it does not know instead of dying on it', async () => {
     enqueue('r1', 'op: teleport\n');
     const daemon = new PreviewDaemon({ common, maxRequests: 1 });

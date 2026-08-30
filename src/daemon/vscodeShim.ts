@@ -17,19 +17,24 @@
  * capability into a wrong answer somewhere far from here.
  */
 
-let values = new Map<string, unknown>();
+let resolve: (key: string) => unknown = () => undefined;
 
-/** Load the resolved settings the editor wrote. */
-export function primeConfiguration(entries: [string, unknown][]): void {
-  values = new Map(entries);
+/**
+ * Where settings come from. A resolver rather than a snapshot: it is
+ * consulted on every read, so the editor rewriting focus-config takes
+ * effect immediately instead of at the next daemon start.
+ */
+export function resolveConfigurationWith(
+  resolver: (key: string) => unknown,
+): void {
+  resolve = resolver;
 }
 
 class Configuration {
   constructor(private readonly section: string) {}
 
   get<T>(key: string, fallback?: T): T | undefined {
-    const value = values.get(`${this.section}.${key}`);
-    return (value as T) ?? fallback;
+    return (resolve(`${this.section}.${key}`) as T) ?? fallback;
   }
 }
 

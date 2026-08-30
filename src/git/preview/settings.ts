@@ -58,15 +58,13 @@ export async function writePreviewSettings(
   return true;
 }
 
-export async function readPreviewSettings(
-  cwd: string,
-): Promise<PreviewSettings | undefined> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(path.join(await commonDir(cwd), CONFIG_FILE), 'utf8');
-  } catch {
-    return undefined;
-  }
+/**
+ * Parse, separately from reading, because the daemon's `vscode` shim needs
+ * these values SYNCHRONOUSLY inside a config getter. One parser, two
+ * readers — the alternative was a second copy of this format living in the
+ * shim, which is how the file and its reader drift apart.
+ */
+export function parsePreviewSettings(raw: string): PreviewSettings | undefined {
   const values = new Map<string, string>();
   for (const line of raw.split('\n')) {
     if (!line || line.startsWith('#')) continue;
@@ -81,6 +79,18 @@ export async function readPreviewSettings(
   // "assume the defaults".
   if (!branch || !base || !checkout) return undefined;
   return { branch, base, checkout, autoResolve: values.get('autoResolve') };
+}
+
+export async function readPreviewSettings(
+  cwd: string,
+): Promise<PreviewSettings | undefined> {
+  try {
+    return parsePreviewSettings(
+      await fs.readFile(path.join(await commonDir(cwd), CONFIG_FILE), 'utf8'),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 export async function clearPreviewSettings(cwd: string): Promise<void> {
