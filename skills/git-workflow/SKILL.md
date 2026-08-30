@@ -188,6 +188,7 @@ out; do it before telling anyone a branch is still published.
 "$dir/gw-lane" status         # leads with the last rebuild
 "$dir/gw-lane" check          # exit 0 ok · 1 failed · 2 nothing to go on
 "$dir/gw-lane" rebuild        # rebuild now, and wait for the answer
+"$dir/gw-lane" refresh        # make the editor look again (see below)
 cat "$dir/focus-status"       # the same record, raw
 ```
 
@@ -266,6 +267,13 @@ the git state.
 | Rebased a pushed lane | **Force Push (with lease)** — their call |
 | Branch list has grown | **Prune Landed Branches** |
 | Diagnosing anything | **Output → Git Workflow** (or `focus-status`, headless) |
+
+**The editor keeps up by watching, so mostly you need do nothing.** Commits,
+branches, rebases and worktree changes all move refs, which it notices within
+a moment. What it cannot see is a file written into a checkout — nothing under
+`.git` changed — so if a row disagrees with your terminal, `gw-lane refresh`
+asks for a fresh look. It is a signal with no reply: report what you did, not
+that the UI agrees.
 
 **The preview has one writer.** A daemon performs every mutation, and the
 sidebar asks it through the same request directory `gw-lane` uses — no client

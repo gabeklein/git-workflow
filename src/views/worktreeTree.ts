@@ -142,6 +142,10 @@ export class WorktreeTreeProvider
         void this.baseStatus.refresh();
       },
       onActivity: () => this._onGitActivity.fire(),
+      onRefreshRequested: (reason) => {
+        this.output.appendLine(`Refresh requested (${reason})`);
+        this.refresh();
+      },
     });
 
     this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);

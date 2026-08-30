@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
 import { STATUS_FILE } from './statusFile';
 import { DAEMON_CMD_FILE, DAEMON_LOCK, QUEUE_DIR } from '../../daemon/protocol';
+import { REFRESH_FILE } from '../refreshSignal';
 
 /**
  * A headless way to join or leave the preview.
@@ -37,6 +38,7 @@ ${SENTINEL}
 #   gw-lane check            exit 0 ok · 1 failed · 2 nothing to go on
 #   gw-lane rebuild          ask the daemon to rebuild, and wait for it
 #   gw-lane owner            who is serving this repo, if anyone
+#   gw-lane refresh          ask any editor watching to catch up now
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -57,6 +59,7 @@ queue="$dir/${QUEUE_DIR}"
 claim="$dir/${DAEMON_LOCK}"
 owner="$claim/owner"
 daemon_cmd="$dir/${DAEMON_CMD_FILE}"
+refresh="$dir/${REFRESH_FILE}"
 
 # The rebuild holds this while it rewrites the same files. It is held for
 # a second or two at most, so wait for it rather than failing.
@@ -167,6 +170,15 @@ await() {
   done
   return 1
 }
+
+# Not a daemon op: a signal is not a mutation, so there is nothing to
+# serialise and nobody to answer. The editor watches this directory and
+# recognises the stamp; if none is running, this costs one file write.
+if [ "$cmd" = "refresh" ]; then
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$refresh"
+  echo "refresh requested — an editor watching this repo will catch up shortly"
+  exit 0
+fi
 
 if [ "$cmd" = "owner" ]; then
   if daemon_alive; then
@@ -321,7 +333,7 @@ case "$cmd" in
     echo "$branch is out of the preview"
     ;;
   *)
-    echo "usage: gw-lane <status|check|rebuild|owner|add|remove> [branch]" >&2
+    echo "usage: gw-lane <status|check|rebuild|refresh|owner|add|remove> [branch]" >&2
     exit 2
     ;;
 esac

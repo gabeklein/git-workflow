@@ -10,7 +10,15 @@ import * as assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { applied, getApi, git, poll, repo, previewRoot, type TestApi } from './helpers';
+import {
+  applied,
+  getApi,
+  git,
+  poll,
+  previewRoot,
+  repo,
+  type TestApi,
+} from './helpers';
 
 describe('preview daemon', () => {
   let api: TestApi;
@@ -72,6 +80,38 @@ describe('preview daemon', () => {
     // …and the editor sees the same preview, without being told
     await poll('the sidebar catches up with the headless rebuild', 20000, () =>
       (api.preview()?.lanes ?? []).includes('feat/daemon'),
+    );
+  });
+
+  /**
+   * The nudge, for the changes no watcher can see.
+   *
+   * A file written into a checkout touches nothing under `.git`, so the
+   * fs.watch never fires and the ROWS — which come from discovery, not
+   * from a live read — keep their old answer until the 30s fallback poll.
+   * The root checkout is the probe because it is the one whose dirty state
+   * discovery records; the tight timeout is the assertion, since a row
+   * that catches up in a couple of seconds did not wait for the poll.
+   */
+  it('refresh makes the sidebar notice a change no watcher could see', async () => {
+    const rootRow = () =>
+      (api.worktrees() ?? []).find((w) => w.path === previewRoot);
+    assert.equal(rootRow()?.isDirty, false, 'the root checkout starts clean');
+
+    const probe = path.join(previewRoot, 'refresh-probe.txt');
+    fs.writeFileSync(probe, 'written straight into the checkout\n');
+    const gwLane = path.join(common, 'gw-lane');
+    execFileSync(gwLane, ['refresh'], { cwd: repo, encoding: 'utf8' });
+    await poll('the row catches up well inside the 30s poll', 8000, () =>
+      rootRow()?.isDirty === true,
+    );
+
+    // …and back out again: an untracked file survives reset --hard, and
+    // every later scenario expects this checkout clean.
+    fs.rmSync(probe);
+    execFileSync(gwLane, ['refresh'], { cwd: repo, encoding: 'utf8' });
+    await poll('and clean again for the scenarios after this one', 8000, () =>
+      rootRow()?.isDirty === false,
     );
   });
 

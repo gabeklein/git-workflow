@@ -135,6 +135,7 @@ To opt in, once the work is worth previewing:
 "$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown
 "$(git rev-parse --git-common-dir)/gw-lane" rebuild      # rebuild, and wait for it
 "$(git rev-parse --git-common-dir)/gw-lane" owner        # who is serving this repo
+"$(git rev-parse --git-common-dir)/gw-lane" refresh      # tell the sidebar to look again
 ```
 
 `rebuild` is real now: a daemon does every preview mutation, and both the
@@ -142,6 +143,12 @@ editor and this CLI ask it through a request directory in the git common
 dir. So you can fix your lane and then rebuild to *verify* it, rather than
 reporting that a rebuild is needed. It starts one if none is running and
 exits when idle; `owner` says who is serving.
+
+`refresh` is for the changes the editor cannot see: anything you do with
+refs reaches the sidebar on its own (it watches the git dir), but a file
+written into a checkout touches nothing under `.git`, and on a filesystem
+that drops watch events even commits wait for a 30s poll. It is a signal,
+not a request — nothing answers for the UI.
 
 `status` leads with the **last rebuild** (also readable raw as
 `focus-status`), because being applied is not the same as being in the tree:
