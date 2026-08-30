@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { asRebuildResult, submit, writeDaemonCommand } from '../daemon/client';
+import { type LaneOpName, runLaneOp } from '../git/preview/laneOp';
 import { queuePaths } from '../daemon/protocol';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
@@ -18,8 +19,6 @@ import {
   resolveBaseSha,
   writeBasePin,
   abortPreviewMerge,
-  addAppliedLane,
-  addCandidateLane,
   addExcludedLane,
   alignPreviewBranchName,
   installCommitGuard,
@@ -32,8 +31,6 @@ import {
   uninstallLaneCli,
   writePreviewSettings,
   baseStatusFor,
-  dropAppliedLane,
-  dropCandidateLane,
   ensurePreviewPushBlocked,
   fetchPreviewBase,
   findLandedLanes,
@@ -788,6 +785,43 @@ export class PreviewController implements vscode.Disposable {
       : { ok: false, code: 'error', message: outcome.message };
   }
 
+  /**
+   * A membership change, asked for the same way `gw-lane` asks.
+   *
+   * Same shape as rebuildVia and for the same reason: the queue is the
+   * normal path, and running the operation here when no daemon can be
+   * reached is what keeps the change adoptable. Either way it is ONE
+   * implementation (preview/laneOp) — the controller no longer composes
+   * lane-file helpers by hand, which is how its verbs drifted from the
+   * script's in the first place.
+   */
+  private async laneOp(op: LaneOpName, lane: string): Promise<void> {
+    const cwd = this.previewPath;
+    if (!cwd) return;
+    try {
+      const answer = await submit(cwd, {
+        op,
+        lane,
+        reason: `sidebar: ${op}`,
+        timeoutMs: 15_000,
+      });
+      if (answer.kind === 'answered') {
+        if (!answer.response.ok) {
+          this.host.output.appendLine(
+            `Lane ${op} refused: ${answer.response.message ?? answer.response.code}`,
+          );
+        }
+        return;
+      }
+    } catch {
+      // fall through to running it here
+    }
+    const result = await runLaneOp(cwd, op, lane);
+    if (!result.ok) {
+      this.host.output.appendLine(`Lane ${op} refused: ${result.message}`);
+    }
+  }
+
   /** Run a rebuild and surface the outcome on the preview row. */
   async runRebuild(reason: string): Promise<RebuildResult> {
     const workingPath = this.previewPath;
@@ -900,8 +934,7 @@ export class PreviewController implements vscode.Disposable {
     if (!isLaneBranch(branch, previewBaseRef()))
       throw new Error(`${branch} cannot be an preview lane`);
     // Re-adding is also how an excluded auto member comes back
-    await dropExcludedLane(this.previewPath, branch);
-    await addCandidateLane(this.previewPath, branch);
+    await this.laneOp('candidate', branch);
     await this.refreshState();
     this.host.fireTreeData();
   }
@@ -915,9 +948,13 @@ export class PreviewController implements vscode.Disposable {
   async removeCandidate(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
-    await dropCandidateLane(this.previewPath, branch);
-    await addExcludedLane(this.previewPath, branch);
-    if (this.lanes.includes(branch)) return this.hide(branch);
+    // One op: out of the tree, off the list, and kept out. It was three
+    // helper calls split across two methods, which is why the shell's
+    // `remove` and this one had to be compared line by line to see they
+    // agreed.
+    const wasApplied = this.lanes.includes(branch);
+    await this.laneOp('remove', branch);
+    if (wasApplied) return this.runRebuild(`remove ${branch}`);
     await this.refreshState();
     this.host.fireTreeData();
     return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
@@ -934,11 +971,7 @@ export class PreviewController implements vscode.Disposable {
         message: `will not apply ${branch} as a lane`,
       };
     }
-    // Persist candidacy too, so unchecking later keeps the row visible
-    // (and applying an excluded branch is an explicit opt back in)
-    await dropExcludedLane(this.previewPath, branch);
-    await addCandidateLane(this.previewPath, branch);
-    await addAppliedLane(this.previewPath, branch);
+    await this.laneOp('apply', branch);
     return this.runRebuild(`apply ${branch}`);
   }
 
@@ -946,7 +979,7 @@ export class PreviewController implements vscode.Disposable {
   async hide(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
-    await dropAppliedLane(this.previewPath, branch);
+    await this.laneOp('unapply', branch);
     return this.runRebuild(`hide ${branch}`);
   }
 
@@ -962,6 +995,9 @@ export class PreviewController implements vscode.Disposable {
   async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
+    // NOT a lane op: this is the synthetic base-drift segment, which has
+    // no branch to apply and lives only in the exclusion list. Routing it
+    // through runLaneOp would make it a candidate row of its own.
     const baseName = previewBaseRef().replace(/^origin\//, '');
     if (included) {
       await dropExcludedLane(this.previewPath, baseName);
@@ -1172,7 +1208,9 @@ export class PreviewController implements vscode.Disposable {
       `Lanes landed (base moved past them), retiring: ${stale.join(', ')}`,
     );
     for (const lane of stale) {
-      await dropAppliedLane(workingPath, lane).catch(() => {});
+      // Same door as every other membership change, so retirement cannot
+      // mean something subtly different from unchecking
+      await this.laneOp('unapply', lane);
     }
     this.landed = [...new Set([...this.landed, ...stale])];
     this.lanes = this.lanes.filter((l) => !stale.includes(l));

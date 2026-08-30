@@ -146,8 +146,8 @@ spawn_daemon() {
 submit() {
   mkdir -p "$queue/tmp" "$queue/req" "$queue/res"
   id=$(basename "$(mktemp -u "$queue/tmp/XXXXXXXX")")
-  printf 'op: %s\nreason: %s\nclient-pid: %s\nclient-host: %s\n' \
-    "$1" "$2" "$$" "$(hostname)" > "$queue/tmp/$id"
+  printf 'op: %s\nlane: %s\nreason: %s\nclient-pid: %s\nclient-host: %s\n' \
+    "$1" "$branch" "$2" "$$" "$(hostname)" > "$queue/tmp/$id"
   mv "$queue/tmp/$id" "$queue/req/$id"
   echo "$id"
 }
@@ -278,23 +278,46 @@ if ! git rev-parse -q --verify "refs/heads/$branch" >/dev/null; then
   exit 2
 fi
 
+# Membership goes to the daemon when one can be reached, so that the same
+# code decides what "apply" and "remove" mean here and in the sidebar. The
+# direct edit below is the fallback, not a second opinion: it is what keeps
+# a repo working where no daemon can be started, and it takes the same lock
+# the daemon's operation takes.
+ask_daemon() { # $1 = op
+  daemon_alive || spawn_daemon || return 1
+  id=$(submit "$1" "gw-lane (pid $$)") || return 1
+  answer=$(await "$id" 30) || return 1
+  ok=$(echo "$answer" | sed -n 's/^ok: //p' | head -1)
+  if [ "$ok" = "yes" ]; then
+    return 0
+  fi
+  # A refusal is an answer: report it rather than editing the files behind
+  # the daemon's back.
+  echo "$(echo "$answer" | sed -n 's/^message: //p' | head -1)" >&2
+  exit 1
+}
+
 case "$cmd" in
   add)
-    take_lock
-    add_line "$candidates" "$branch"
-    add_line "$applied" "$branch"
-    drop_line "$dir/focus-excluded" "$branch"
-    drop_lock
+    if ! ask_daemon apply; then
+      take_lock
+      add_line "$candidates" "$branch"
+      add_line "$applied" "$branch"
+      drop_line "$dir/focus-excluded" "$branch"
+      drop_lock
+    fi
     echo "$branch is in the preview"
     ;;
   remove)
-    take_lock
-    drop_line "$applied" "$branch"
-    drop_line "$candidates" "$branch"
-    # Persist the choice: an auto-membership pass would otherwise put the
-    # row straight back.
-    add_line "$dir/focus-excluded" "$branch"
-    drop_lock
+    if ! ask_daemon remove; then
+      take_lock
+      drop_line "$applied" "$branch"
+      drop_line "$candidates" "$branch"
+      # Persist the choice: an auto-membership pass would otherwise put the
+      # row straight back.
+      add_line "$dir/focus-excluded" "$branch"
+      drop_lock
+    fi
     echo "$branch is out of the preview"
     ;;
   *)

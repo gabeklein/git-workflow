@@ -242,6 +242,44 @@ describe('preview daemon', () => {
     expect(fs.existsSync(paths().lock)).toBe(false);
   });
 
+  /**
+   * Membership over the queue: the sidebar's checkbox and `gw-lane add`
+   * now reach the same operation by the same route, so "apply" cannot come
+   * to mean two things.
+   */
+  it('serves membership changes, and says whether anything changed', async () => {
+    const daemon = new PreviewDaemon({ common, maxRequests: 2 });
+    await daemon.claim();
+    const serving = daemon.serve();
+    const first = await submit(repo, {
+      op: 'apply',
+      lane: 'feat/a',
+      spawnIfIdle: false,
+      timeoutMs: 10_000,
+    });
+    const again = await submit(repo, {
+      op: 'apply',
+      lane: 'feat/a',
+      spawnIfIdle: false,
+      timeoutMs: 10_000,
+    });
+    await serving;
+    expect(first).toMatchObject({ kind: 'answered' });
+    if (first.kind === 'answered') expect(first.response.ok).toBe(true);
+    if (again.kind === 'answered') {
+      expect(again.response.extra).toContainEqual(['changed', 'no']);
+    }
+  });
+
+  it('refuses a membership request with no lane, instead of guessing', async () => {
+    enqueue('r1', 'op: apply\n');
+    const daemon = new PreviewDaemon({ common, maxRequests: 1 });
+    await daemon.claim();
+    await daemon.serve();
+    expect(answer('r1').get('ok')).toBe('no');
+    expect(answer('r1').get('message')).toContain('needs a lane');
+  });
+
   it('says so plainly when no daemon can be reached or started', async () => {
     // No focus-daemon-cmd: nothing to spawn, and nothing is serving
     const result = await submit(repo, { op: 'ping', timeoutMs: 500 });
@@ -286,6 +324,19 @@ describe('preview daemon', () => {
       );
 
       const cli = await laneCliPath(repo);
+
+      // Membership first, and through the daemon: nothing is serving yet,
+      // so a daemon being up afterwards is the evidence that `add` went
+      // over the queue rather than editing the files itself.
+      execFileSync(cli, ['add', 'feat/a'], {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, GW_DAEMON_IDLE_MS: '1500' },
+      });
+      expect(
+        execFileSync(cli, ['owner'], { cwd: repo, encoding: 'utf8' }),
+      ).toMatch(/serving: pid \d+/);
+
       const out = execFileSync(cli, ['rebuild'], {
         cwd: repo,
         encoding: 'utf8',

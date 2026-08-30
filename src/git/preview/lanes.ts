@@ -52,6 +52,39 @@ export async function writeLaneFile(
   await fs.writeFile(abs, out.length > 0 ? `${out.join('\n')}\n` : '');
 }
 
+/**
+ * Run `fn` while holding the rebuild lock.
+ *
+ * Every writer of these files takes it — the engine across a whole
+ * rebuild, the shell script across an edit — because a membership change
+ * read-modify-written outside it can silently undo a lane the rebuild just
+ * retired. Waits rather than failing: the lock is held for a rebuild, i.e.
+ * seconds, and a client that gave up instantly would fail constantly on a
+ * busy repo.
+ */
+export async function withLaneLock<T>(
+  cwd: string,
+  fn: () => Promise<T>,
+  opts: { waitMs?: number } = {},
+): Promise<T | undefined> {
+  const lock = path.join(await commonDir(cwd), LOCK_DIR);
+  const deadline = Date.now() + (opts.waitMs ?? 10_000);
+  for (;;) {
+    try {
+      await fs.mkdir(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) return undefined;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    await fs.rm(lock, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function listAppliedLanes(cwd: string): Promise<string[]> {
   return readLaneFile(cwd, APPLIED_FILE);
 }

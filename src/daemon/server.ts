@@ -2,6 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as fsSync from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { isLaneOp, runLaneOp } from '../git/preview/laneOp';
+import { readPreviewSettings } from '../git/preview/settings';
 import { rebuildFromSettings } from '../git/preview/rebuildOp';
 import {
   type PreviewRequest,
@@ -218,6 +220,11 @@ export class PreviewDaemon {
         return { ...base, ok: true, extra: [['pid', String(process.pid)]] };
       case 'rebuild':
         return this.rebuild(req);
+      case 'apply':
+      case 'unapply':
+      case 'remove':
+      case 'candidate':
+        return this.membership(req);
       default:
         return {
           ...base,
@@ -226,6 +233,42 @@ export class PreviewDaemon {
           message: `this daemon does not know how to ${req.op || '(nothing)'}`,
         };
     }
+  }
+
+  /**
+   * Who is in the preview. Deliberately does NOT rebuild: membership and
+   * the tree are separate questions, and a client that wants both says so
+   * in two requests — which the queue then serialises anyway. Folding a
+   * rebuild in here would make every checkbox toggle wait for one.
+   */
+  private async membership(req: PreviewRequest): Promise<PreviewResponse> {
+    const base = { id: req.id, op: req.op };
+    if (!req.lane) {
+      return { ...base, ok: false, code: 'error', message: `${req.op} needs a lane` };
+    }
+    if (!isLaneOp(req.op)) {
+      return { ...base, ok: false, code: 'unsupported', message: req.op };
+    }
+    // The repo whose lanes these are: the checkout the editor recorded,
+    // falling back to the common dir when preview is off (leaving is
+    // allowed then; joining will fail on its own for want of a branch).
+    const settings = await readPreviewSettings(this.opts.common);
+    const result = await runLaneOp(
+      settings?.checkout ?? this.opts.common,
+      req.op,
+      req.lane,
+    );
+    if (!result.ok) {
+      return { ...base, ok: false, code: result.code, message: result.message };
+    }
+    return {
+      ...base,
+      ok: true,
+      extra: [
+        ['lane', result.lane],
+        ['changed', result.changed ? 'yes' : 'no'],
+      ],
+    };
   }
 
   private async rebuild(req: PreviewRequest): Promise<PreviewResponse> {
