@@ -117,18 +117,34 @@ describe('preview from a shell', () => {
     );
   });
 
-  it('names nobody as the writer once every operation has finished', () => {
+  /**
+   * Nothing stays resident, so the lock is transient: whoever is writing
+   * finishes and lets go. POLLED, not asserted once — a rebuild the editor
+   * started may still be running, and "somebody is writing right now" is a
+   * correct answer, just not the final one. Asserting it once assumed a
+   * quiescence CI does not owe us, and CI said so.
+   */
+  it('lets go of the lock: no writer outlives its operation', async () => {
     const cli = path.join(common, 'gw-lane');
-    // `owner` exits 1 when there is no live writer — which is the state a
-    // repo should be in between operations, since nothing stays resident
-    let out = '';
-    try {
-      out = execFileSync(cli, ['owner'], { cwd: repo, encoding: 'utf8' });
-      assert.fail(`expected no writer, got: ${out}`);
-    } catch (err) {
-      out = String((err as { stdout?: string }).stdout ?? '');
-    }
-    assert.match(out, /nobody is writing the preview/);
+    const owner = (): { status: number; out: string } => {
+      try {
+        return {
+          status: 0,
+          out: execFileSync(cli, ['owner'], { cwd: repo, encoding: 'utf8' }),
+        };
+      } catch (err) {
+        const e = err as { status?: number; stdout?: string };
+        return { status: e.status ?? -1, out: String(e.stdout ?? '') };
+      }
+    };
+    let last = '';
+    await poll('every writer finishes and releases the lock', 30000, () => {
+      const answer = owner();
+      last = answer.out;
+      // exit 1 = nobody holds it; 0 = somebody does, so keep waiting
+      return answer.status === 1;
+    });
+    assert.match(last, /nobody is writing the preview/);
 
     // Leaving the lane out again keeps later scenarios on the state they expect
     execFileSync(cli, ['remove', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
