@@ -2,6 +2,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
 import { STATUS_FILE } from './statusFile';
+import { RUNNER_FILE } from '../../cli/runner';
+import { REFRESH_FILE } from '../refreshSignal';
 
 /**
  * A headless way to join or leave the preview.
@@ -30,10 +32,13 @@ const SENTINEL = '# git-workflow: lane CLI';
 const SCRIPT = `#!/bin/sh
 ${SENTINEL}
 #
-# Join or leave the preview preview, without VS Code.
+# Drive the preview without VS Code: join, leave, rebuild, look.
 #
 #   gw-lane status           how the preview built, what is applied
 #   gw-lane check            exit 0 ok · 1 failed · 2 nothing to go on
+#   gw-lane rebuild          rebuild the preview now, here
+#   gw-lane owner            who holds the preview lock, if anyone
+#   gw-lane refresh          ask any editor watching to catch up now
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -50,13 +55,21 @@ applied="$dir/${APPLIED_FILE}"
 candidates="$dir/${CANDIDATES_FILE}"
 built="$dir/${STATUS_FILE}"
 lock="$dir/${LOCK_DIR}"
+owner="$lock/owner"
+runner="$dir/${RUNNER_FILE}"
+refresh="$dir/${REFRESH_FILE}"
 
-# The rebuild holds this while it rewrites the same files. It is held for
-# a second or two at most, so wait for it rather than failing.
+# The rebuild holds this while it rewrites the same files. Wait a long way
+# for it: a rebuild is seconds on a developer's machine and considerably
+# more on a loaded one, and queuing behind it is the normal case rather
+# than an error. Matches LOCK_WAIT_MS in laneLock.
 take_lock() {
   n=0
-  while [ $n -lt 50 ]; do
+  while [ $n -lt 300 ]; do
     if mkdir "$lock" 2>/dev/null; then
+      printf 'pid: %s\nhost: %s\nstarted: %s\nop: %s\n' \
+        "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "gw-lane $cmd" \
+        > "$lock/owner" 2>/dev/null || true
       return 0
     fi
     n=$((n + 1))
@@ -65,7 +78,7 @@ take_lock() {
   echo "preview is busy (lock held) — try again in a moment" >&2
   exit 1
 }
-drop_lock() { rmdir "$lock" 2>/dev/null || true; }
+drop_lock() { rm -f "$lock/owner" 2>/dev/null || true; rmdir "$lock" 2>/dev/null || true; }
 
 has_line() { [ -f "$1" ] && grep -qxF "$2" "$1"; }
 # Append, never sort: the order lanes were added is the order they merge.
@@ -94,8 +107,69 @@ moved_list() {
 }
 
 field() { sed -n "s/^$1: //p" "$built" 2>/dev/null | head -1; }
+value() { sed -n "s/^$2: //p" "$1" 2>/dev/null | head -1; }
+
+# --- running an operation ------------------------------------------------
+# The engine is a bundle the editor recorded a recipe for; this runs it in
+# THIS process and waits. Exclusion is the lock the engine takes (which now
+# records its holder — see laneLock), not a queue: two of these racing is
+# one of them waiting. Exit 127 means there is nothing to run, which is
+# different from an operation that ran and failed.
+run_op() {
+  [ -f "$runner" ] || return 127
+  rnode=$(value "$runner" node)
+  rscript=$(value "$runner" script)
+  [ -n "$rnode" ] && [ -n "$rscript" ] && [ -f "$rscript" ] || return 127
+  if [ -n "$2" ]; then
+    ELECTRON_RUN_AS_NODE=1 "$rnode" "$rscript" --common "$dir" "$1" "$2"
+  else
+    ELECTRON_RUN_AS_NODE=1 "$rnode" "$rscript" --common "$dir" "$1"
+  fi
+}
+
+if [ "$cmd" = "refresh" ]; then
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$refresh"
+  echo "refresh requested — an editor watching this repo will catch up shortly"
+  exit 0
+fi
+
+if [ "$cmd" = "owner" ]; then
+  if [ ! -f "$owner" ]; then
+    echo "nobody is writing the preview"
+    exit 1
+  fi
+  opid=$(value "$owner" pid)
+  ohost=$(value "$owner" host)
+  what=$(value "$owner" op)
+  # Another host's holder cannot be checked from here, so it is reported
+  # as-is rather than guessed at: two writers is the failure this avoids.
+  if [ "$ohost" != "$(hostname)" ] || kill -0 "$opid" 2>/dev/null; then
+    echo "busy: $what (pid $opid on $ohost since $(value "$owner" started))"
+    exit 0
+  fi
+  echo "stale lock: $what (pid $opid is gone) — the next writer sweeps it"
+  exit 1
+fi
+
+if [ "$cmd" = "rebuild" ]; then
+  # rc must be captured in the ELSE branch: after the fi, $? is the status
+  # of the compound (zero when no branch ran), not of the condition.
+  if run_op rebuild ""; then
+    exit 0
+  else
+    rc=$?
+  fi
+  if [ $rc -eq 127 ]; then
+    echo "no way to run a rebuild here (focus-runner missing) — is preview on, and has the editor opened this repo?" >&2
+    exit 2
+  fi
+  exit $rc
+fi
 
 if [ "$cmd" = "status" ]; then
+  if [ -f "$owner" ]; then
+    echo "writer: $(value "$owner" op) (pid $(value "$owner" pid) on $(value "$owner" host))"
+  fi
   # Build outcome FIRST: when it failed, the checkout still holds the last
   # good tree, so which lanes are "applied" is the less urgent fact.
   echo "last rebuild:"
@@ -157,25 +231,49 @@ fi
 
 case "$cmd" in
   add)
-    take_lock
-    add_line "$candidates" "$branch"
-    add_line "$applied" "$branch"
-    drop_line "$dir/focus-excluded" "$branch"
-    drop_lock
-    echo "$branch is in the preview"
+    if run_op apply "$branch"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ $rc -eq 0 ]; then
+      :
+    elif [ $rc -eq 127 ]; then
+      # Nothing to run — do it here. The files and this lock are the
+      # protocol; the bundle is only a faster way to reach the same code.
+      take_lock
+      add_line "$candidates" "$branch"
+      add_line "$applied" "$branch"
+      drop_line "$dir/focus-excluded" "$branch"
+      drop_lock
+      echo "$branch is in the preview"
+    else
+      exit 1
+    fi
     ;;
   remove)
-    take_lock
-    drop_line "$applied" "$branch"
-    drop_line "$candidates" "$branch"
-    # Persist the choice: an auto-membership pass would otherwise put the
-    # row straight back.
-    add_line "$dir/focus-excluded" "$branch"
-    drop_lock
-    echo "$branch is out of the preview"
+    if run_op remove "$branch"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ $rc -eq 0 ]; then
+      :
+    elif [ $rc -eq 127 ]; then
+      take_lock
+      drop_line "$applied" "$branch"
+      drop_line "$candidates" "$branch"
+      # Persist the choice: an auto-membership pass would otherwise put the
+      # row straight back.
+      add_line "$dir/focus-excluded" "$branch"
+      drop_lock
+      echo "$branch is out of the preview"
+    else
+      exit 1
+    fi
     ;;
   *)
-    echo "usage: gw-lane <status|check|add|remove> [branch]" >&2
+    echo "usage: gw-lane <status|check|rebuild|refresh|owner|add|remove> [branch]" >&2
     exit 2
     ;;
 esac

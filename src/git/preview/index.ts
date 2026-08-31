@@ -32,6 +32,7 @@ export {
 
 // lanes
 export {
+  commonDir,
   addAppliedLane,
   addCandidateLane,
   addExcludedLane,
@@ -71,6 +72,9 @@ export {
   rebuildPreview,
 } from './engine';
 
+// rebuildOp — "rebuild this repo's preview", the one the CLI runs too
+export { type RebuildOutcome, rebuildFromSettings } from './rebuildOp';
+
 // lifecycle
 export {
   alignPreviewBranchName,
@@ -101,6 +105,16 @@ export {
   laneCliPath,
   uninstallLaneCli,
 } from './laneCli';
+
+// settings
+export {
+  CONFIG_FILE,
+  type PreviewSettings,
+  clearPreviewSettings,
+  parsePreviewSettings,
+  readPreviewSettings,
+  writePreviewSettings,
+} from './settings';
 
 // statusFile
 export {

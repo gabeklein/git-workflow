@@ -4,6 +4,7 @@ import {
   worktreeListFingerprint,
 } from '../git/discovery';
 import { GitDirWatcher } from '../git/gitWatcher';
+import { refreshStamp } from '../git/refreshSignal';
 
 /**
  * Worktree-list / preview check cadence. Primary signal is the .git
@@ -22,6 +23,10 @@ interface GitActivityHost {
   onTick(reason: string): Promise<void>;
   /** Fired after each completed state check (cheap change signal). */
   onActivity(): void;
+  /** Somebody asked for a full look — `gw-lane refresh` (see
+   *  refreshSignal). Rediscovery, not just a tick: the rows an agent wants
+   *  refreshed after working in a checkout come from discovery. */
+  onRefreshRequested(reason: string): void;
 }
 
 /**
@@ -33,6 +38,8 @@ export class GitActivityHub implements vscode.Disposable {
   private generation = 0;
   private pollTimer: NodeJS.Timeout | undefined;
   private fingerprint: string | undefined;
+  private refreshedAt = 0;
+  private refreshSeeded = false;
   private checkInFlight = false;
   private checkQueued = false;
 
@@ -106,6 +113,34 @@ export class GitActivityHub implements vscode.Disposable {
   }
 
   /**
+   * Has anyone asked for a full look since the last check?
+   *
+   * Seeded on the first pass without firing — an editor opening a repo
+   * where somebody ran `gw-lane refresh` last week should not treat that
+   * as a live request. After that, any newer stamp is one.
+   */
+  private async checkRefreshRequest(reason: string): Promise<void> {
+    let stamp = 0;
+    for (const common of await resolveRepoCommonDirs().catch(() => [])) {
+      stamp = Math.max(stamp, (await refreshStamp(common)) ?? 0);
+    }
+    // Seed on the FIRST check whether or not a stamp exists yet. Seeding
+    // only when the file is already there swallowed the first request a
+    // repo ever made: the file appearing later looked exactly like the
+    // seed, so the one signal nobody had sent before was the one signal
+    // that did nothing.
+    if (!this.refreshSeeded) {
+      this.refreshSeeded = true;
+      this.refreshedAt = stamp;
+      return;
+    }
+    if (stamp > this.refreshedAt) {
+      this.refreshedAt = stamp;
+      this.host.onRefreshRequested(`${reason} (refresh requested)`);
+    }
+  }
+
+  /**
    * Shared state check for .git events and the fallback poll: rediscover
    * when worktree membership changed, then run the host tick.
    */
@@ -118,6 +153,7 @@ export class GitActivityHub implements vscode.Disposable {
     }
     this.checkInFlight = true;
     try {
+      await this.checkRefreshRequest(reason);
       const next = await worktreeListFingerprint();
       if (this.fingerprint === undefined) {
         this.fingerprint = next;

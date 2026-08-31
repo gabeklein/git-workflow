@@ -1,5 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { clearRunnerCommand, writeRunnerCommand } from '../cli/runner';
+import { type LaneOpName, runLaneOp } from '../git/preview/laneOp';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
@@ -16,20 +18,19 @@ import {
   resolveBaseSha,
   writeBasePin,
   abortPreviewMerge,
-  addAppliedLane,
-  addCandidateLane,
   addExcludedLane,
   alignPreviewBranchName,
   installCommitGuard,
   installLaneCli,
   laneCliPath,
   isCommitGuardEnabled,
+  clearPreviewSettings,
   clearPreviewStatus,
+  commonDir,
   uninstallCommitGuard,
   uninstallLaneCli,
+  writePreviewSettings,
   baseStatusFor,
-  dropAppliedLane,
-  dropCandidateLane,
   ensurePreviewPushBlocked,
   fetchPreviewBase,
   findLandedLanes,
@@ -49,7 +50,7 @@ import {
   listExcludedLanes,
   listWipLanes,
   pruneDeadLanes,
-  rebuildPreview,
+  rebuildFromSettings,
   setWipLane,
   type AbsorbResult,
   type AbsorbTarget,
@@ -72,6 +73,9 @@ interface PreviewHost {
   /** Override ?? genuine inference for a worktree's base — undefined when
    *  there is no evidence (auto-membership must never enroll on a guess). */
   genuineBaseFor(worktreePath: string): Promise<string | undefined>;
+  /** Where this extension is installed — the one-shot CLI bundle ships
+   *  beside it, and the recipe has to name a real path. */
+  extensionPath?(): string | undefined;
 }
 
 export interface PreviewState {
@@ -631,8 +635,12 @@ export class PreviewController implements vscode.Disposable {
         await uninstallLaneCli(cwd);
         // A recorded conflict outlasting the preview it described is worse
         // than no record: it reads as a live failure in a repo that has no
-        // preview to fail.
+        // preview to fail. The settings go for the same reason — a CLI
+        // run later must refuse rather than rebuild a preview that was
+        // turned off.
         await clearPreviewStatus(cwd);
+        await clearPreviewSettings(cwd);
+        await clearRunnerCommand(await commonDir(cwd));
         return;
       }
       // The lane CLI is how anything outside VS Code joins the preview, so
@@ -642,6 +650,19 @@ export class PreviewController implements vscode.Disposable {
           `Lane CLI installed: ${await laneCliPath(cwd)}`,
         );
       }
+      // The settings a headless run needs (and its vscode shim serves),
+      // plus how to run it. Both are rewritten here rather than at enable
+      // time so they follow a renamed branch, a changed base, and an
+      // extension that moved on disk after an update.
+      await writePreviewSettings(cwd, {
+        branch,
+        base: previewBaseRef(),
+        checkout: workingPath,
+        autoResolve: vscode.workspace
+          .getConfiguration('worktreeCompare')
+          .get<string>('previewAutoResolve'),
+      });
+      await this.recordRunnerCommand(cwd);
       if (!isCommitGuardEnabled()) {
         await uninstallCommitGuard(cwd);
         return;
@@ -691,6 +712,69 @@ export class PreviewController implements vscode.Disposable {
     this.host.refresh();
   }
 
+  /**
+   * Record how a shell runs a preview operation in this repo.
+   *
+   * The editor is not a server and nothing connects to it: `gw-lane` runs
+   * the bundled one-shot CLI itself, taking the same lock this process
+   * takes. All it needs is where to find it — which a shell cannot know,
+   * least of all after an update moves the extension. So the recipe is
+   * written beside the state it operates on, naming the editor's own node
+   * (`process.execPath` under ELECTRON_RUN_AS_NODE, frequently the only
+   * node on the machine) and the bundle shipped alongside. Rewritten on
+   * every reconcile, so a moved install heals itself.
+   */
+  private async recordRunnerCommand(cwd: string): Promise<void> {
+    const root = this.host.extensionPath?.();
+    if (!root) return;
+    try {
+      await writeRunnerCommand(await commonDir(cwd), {
+        node: process.execPath,
+        script: path.join(root, 'dist', 'gw-op.js'),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.host.output.appendLine(`Runner command not recorded: ${message}`);
+    }
+  }
+
+  /**
+   * Rebuild, in this process.
+   *
+   * The same operation `gw-lane rebuild` runs, differing only in where the
+   * settings come from: the editor's are live, so it passes them rather
+   * than reading back the file it just wrote. Exclusion between the two is
+   * the rebuild lock, which both take and which now records its holder —
+   * that, not a queue, is what makes concurrent writers safe.
+   */
+  private async rebuildVia(
+    workingPath: string,
+    _reason: string,
+  ): Promise<RebuildResult> {
+    const outcome = await rebuildFromSettings(workingPath, {
+      branch: previewBranch(),
+      base: previewBaseRef(),
+      checkout: workingPath,
+    });
+    return outcome.kind === 'ran'
+      ? outcome.result
+      : { ok: false, code: 'error', message: outcome.message };
+  }
+
+  /**
+   * A membership change — one implementation (preview/laneOp), shared with
+   * the CLI. The controller no longer composes lane-file helpers by hand,
+   * which is how its verbs drifted from the script's in the first place.
+   */
+  private async laneOp(op: LaneOpName, lane: string): Promise<void> {
+    const cwd = this.previewPath;
+    if (!cwd) return;
+    const result = await runLaneOp(cwd, op, lane);
+    if (!result.ok) {
+      this.host.output.appendLine(`Lane ${op} refused: ${result.message}`);
+    }
+  }
+
   /** Run a rebuild and surface the outcome on the preview row. */
   async runRebuild(reason: string): Promise<RebuildResult> {
     const workingPath = this.previewPath;
@@ -717,7 +801,7 @@ export class PreviewController implements vscode.Disposable {
         this.lastBaseFetchAt = Date.now();
         await fetchPreviewBase(workingPath, previewBaseRef());
       }
-      const result = await rebuildPreview(workingPath, previewBaseRef());
+      const result = await this.rebuildVia(workingPath, reason);
       if (result.ok) {
         this.error = undefined;
         this.autoResolved = result.resolved;
@@ -803,8 +887,7 @@ export class PreviewController implements vscode.Disposable {
     if (!isLaneBranch(branch, previewBaseRef()))
       throw new Error(`${branch} cannot be an preview lane`);
     // Re-adding is also how an excluded auto member comes back
-    await dropExcludedLane(this.previewPath, branch);
-    await addCandidateLane(this.previewPath, branch);
+    await this.laneOp('candidate', branch);
     await this.refreshState();
     this.host.fireTreeData();
   }
@@ -818,9 +901,13 @@ export class PreviewController implements vscode.Disposable {
   async removeCandidate(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
-    await dropCandidateLane(this.previewPath, branch);
-    await addExcludedLane(this.previewPath, branch);
-    if (this.lanes.includes(branch)) return this.hide(branch);
+    // One op: out of the tree, off the list, and kept out. It was three
+    // helper calls split across two methods, which is why the shell's
+    // `remove` and this one had to be compared line by line to see they
+    // agreed.
+    const wasApplied = this.lanes.includes(branch);
+    await this.laneOp('remove', branch);
+    if (wasApplied) return this.runRebuild(`remove ${branch}`);
     await this.refreshState();
     this.host.fireTreeData();
     return { ok: true, lanes: this.lanes.slice(), skipped: [], landed: [], resolved: [] };
@@ -837,11 +924,7 @@ export class PreviewController implements vscode.Disposable {
         message: `will not apply ${branch} as a lane`,
       };
     }
-    // Persist candidacy too, so unchecking later keeps the row visible
-    // (and applying an excluded branch is an explicit opt back in)
-    await dropExcludedLane(this.previewPath, branch);
-    await addCandidateLane(this.previewPath, branch);
-    await addAppliedLane(this.previewPath, branch);
+    await this.laneOp('apply', branch);
     return this.runRebuild(`apply ${branch}`);
   }
 
@@ -849,7 +932,7 @@ export class PreviewController implements vscode.Disposable {
   async hide(branch: string): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
-    await dropAppliedLane(this.previewPath, branch);
+    await this.laneOp('unapply', branch);
     return this.runRebuild(`hide ${branch}`);
   }
 
@@ -865,6 +948,9 @@ export class PreviewController implements vscode.Disposable {
   async setBaseDriftIncluded(included: boolean): Promise<RebuildResult> {
     if (!this.previewPath)
       return { ok: false, code: 'error', message: 'preview mode is off' };
+    // NOT a lane op: this is the synthetic base-drift segment, which has
+    // no branch to apply and lives only in the exclusion list. Routing it
+    // through runLaneOp would make it a candidate row of its own.
     const baseName = previewBaseRef().replace(/^origin\//, '');
     if (included) {
       await dropExcludedLane(this.previewPath, baseName);
@@ -1075,7 +1161,9 @@ export class PreviewController implements vscode.Disposable {
       `Lanes landed (base moved past them), retiring: ${stale.join(', ')}`,
     );
     for (const lane of stale) {
-      await dropAppliedLane(workingPath, lane).catch(() => {});
+      // Same door as every other membership change, so retirement cannot
+      // mean something subtly different from unchecking
+      await this.laneOp('unapply', lane);
     }
     this.landed = [...new Set([...this.landed, ...stale])];
     this.lanes = this.lanes.filter((l) => !stale.includes(l));

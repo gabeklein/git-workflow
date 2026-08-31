@@ -122,6 +122,7 @@ export class WorktreeTreeProvider
       refreshCompare: (p) => this.refreshCompare(p),
       moveSelectionOff: (p) => this.moveSelectionOff(p),
       genuineBaseFor: (p) => this.baseStatus.genuineBaseFor(p),
+      extensionPath: () => context.extensionPath,
     });
     this.baseStatus = new BaseStatusTracker({
       output,
@@ -141,6 +142,10 @@ export class WorktreeTreeProvider
         void this.baseStatus.refresh();
       },
       onActivity: () => this._onGitActivity.fire(),
+      onRefreshRequested: (reason) => {
+        this.output.appendLine(`Refresh requested (${reason})`);
+        this.refresh();
+      },
     });
 
     this.selectedPath = context.workspaceState.get<string>(SELECTED_PATH_KEY);

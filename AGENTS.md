@@ -133,7 +133,23 @@ To opt in, once the work is worth previewing:
 "$(git rev-parse --git-common-dir)/gw-lane" status       # how it built, then what is in it
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 "$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown
+"$(git rev-parse --git-common-dir)/gw-lane" rebuild      # rebuild, and wait for it
+"$(git rev-parse --git-common-dir)/gw-lane" owner        # who is writing right now
+"$(git rev-parse --git-common-dir)/gw-lane" refresh      # tell the sidebar to look again
 ```
+
+`rebuild` is real now: the extension records how to run the engine
+headlessly, so this runs the same rebuild the sidebar runs and waits for
+it. Fix your lane and then rebuild to *verify* it, rather than reporting
+that a rebuild is needed. Nothing stays resident — exclusion is the
+rebuild lock, which names its holder, so `owner` says whether anything is
+writing right now.
+
+`refresh` is for the changes the editor cannot see: anything you do with
+refs reaches the sidebar on its own (it watches the git dir), but a file
+written into a checkout touches nothing under `.git`, and on a filesystem
+that drops watch events even commits wait for a 30s poll. It is a signal,
+not a request — nothing answers for the UI.
 
 `status` leads with the **last rebuild** (also readable raw as
 `focus-status`), because being applied is not the same as being in the tree:
@@ -143,9 +159,10 @@ Read the record before concluding anything about the preview — `next:` names
 the move that clears it, and `tip:` is what makes a stale conflict
 recognisable as one already dealt with. When the failure names **your** lane,
 fixing it is ordinary work: catch the lane up in its own worktree, or
-`gw-lane remove` so nobody else's preview stays blocked. You cannot rebuild
-headlessly, so with the editor closed say the fix is in and a rebuild is
-needed — do not imply you verified one. The skill's §8 has the guardrails.
+`gw-lane remove` so nobody else's preview stays blocked. Then
+`gw-lane rebuild` and check the result — verifying is the normal case now,
+so reporting "a rebuild is needed" is only honest when the rebuild itself
+could not run. The skill's §8 has the guardrails.
 
 Inside the editor the same thing is **Git Workflow: Add to Preview**
 (`worktreeCompare.addToPreview`).

@@ -2,12 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { previewBranch } from './config';
+import { LOCK_DIR, withLaneLock } from './laneLock';
 
 export const APPLIED_FILE = 'focus-applied';
 export const CANDIDATES_FILE = 'focus-candidates';
 const WIP_FILE = 'focus-wip';
 const EXCLUDED_FILE = 'focus-excluded';
-export const LOCK_DIR = 'focus-working.lock';
+export { LOCK_DIR } from './laneLock';
 
 export async function commonDir(cwd: string): Promise<string> {
   const out = (await git(cwd, ['rev-parse', '--git-common-dir'])).trim();
@@ -50,6 +51,19 @@ export async function writeLaneFile(
   const unique = [...new Set(lanes.filter(Boolean))];
   const out = opts.ordered ? unique : unique.sort();
   await fs.writeFile(abs, out.length > 0 ? `${out.join('\n')}\n` : '');
+}
+
+/**
+ * `withLaneLock` addressed by a working directory rather than a common
+ * dir — every caller in this module has the former and not the latter.
+ */
+export async function withRepoLock<T>(
+  cwd: string,
+  op: string,
+  fn: () => Promise<T>,
+  opts: { waitMs?: number } = {},
+): Promise<T | undefined> {
+  return withLaneLock(await commonDir(cwd), op, fn, opts);
 }
 
 export async function listAppliedLanes(cwd: string): Promise<string[]> {

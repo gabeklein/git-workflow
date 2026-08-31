@@ -78,7 +78,9 @@ export interface TestApi {
     }[]
   >;
   selectedPath(): string | undefined;
-  worktrees(): { path: string; branch: string }[];
+  /** isDirty is what the rows carry; scenarios that assert on it are
+   *  asserting that discovery reran, not just that a view repainted. */
+  worktrees(): { path: string; branch: string; isDirty?: boolean }[];
   baseStatus(worktreePath: string): {
     behind: number;
     conflicts: boolean;

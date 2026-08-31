@@ -164,6 +164,23 @@ describe('lane CLI', () => {
     });
 
     /**
+     * The nudge for changes the watcher cannot see: a dirty worktree is
+     * state on disk nowhere near .git, so without this the sidebar waits
+     * for a 30s poll to notice what the terminal already shows.
+     */
+    it('refresh stamps a signal the editor watches for', () => {
+      const file = path.join(scratch.repo, '.git', 'focus-refresh');
+      expect(fs.existsSync(file)).toBe(false);
+      expect(run('refresh')).toContain('refresh requested');
+      const first = fs.statSync(file).mtimeMs;
+      expect(fs.readFileSync(file, 'utf8')).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      // Asking twice means it twice — the stamp must move
+      execFileSync('sleep', ['1.1']);
+      run('refresh');
+      expect(fs.statSync(file).mtimeMs).toBeGreaterThan(first);
+    });
+
+    /**
      * `check` is the same record as an exit status, so an agent can gate on
      * it instead of parsing prose. `status` deliberately stays 0 — printing
      * a report is not a failure, and a `set -e` script must not die of it.
