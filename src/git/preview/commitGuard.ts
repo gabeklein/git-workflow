@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { git } from '../exec';
 import { excludeManagedFiles, unexcludeManagedFiles } from '../exclude';
 import { commonDir } from './lanes';
+import { CONFIG_FILE } from './settings';
 
 /**
  * A `git commit` made while the preview branch is checked out is a
@@ -100,6 +101,11 @@ guarded=$(cat "$dir/${GUARD_FILE}" 2>/dev/null) || exit 0
 head=$(git symbolic-ref --short HEAD 2>/dev/null) || exit 0
 [ "$head" = "$guarded" ] || exit 0
 
+# Name the actual destination rather than "the base": an agent told to
+# absorb needs to know WHERE the work lands before it agrees to.
+base=$(sed -n 's/^base: //p' "$dir/${CONFIG_FILE}" 2>/dev/null | head -1)
+[ -n "$base" ] || base="the base branch"
+
 exec >&2
 echo
 echo "  Refusing to commit on $guarded."
@@ -113,10 +119,17 @@ echo "  to another branch to get around this: that turns the preview off."
 echo
 echo "  Your changes are untouched and still staged. Pick an exit:"
 echo
-echo "    * Run Git Workflow: Absorb Preview Edits to move the working"
-echo "      tree onto a real branch's checkout, then commit there."
 echo "    * Commit in the lane this work belongs to — its own worktree:"
 echo "        git worktree add .worktrees/NAME -b BRANCH BASE"
+echo "      This is the answer for a FEATURE. Absorb cannot aim at a lane."
+echo "    * Fixing the base itself (a hotfix), not a lane? That is what"
+echo "      absorb is for — it moves this delta onto $base and leaves the"
+echo "      merged lane content behind:"
+echo "        \\"$dir/gw-lane\\" absorb"
+echo "      Run it INSTEAD of committing. Uncommitted edits absorb too,"
+echo "      so there is nothing to commit here first."
+echo "    * Run Git Workflow: Absorb Preview Edits, the same move in the"
+echo "      editor."
 echo "    * git commit --no-verify   (you meant it; absorb can rescue it later)"
 echo
 echo "  Agent: this repo has a worktree workflow you likely do not know yet."

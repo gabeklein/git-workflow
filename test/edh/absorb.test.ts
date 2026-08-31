@@ -8,6 +8,7 @@
  * Runs LAST: absorbing commits onto main mutates the fixture's base.
  */
 import * as assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -175,5 +176,50 @@ describe('absorbing stray preview work', () => {
       !fs.existsSync(path.join(previewRoot, 'edit.txt')),
       'the preview checkout was restored, untracked file included',
     );
+  });
+  /**
+   * The same rescue from a terminal, in a repo the extension is really
+   * managing. It is the route that matters most for a hotfix: the guard's
+   * refusal now names this command, and a refusal that names a command
+   * nobody can run is how an agent ends up at `--no-verify` instead.
+   */
+  describe('gw-lane absorb', () => {
+    const cli = path.join(repo, '.git', 'gw-lane');
+
+    it('moves a stray commit onto the base without the editor', async () => {
+      assert.ok(fs.existsSync(cli), 'the lane CLI is installed while preview is on');
+      // The scenario above deliberately leaves its absorbed edit STAGED in
+      // the base checkout — absorbing must not decide uncommitted work is
+      // finished. Committing it is what its author would do next, and it
+      // has to happen before this one: cherry-pick refuses against any
+      // staged index, whether or not the paths overlap.
+      git(mainTree, ['commit', '-qm', 'land the absorbed edit']);
+      const target = path.join(previewRoot, 'shell-hotfix.txt');
+      fs.writeFileSync(target, 'fixed from a shell\n');
+      git(previewRoot, ['add', '-A']);
+      // --no-verify because this scenario is deliberately standing in for
+      // an agent that has already decided the fix belongs to the base;
+      // the guard's own refusal is pinned by the first test in this file.
+      git(previewRoot, ['commit', '--no-verify', '-qm', 'shell hotfix']);
+
+      const out = execFileSync(cli, ['absorb', '--allow-added'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      assert.match(out, /absorbed 1 commit\(s\)/, `absorb reported success: ${out}`);
+      await poll('the fix reaches the base checkout', 30000, () =>
+        fs.existsSync(path.join(mainTree, 'shell-hotfix.txt')),
+      );
+      // …and the preview checkout is rewound, not left carrying it
+      assert.ok(
+        !fs.existsSync(target),
+        'the stray is gone from the preview checkout',
+      );
+    });
+
+    it('says there is nothing to do rather than failing on a clean tree', () => {
+      const out = execFileSync(cli, ['absorb'], { cwd: repo, encoding: 'utf8' });
+      assert.match(out, /nothing to absorb/);
+    });
   });
 });

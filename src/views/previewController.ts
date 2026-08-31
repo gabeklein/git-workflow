@@ -12,9 +12,9 @@ import {
   absorbDirtyEdits,
   absorbStrayCommits,
   addedPathsInCommits,
-  checkoutForBranch,
   clearBasePin,
   readBasePin,
+  resolveAbsorbTarget,
   resolveBaseSha,
   writeBasePin,
   abortPreviewMerge,
@@ -972,23 +972,7 @@ export class PreviewController implements vscode.Disposable {
    */
   private async absorbTarget(): Promise<AbsorbTarget | undefined> {
     if (!this.previewPath) return undefined;
-    const baseName = previewBaseRef().replace(/^origin\//, '');
-    if (!(await gitOk(this.previewPath, [
-      'rev-parse',
-      '-q',
-      '--verify',
-      `refs/heads/${baseName}`,
-    ]))) {
-      return undefined; // no base branch at all — nothing to absorb into
-    }
-    const path = await checkoutForBranch(this.previewPath, baseName);
-    // Prefer a checkout so the replay leaves its working tree consistent;
-    // fall back to the ref, which is the ONLY option when preview was
-    // enabled by switching a checkout in place — the base then has no
-    // worktree of its own.
-    return path
-      ? { kind: 'checkout', path, branch: baseName }
-      : { kind: 'ref', branch: baseName };
+    return resolveAbsorbTarget(this.previewPath, previewBaseRef());
   }
 
   /**

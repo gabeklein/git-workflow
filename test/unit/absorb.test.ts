@@ -1,11 +1,17 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { absorbFromSettings } from '../../src/git/preview/absorbOp';
+import {
+  acquireLaneLock,
+  releaseLaneLock,
+} from '../../src/git/preview/laneLock';
 import {
   absorbDirtyEdits,
   absorbStrayCommits,
   addedPathsInCommits,
   checkoutForBranch,
+  resolveAbsorbTarget,
 } from '../../src/git/preview/absorb';
 import {
   findStrayCommits,
@@ -375,6 +381,107 @@ describe('absorb', () => {
     it('finds the worktree holding a branch, and nothing for a bare ref', async () => {
       expect(await checkoutForBranch(scratch.repo, 'main')).toBe(scratch.repo);
       expect(await checkoutForBranch(scratch.repo, 'feat/lane')).toBeUndefined();
+    });
+  });
+  /**
+   * The headless op — what `gw-lane absorb` runs. The two primitives are
+   * covered above; what is left is the choosing between them, and the
+   * refusals a dialog used to make.
+   */
+  describe('absorbFromSettings', () => {
+    const settings = () => ({
+      branch: PREVIEW,
+      base: 'origin/main',
+      checkout: integ,
+    });
+
+    it('prefers a checkout, and falls back to the ref that always exists', async () => {
+      // main has a worktree here (the scratch repo itself)
+      expect(await resolveAbsorbTarget(integ, 'origin/main')).toEqual({
+        kind: 'checkout',
+        path: scratch.repo,
+        branch: 'main',
+      });
+      // The shipped layout has no base checkout — the ref is the target
+      git(scratch.repo, ['checkout', '-q', '-b', 'parked']);
+      expect(await resolveAbsorbTarget(integ, 'origin/main')).toEqual({
+        kind: 'ref',
+        branch: 'main',
+      });
+    });
+
+    it('has no destination when the base branch is not local', async () => {
+      expect(await resolveAbsorbTarget(integ, 'origin/nope')).toBeUndefined();
+    });
+
+    /**
+     * Both halves of "could not run", kept distinct from "ran and
+     * refused": a caller gating on this must not read either as work
+     * having moved.
+     */
+    it('is unconfigured without recorded settings', async () => {
+      const outcome = await absorbFromSettings(scratch.repo);
+      expect(outcome.kind).toBe('unconfigured');
+    });
+
+    it('is busy while another writer holds the lock', async () => {
+      fs.writeFileSync(path.join(integ, 'app.txt'), 'line1\nLANE\nfixed\n');
+      git(integ, ['commit', '-qam', 'hotfix']);
+      expect(await acquireLaneLock(path.join(scratch.repo, '.git'), 'rebuild')).toBe(
+        true,
+      );
+      const outcome = await absorbFromSettings(scratch.repo, {
+        settings: settings(),
+        waitMs: 100,
+      });
+      expect(outcome.kind).toBe('busy');
+      // …and the work is untouched, not half-moved
+      expect(read(integ, 'app.txt')).toContain('fixed');
+      await releaseLaneLock(path.join(scratch.repo, '.git'));
+    });
+
+    it('takes commits over edits when the checkout has both', async () => {
+      fs.writeFileSync(path.join(integ, 'hotfix.txt'), 'fixed\n');
+      git(integ, ['add', '-A']);
+      git(integ, ['commit', '-qm', 'hotfix']);
+      fs.writeFileSync(path.join(integ, 'later.txt'), 'still writing\n');
+      const outcome = await absorbFromSettings(scratch.repo, {
+        settings: settings(),
+      });
+      expect(outcome).toMatchObject({
+        kind: 'ran',
+        result: { ok: true, commits: 1, uncommitted: false },
+      });
+      // The uncommitted file stayed put: absorbing a COMMIT must not
+      // sweep up work somebody is still writing.
+      expect(fs.existsSync(path.join(integ, 'later.txt'))).toBe(true);
+    });
+
+    /**
+     * Nothing applied means the preview tree IS the base, so an added
+     * file has no lane context to depend on and needs no confirmation —
+     * the gate is the combination, not the shape of the commit.
+     */
+    it('only gates an added file when a lane is actually applied', async () => {
+      fs.writeFileSync(path.join(integ, 'hotfix.txt'), 'fixed\n');
+      git(integ, ['add', '-A']);
+      git(integ, ['commit', '-qm', 'hotfix']);
+      fs.writeFileSync(
+        path.join(scratch.repo, '.git', 'focus-applied'),
+        'feat/lane\n',
+      );
+      expect(
+        await absorbFromSettings(scratch.repo, { settings: settings() }),
+      ).toMatchObject({
+        kind: 'ran',
+        result: { ok: false, code: 'needs-confirmation' },
+      });
+      expect(
+        await absorbFromSettings(scratch.repo, {
+          settings: settings(),
+          allowAdded: true,
+        }),
+      ).toMatchObject({ kind: 'ran', result: { ok: true, commits: 1 } });
     });
   });
 });

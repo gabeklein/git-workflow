@@ -523,3 +523,34 @@ export async function absorbDirtyEdits(
   }
   return { ok: true, target: targetPath, commits: 0, uncommitted: true };
 }
+
+/**
+ * Where absorbed work should go for a given base.
+ *
+ * A checkout is preferred; the ref is the fallback and the ONLY option in
+ * the layout this extension actually ships — preview enabled by switching
+ * the workspace root in place leaves the base with no worktree of its own.
+ * Undefined means the base branch does not exist locally, which is the one
+ * case with no destination at all.
+ *
+ * Lives here rather than on the controller because the CLI needs the same
+ * answer, and a second copy is how the two would come to disagree about
+ * which of `main` and `origin/main` is being aimed at.
+ */
+export async function resolveAbsorbTarget(
+  previewPath: string,
+  baseRef: string,
+): Promise<AbsorbTarget | undefined> {
+  const baseName = baseRef.replace(/^origin\//, '');
+  const exists = await gitOk(previewPath, [
+    'rev-parse',
+    '-q',
+    '--verify',
+    `refs/heads/${baseName}`,
+  ]);
+  if (!exists) return undefined;
+  const path = await checkoutForBranch(previewPath, baseName);
+  return path
+    ? { kind: 'checkout', path, branch: baseName }
+    : { kind: 'ref', branch: baseName };
+}

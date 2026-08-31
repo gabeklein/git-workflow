@@ -100,8 +100,7 @@ worktree is somebody's manual `git switch` — the extension ignores it entirely
 one as a preview.
 
 A `pre-commit` hook refuses it. **Do not reach for `--no-verify`** — that is a
-human's override. Check out the real lane, or ask for **Absorb Preview
-Edits**.
+human's override. Check out the real lane, or absorb (below).
 
 Same for the files it owns: change them via `gw-lane`, never by hand, since
 rebuilds hold `focus-working.lock` while rewriting them — `focus-applied`
@@ -109,6 +108,41 @@ rebuilds hold `focus-working.lock` while rewriting them — `focus-applied`
 `focus-wip` · `focus-base` (pinned base) · `focus-guard`. `focus-status` is
 the exception in the other direction: it is a *record* of the last rebuild,
 rewritten by every one — read it, never write it (§8).
+
+### The one exception: a hotfix to the base
+
+Absorb aims at the **base and only the base**. That is what makes it the wrong
+rescue for lane work — and the right move for a fix that belongs to the base
+itself, found while reading the preview because the merged lanes are what made
+it visible.
+
+```sh
+"$dir/gw-lane" absorb     # move this checkout's work onto the base
+```
+
+The delta is taken against the **merged tree**, so a fix written in a file a
+lane also touched lands carrying the fix and not the lane. Uncommitted edits
+absorb too, so prefer running it *instead of* committing — that way the guard
+never comes up.
+
+You may do this yourself, on two conditions:
+
+- **It is genuinely a base fix.** "Which branch should own this?" is the whole
+  question. Anything that belongs to a feature is a lane, and absorbing it
+  puts it on `main` where nobody reviewed it. When unsure, it is a lane.
+- **Say so in your report**, naming the branch it landed on. It arrives as
+  unpushed base drift, and nothing else will explain it.
+
+Exit codes match the rest: **0** moved · **1** ran and refused · **2** could not
+run. A refusal worth knowing is `needs-confirmation`: stray commits that *add*
+files while lanes are applied. An added file has no diff context, so it applies
+to the base cleanly even when its contents depend on lane code — re-run with
+`--allow-added` only once you have checked it does not.
+
+With the base unchecked-out (the usual layout — preview is the root switched in
+place) uncommitted edits have nowhere to land, and absorb says so. Commit them
+where they are and absorb again; that is the one time `--no-verify` past the
+guard is the intended path rather than a bypass.
 
 ## 5. Joining the preview is deliberate — and yours to do  *(preview on)*
 
@@ -188,6 +222,7 @@ out; do it before telling anyone a branch is still published.
 "$dir/gw-lane" status         # leads with the last rebuild
 "$dir/gw-lane" check          # exit 0 ok · 1 failed · 2 nothing to go on
 "$dir/gw-lane" rebuild        # rebuild now, and wait for the answer
+"$dir/gw-lane" absorb         # move work made in the preview onto the base
 "$dir/gw-lane" refresh        # make the editor look again (see below)
 cat "$dir/focus-status"       # the same record, raw
 ```
@@ -247,8 +282,10 @@ What is NOT yours to fix, whatever the record says:
   `next:` advises.
 - **The preview branch itself.** Never resolve there, never commit there
   (§4) — a conflict "fixed" on the preview is discarded by the next rebuild.
-- `dirty` / `unique` codes: those are somebody's uncommitted or stranded work
-  in the root checkout. Absorb is a human's call — report it.
+- `dirty` / `unique` codes: somebody's uncommitted or stranded work in the root
+  checkout. If it is not yours, report it — absorb would decide, on their
+  behalf, that it belongs on the base. Your own deliberate hotfix is the case
+  §4 covers.
 
 Lanes may also be tagged `auto-resolved` (same-line clash resolved toward the
 incoming lane, dropped hunks listed) or `conflict`. Fix these **on the lane** by
@@ -261,7 +298,7 @@ the git state.
 
 | Situation | Tell them |
 |---|---|
-| Work stranded on the preview branch | **Absorb Preview Edits…** |
+| Work stranded on the preview branch | **Absorb Preview Edits…** (`gw-lane absorb`) |
 | Preview looks stale | **Rebuild Preview** |
 | Lane conflicts with base | **Resolve Conflict with Base…** / **Catch Up with Base…** |
 | Rebased a pushed lane | **Force Push (with lease)** — their call |

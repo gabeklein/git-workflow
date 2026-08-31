@@ -72,6 +72,13 @@ export {
   rebuildPreview,
 } from './engine';
 
+// absorbOp — "move preview work onto the base", the one the CLI runs too
+export {
+  type AbsorbOptions,
+  type AbsorbOutcome,
+  absorbFromSettings,
+} from './absorbOp';
+
 // rebuildOp — "rebuild this repo's preview", the one the CLI runs too
 export { type RebuildOutcome, rebuildFromSettings } from './rebuildOp';
 
@@ -91,6 +98,7 @@ export {
   absorbStrayCommits,
   addedPathsInCommits,
   checkoutForBranch,
+  resolveAbsorbTarget,
 } from './absorb';
 
 // commitGuard
