@@ -52,6 +52,8 @@ export async function runLaneOp(
   cwd: string,
   op: LaneOpName,
   lane: string,
+  /** Mostly for tests: how long to wait for a rebuild to finish. */
+  opts: { waitMs?: number } = {},
 ): Promise<LaneOpResult> {
   // Only joining requires the branch to exist. Leaving must work for a
   // branch that is already gone — that is precisely when a stale row needs
@@ -94,7 +96,7 @@ export async function runLaneOp(
       ...(await listCandidateLanes(cwd)),
     ].join('\n');
     return before !== after;
-  });
+  }, opts);
 
   if (done === undefined) {
     return {

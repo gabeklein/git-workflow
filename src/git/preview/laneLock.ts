@@ -123,9 +123,24 @@ export async function releaseLaneLock(common: string): Promise<void> {
 }
 
 /**
- * Run `fn` holding the lock, waiting for it rather than failing: it is held
- * for a rebuild — seconds — and a caller that gave up instantly would fail
- * constantly on a busy repo. Returns undefined when the wait ran out.
+ * How long a writer waits for the lock before giving up.
+ *
+ * Generous on purpose. The holder is usually a rebuild, and a rebuild is
+ * "a few seconds" only on a developer's machine: under CI, on a cold cache,
+ * with several lanes and a landed probe, it runs well past ten seconds —
+ * which is what the first value here was, and it turned an ordinary
+ * `gw-lane add` issued during a rebuild into a hard failure. Queuing behind
+ * a rebuild is the normal case, not an error.
+ *
+ * Bounded rather than infinite so a wedged repo still returns something an
+ * agent can report, and the answer when it runs out is "could not run"
+ * (exit 2), never "the preview is broken".
+ */
+const LOCK_WAIT_MS = 60_000;
+
+/**
+ * Run `fn` holding the lock, waiting for it rather than failing. Returns
+ * undefined when the wait ran out.
  */
 export async function withLaneLock<T>(
   common: string,
@@ -133,7 +148,7 @@ export async function withLaneLock<T>(
   fn: () => Promise<T>,
   opts: { waitMs?: number } = {},
 ): Promise<T | undefined> {
-  const deadline = Date.now() + (opts.waitMs ?? 10_000);
+  const deadline = Date.now() + (opts.waitMs ?? LOCK_WAIT_MS);
   while (!(await acquireLaneLock(common, op))) {
     if (Date.now() > deadline) return undefined;
     await new Promise((r) => setTimeout(r, 200));

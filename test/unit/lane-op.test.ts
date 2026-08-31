@@ -112,7 +112,9 @@ describe('lane membership ops', () => {
 
   it('waits for the rebuild lock, and says so rather than racing it', async () => {
     fs.mkdirSync(path.join(repo, '.git', 'focus-working.lock'));
-    const result = await runLaneOp(repo, 'apply', 'feat/a');
+    // A short wait here only: the real default is a minute, because
+    // queuing behind a rebuild is the normal case (see laneLock).
+    const result = await runLaneOp(repo, 'apply', 'feat/a', { waitMs: 500 });
     expect(result).toMatchObject({ ok: false, code: 'busy' });
     // The lock is somebody else's; it must still be there
     expect(fs.existsSync(path.join(repo, '.git', 'focus-working.lock'))).toBe(true);

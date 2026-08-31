@@ -59,11 +59,13 @@ owner="$lock/owner"
 runner="$dir/${RUNNER_FILE}"
 refresh="$dir/${REFRESH_FILE}"
 
-# The rebuild holds this while it rewrites the same files. It is held for
-# a second or two at most, so wait for it rather than failing.
+# The rebuild holds this while it rewrites the same files. Wait a long way
+# for it: a rebuild is seconds on a developer's machine and considerably
+# more on a loaded one, and queuing behind it is the normal case rather
+# than an error. Matches LOCK_WAIT_MS in laneLock.
 take_lock() {
   n=0
-  while [ $n -lt 50 ]; do
+  while [ $n -lt 300 ]; do
     if mkdir "$lock" 2>/dev/null; then
       printf 'pid: %s\nhost: %s\nstarted: %s\nop: %s\n' \
         "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "gw-lane $cmd" \
