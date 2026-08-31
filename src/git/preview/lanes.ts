@@ -2,12 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { git, gitOk } from '../exec';
 import { previewBranch } from './config';
+import { LOCK_DIR, withLaneLock } from './laneLock';
 
 export const APPLIED_FILE = 'focus-applied';
 export const CANDIDATES_FILE = 'focus-candidates';
 const WIP_FILE = 'focus-wip';
 const EXCLUDED_FILE = 'focus-excluded';
-export const LOCK_DIR = 'focus-working.lock';
+export { LOCK_DIR } from './laneLock';
 
 export async function commonDir(cwd: string): Promise<string> {
   const out = (await git(cwd, ['rev-parse', '--git-common-dir'])).trim();
@@ -53,36 +54,16 @@ export async function writeLaneFile(
 }
 
 /**
- * Run `fn` while holding the rebuild lock.
- *
- * Every writer of these files takes it — the engine across a whole
- * rebuild, the shell script across an edit — because a membership change
- * read-modify-written outside it can silently undo a lane the rebuild just
- * retired. Waits rather than failing: the lock is held for a rebuild, i.e.
- * seconds, and a client that gave up instantly would fail constantly on a
- * busy repo.
+ * `withLaneLock` addressed by a working directory rather than a common
+ * dir — every caller in this module has the former and not the latter.
  */
-export async function withLaneLock<T>(
+export async function withRepoLock<T>(
   cwd: string,
+  op: string,
   fn: () => Promise<T>,
   opts: { waitMs?: number } = {},
 ): Promise<T | undefined> {
-  const lock = path.join(await commonDir(cwd), LOCK_DIR);
-  const deadline = Date.now() + (opts.waitMs ?? 10_000);
-  for (;;) {
-    try {
-      await fs.mkdir(lock);
-      break;
-    } catch {
-      if (Date.now() > deadline) return undefined;
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
-  try {
-    return await fn();
-  } finally {
-    await fs.rm(lock, { recursive: true, force: true }).catch(() => {});
-  }
+  return withLaneLock(await commonDir(cwd), op, fn, opts);
 }
 
 export async function listAppliedLanes(cwd: string): Promise<string[]> {

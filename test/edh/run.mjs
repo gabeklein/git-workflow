@@ -160,10 +160,6 @@ try {
       GW_FIXTURE_REPO: repo,
       GW_TEST_HOOKS: '1',
       GW_FIXTURE_LANDING: path.join(root, 'landing'),
-      // Preview daemons spawned during the run inherit this. Without it
-      // they idle for five minutes after the window closes, holding a
-      // claim in a fixture the runner is about to delete.
-      GW_DAEMON_IDLE_MS: '15000',
     },
   });
   console.log('[edh-test] PASS');

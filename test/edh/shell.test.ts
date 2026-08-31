@@ -1,10 +1,11 @@
 /**
- * The single writer, in a repo the extension is actually managing.
+ * Driving the preview from a shell, in a repo the extension is actually
+ * managing.
  *
- * The unit layer pins the queue and the daemon's behaviour; this pins the
- * wiring that cannot be faked — that the running extension records how to
- * start a daemon and what settings it should serve, and that an agent's
- * shell can then drive the very same preview the sidebar is showing.
+ * The unit layer pins the operations and the lock; this pins the wiring
+ * that cannot be faked — that the running extension records the settings
+ * and the recipe a shell needs, and that an agent's terminal then drives
+ * the very same preview the sidebar is showing.
  */
 import * as assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -20,7 +21,7 @@ import {
   type TestApi,
 } from './helpers';
 
-describe('preview daemon', () => {
+describe('preview from a shell', () => {
   let api: TestApi;
   const common = path.join(repo, '.git');
   const read = (file: string) =>
@@ -30,56 +31,57 @@ describe('preview daemon', () => {
     api = await getApi();
   });
 
-  it('records the settings and the recipe for starting one', async () => {
-    await poll('the editor writes focus-config and focus-daemon-cmd', 20000, () => {
+  it('records the settings and the recipe a shell needs', async () => {
+    await poll('the editor writes focus-config and focus-runner', 20000, () => {
       return (
         fs.existsSync(path.join(common, 'focus-config')) &&
-        fs.existsSync(path.join(common, 'focus-daemon-cmd'))
+        fs.existsSync(path.join(common, 'focus-runner'))
       );
     });
     const config = read('focus-config');
-    // Resolved values, not templates: a daemon cannot substitute {base}.
+    // Resolved values, not templates: a shell cannot substitute {base}.
     // The base is whatever THIS repo is configured with (the fixture uses
     // the plain branch name), so pin the shape rather than a guess.
     assert.match(config, /^branch: preview\/main$/m);
     assert.match(config, /^base: (origin\/)?main$/m);
     assert.match(config, new RegExp(`^checkout: ${previewRoot}$`, 'm'));
 
-    const script = read('focus-daemon-cmd')
+    const script = read('focus-runner')
       .split('\n')
       .find((l) => l.startsWith('script:'))
       ?.slice('script:'.length)
       .trim();
-    assert.ok(script && fs.existsSync(script), `daemon bundle exists: ${script}`);
+    assert.ok(script && fs.existsSync(script), `the bundle exists: ${script}`);
   });
 
   /**
-   * The agent's route, end to end: a shell starts a daemon, it performs a
-   * real rebuild of the real preview, and the answer comes back. Nothing
-   * here goes through a VS Code command.
+   * The agent's route, end to end: a shell runs the bundle, it performs a
+   * real rebuild of the real preview, and the answer comes back on exit.
+   * Nothing here goes through a VS Code command.
    */
   it('gw-lane rebuild drives the same preview the sidebar shows', async () => {
     const cli = path.join(common, 'gw-lane');
     assert.ok(fs.existsSync(cli), 'the lane CLI is installed while preview is on');
 
     // A lane with content nobody has merged yet, added the headless way
-    const wt = path.join(repo, '.worktrees', 'feat-daemon');
-    git(repo, ['worktree', 'add', '-q', '.worktrees/feat-daemon', '-b', 'feat/daemon', 'origin/main']);
-    fs.writeFileSync(path.join(wt, 'daemon.txt'), 'from the daemon lane\n');
+    const wt = path.join(repo, '.worktrees', 'feat-shell');
+    git(repo, ['worktree', 'add', '-q', '.worktrees/feat-shell', '-b', 'feat/shell', 'origin/main']);
+    fs.writeFileSync(path.join(wt, 'shell.txt'), 'from the shell lane\n');
     git(wt, ['add', '-A']);
-    git(wt, ['commit', '-qm', 'daemon lane']);
-    execFileSync(cli, ['add', 'feat/daemon'], { cwd: repo, encoding: 'utf8' });
-    assert.ok(applied().includes('feat/daemon'), 'gw-lane add applied it');
+    git(wt, ['commit', '-qm', 'shell lane']);
+    execFileSync(cli, ['add', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    assert.ok(applied().includes('feat/shell'), 'gw-lane add applied it');
 
     const out = execFileSync(cli, ['rebuild'], { cwd: repo, encoding: 'utf8' });
     assert.match(out, /^rebuilt: /, `rebuild reported success: ${out}`);
     assert.ok(
-      fs.existsSync(path.join(previewRoot, 'daemon.txt')),
+      fs.existsSync(path.join(previewRoot, 'shell.txt')),
       'the lane is in the preview tree',
     );
-    // …and the editor sees the same preview, without being told
+    // …and the editor sees the same preview, without being told: the
+    // rebuild moved refs, which its .git watch notices on its own
     await poll('the sidebar catches up with the headless rebuild', 20000, () =>
-      (api.preview()?.lanes ?? []).includes('feat/daemon'),
+      (api.preview()?.lanes ?? []).includes('feat/shell'),
     );
   });
 
@@ -115,14 +117,22 @@ describe('preview daemon', () => {
     );
   });
 
-  it('says who is serving, and stays out of the way when nobody is', () => {
+  it('names nobody as the writer once every operation has finished', () => {
     const cli = path.join(common, 'gw-lane');
-    const status = execFileSync(cli, ['status'], { cwd: repo, encoding: 'utf8' });
-    assert.match(status, /^daemon: /m, 'status leads with whether one is up');
+    // `owner` exits 1 when there is no live writer — which is the state a
+    // repo should be in between operations, since nothing stays resident
+    let out = '';
+    try {
+      out = execFileSync(cli, ['owner'], { cwd: repo, encoding: 'utf8' });
+      assert.fail(`expected no writer, got: ${out}`);
+    } catch (err) {
+      out = String((err as { stdout?: string }).stdout ?? '');
+    }
+    assert.match(out, /nobody is writing the preview/);
 
     // Leaving the lane out again keeps later scenarios on the state they expect
-    execFileSync(cli, ['remove', 'feat/daemon'], { cwd: repo, encoding: 'utf8' });
-    git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-daemon']);
-    git(repo, ['branch', '-D', 'feat/daemon']);
+    execFileSync(cli, ['remove', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-shell']);
+    git(repo, ['branch', '-D', 'feat/shell']);
   });
 });

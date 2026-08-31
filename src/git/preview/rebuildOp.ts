@@ -2,11 +2,11 @@ import { type RebuildResult, rebuildPreview } from './engine';
 import { type PreviewSettings, readPreviewSettings } from './settings';
 
 /**
- * "Rebuild this repo's preview" as one operation, so the daemon and the
+ * "Rebuild this repo's preview" as one operation, so a shell and the
  * editor cannot mean different things by it.
  *
  * The engine was never duplicated — both call rebuildPreview — but its
- * INPUTS were assembled twice: the daemon from focus-config, the editor
+ * INPUTS were assembled twice: the CLI from focus-config, the editor
  * from live workspace settings. Two assemblies of the same argument list
  * is where a divergence would eventually appear, and it would appear as
  * the worst possible symptom: a preview that depends on who built it. So

@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { commonDir, APPLIED_FILE, CANDIDATES_FILE, LOCK_DIR } from './lanes';
 import { STATUS_FILE } from './statusFile';
-import { DAEMON_CMD_FILE, DAEMON_LOCK, QUEUE_DIR } from '../../daemon/protocol';
+import { RUNNER_FILE } from '../../cli/runner';
 import { REFRESH_FILE } from '../refreshSignal';
 
 /**
@@ -32,12 +32,12 @@ const SENTINEL = '# git-workflow: lane CLI';
 const SCRIPT = `#!/bin/sh
 ${SENTINEL}
 #
-# Join or leave the preview preview, without VS Code.
+# Drive the preview without VS Code: join, leave, rebuild, look.
 #
 #   gw-lane status           how the preview built, what is applied
 #   gw-lane check            exit 0 ok · 1 failed · 2 nothing to go on
-#   gw-lane rebuild          ask the daemon to rebuild, and wait for it
-#   gw-lane owner            who is serving this repo, if anyone
+#   gw-lane rebuild          rebuild the preview now, here
+#   gw-lane owner            who holds the preview lock, if anyone
 #   gw-lane refresh          ask any editor watching to catch up now
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
@@ -55,10 +55,8 @@ applied="$dir/${APPLIED_FILE}"
 candidates="$dir/${CANDIDATES_FILE}"
 built="$dir/${STATUS_FILE}"
 lock="$dir/${LOCK_DIR}"
-queue="$dir/${QUEUE_DIR}"
-claim="$dir/${DAEMON_LOCK}"
-owner="$claim/owner"
-daemon_cmd="$dir/${DAEMON_CMD_FILE}"
+owner="$lock/owner"
+runner="$dir/${RUNNER_FILE}"
 refresh="$dir/${REFRESH_FILE}"
 
 # The rebuild holds this while it rewrites the same files. It is held for
@@ -67,6 +65,9 @@ take_lock() {
   n=0
   while [ $n -lt 50 ]; do
     if mkdir "$lock" 2>/dev/null; then
+      printf 'pid: %s\nhost: %s\nstarted: %s\nop: %s\n' \
+        "$$" "$(hostname)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "gw-lane $cmd" \
+        > "$lock/owner" 2>/dev/null || true
       return 0
     fi
     n=$((n + 1))
@@ -75,7 +76,7 @@ take_lock() {
   echo "preview is busy (lock held) — try again in a moment" >&2
   exit 1
 }
-drop_lock() { rmdir "$lock" 2>/dev/null || true; }
+drop_lock() { rm -f "$lock/owner" 2>/dev/null || true; rmdir "$lock" 2>/dev/null || true; }
 
 has_line() { [ -f "$1" ] && grep -qxF "$2" "$1"; }
 # Append, never sort: the order lanes were added is the order they merge.
@@ -106,74 +107,24 @@ moved_list() {
 field() { sed -n "s/^$1: //p" "$built" 2>/dev/null | head -1; }
 value() { sed -n "s/^$2: //p" "$1" 2>/dev/null | head -1; }
 
-# --- the preview protocol, in sh -----------------------------------------
-# The same four moves as src/daemon/client.ts, which is the point: the
-# transport is a directory precisely so that sh is a first-class client
-# rather than something that has to call node to reach node. Keep the two
-# in step — both are covered by tests that run the real script.
-#
-# Is somebody serving this repo? A claim from ANOTHER host is honoured
-# blind: we cannot read its process table, and guessing wrong would mean
-# two writers, which is the one thing the queue exists to prevent.
-daemon_alive() {
-  [ -f "$owner" ] || return 1
-  opid=$(value "$owner" pid)
-  ohost=$(value "$owner" host)
-  [ -n "$opid" ] || return 1
-  if [ -n "$ohost" ] && [ "$ohost" != "$(hostname)" ]; then
-    return 0
+# --- running an operation ------------------------------------------------
+# The engine is a bundle the editor recorded a recipe for; this runs it in
+# THIS process and waits. Exclusion is the lock the engine takes (which now
+# records its holder — see laneLock), not a queue: two of these racing is
+# one of them waiting. Exit 127 means there is nothing to run, which is
+# different from an operation that ran and failed.
+run_op() {
+  [ -f "$runner" ] || return 127
+  rnode=$(value "$runner" node)
+  rscript=$(value "$runner" script)
+  [ -n "$rnode" ] && [ -n "$rscript" ] && [ -f "$rscript" ] || return 127
+  if [ -n "$2" ]; then
+    ELECTRON_RUN_AS_NODE=1 "$rnode" "$rscript" --common "$dir" "$1" "$2"
+  else
+    ELECTRON_RUN_AS_NODE=1 "$rnode" "$rscript" --common "$dir" "$1"
   fi
-  kill -0 "$opid" 2>/dev/null
 }
 
-# Start one. Safe to call when another is already running: the loser of
-# the claim exits immediately, so a race costs a process that lives for a
-# few milliseconds rather than a lock nobody can resolve.
-spawn_daemon() {
-  [ -f "$daemon_cmd" ] || return 1
-  dnode=$(value "$daemon_cmd" node)
-  dscript=$(value "$daemon_cmd" script)
-  [ -n "$dnode" ] && [ -n "$dscript" ] && [ -f "$dscript" ] || return 1
-  ELECTRON_RUN_AS_NODE=1 nohup "$dnode" "$dscript" --common "$dir" \
-    >/dev/null 2>&1 &
-  n=0
-  while [ $n -lt 50 ]; do
-    daemon_alive && return 0
-    n=$((n + 1))
-    sleep 0.1
-  done
-  return 1
-}
-
-# Write, then rename: a request appears in req/ complete or not at all.
-submit() {
-  mkdir -p "$queue/tmp" "$queue/req" "$queue/res"
-  id=$(basename "$(mktemp -u "$queue/tmp/XXXXXXXX")")
-  printf 'op: %s\nlane: %s\nreason: %s\nclient-pid: %s\nclient-host: %s\n' \
-    "$1" "$branch" "$2" "$$" "$(hostname)" > "$queue/tmp/$id"
-  mv "$queue/tmp/$id" "$queue/req/$id"
-  echo "$id"
-}
-
-# $1 = id, $2 = seconds to wait. Prints the answer; 1 if none came.
-await() {
-  n=0
-  limit=$(( $2 * 10 ))
-  while [ $n -lt $limit ]; do
-    if [ -f "$queue/res/$1" ]; then
-      cat "$queue/res/$1"
-      rm -f "$queue/res/$1"
-      return 0
-    fi
-    n=$((n + 1))
-    sleep 0.1
-  done
-  return 1
-}
-
-# Not a daemon op: a signal is not a mutation, so there is nothing to
-# serialise and nobody to answer. The editor watches this directory and
-# recognises the stamp; if none is running, this costs one file write.
 if [ "$cmd" = "refresh" ]; then
   date -u +%Y-%m-%dT%H:%M:%SZ > "$refresh"
   echo "refresh requested — an editor watching this repo will catch up shortly"
@@ -181,55 +132,41 @@ if [ "$cmd" = "refresh" ]; then
 fi
 
 if [ "$cmd" = "owner" ]; then
-  if daemon_alive; then
-    echo "serving: pid $(value "$owner" pid) on $(value "$owner" host) since $(value "$owner" started)"
+  if [ ! -f "$owner" ]; then
+    echo "nobody is writing the preview"
+    exit 1
+  fi
+  opid=$(value "$owner" pid)
+  ohost=$(value "$owner" host)
+  what=$(value "$owner" op)
+  # Another host's holder cannot be checked from here, so it is reported
+  # as-is rather than guessed at: two writers is the failure this avoids.
+  if [ "$ohost" != "$(hostname)" ] || kill -0 "$opid" 2>/dev/null; then
+    echo "busy: $what (pid $opid on $ohost since $(value "$owner" started))"
     exit 0
   fi
-  if [ -f "$owner" ]; then
-    echo "stale claim: pid $(value "$owner" pid) on $(value "$owner" host) is gone (the next daemon sweeps it)"
-  else
-    echo "nobody is serving this repo"
-  fi
+  echo "stale lock: $what (pid $opid is gone) — the next writer sweeps it"
   exit 1
 fi
 
 if [ "$cmd" = "rebuild" ]; then
-  if ! daemon_alive; then
-    if ! spawn_daemon; then
-      echo "cannot reach or start a preview daemon (focus-daemon-cmd missing or unusable) — is preview on?" >&2
-      exit 2
-    fi
-  fi
-  id=$(submit rebuild "gw-lane (pid $$)")
-  answer=$(await "$id" 180) || {
-    echo "no answer in 180s — the daemon may still be working; try: gw-lane status" >&2
-    exit 2
-  }
-  ok=$(echo "$answer" | sed -n 's/^ok: //p' | head -1)
-  code=$(echo "$answer" | sed -n 's/^code: //p' | head -1)
-  msg=$(echo "$answer" | sed -n 's/^message: //p' | head -1)
-  if [ "$ok" = "yes" ]; then
-    echo "rebuilt: $(echo "$answer" | sed -n 's/^tree: //p' | head -1)"
+  # rc must be captured in the ELSE branch: after the fi, $? is the status
+  # of the compound (zero when no branch ran), not of the condition.
+  if run_op rebuild ""; then
     exit 0
-  fi
-  if [ -n "$msg" ]; then
-    echo "rebuild failed: $code — $msg" >&2
   else
-    echo "rebuild failed: $code" >&2
+    rc=$?
   fi
-  # Same three answers as check: a rebuild that never ran (no settings, an
-  # op this daemon does not know) is not a failed preview.
-  case "$code" in
-    unconfigured|unsupported|busy) exit 2 ;;
-    *) exit 1 ;;
-  esac
+  if [ $rc -eq 127 ]; then
+    echo "no way to run a rebuild here (focus-runner missing) — is preview on, and has the editor opened this repo?" >&2
+    exit 2
+  fi
+  exit $rc
 fi
 
 if [ "$cmd" = "status" ]; then
-  if daemon_alive; then
-    echo "daemon: serving (pid $(value "$owner" pid))"
-  else
-    echo "daemon: not running (started on demand)"
+  if [ -f "$owner" ]; then
+    echo "writer: $(value "$owner" op) (pid $(value "$owner" pid) on $(value "$owner" host))"
   fi
   # Build outcome FIRST: when it failed, the checkout still holds the last
   # good tree, so which lanes are "applied" is the less urgent fact.
@@ -290,38 +227,37 @@ if ! git rev-parse -q --verify "refs/heads/$branch" >/dev/null; then
   exit 2
 fi
 
-# Membership goes to the daemon when one can be reached, so that the same
-# code decides what "apply" and "remove" mean here and in the sidebar. The
-# direct edit below is the fallback, not a second opinion: it is what keeps
-# a repo working where no daemon can be started, and it takes the same lock
-# the daemon's operation takes.
-ask_daemon() { # $1 = op
-  daemon_alive || spawn_daemon || return 1
-  id=$(submit "$1" "gw-lane (pid $$)") || return 1
-  answer=$(await "$id" 30) || return 1
-  ok=$(echo "$answer" | sed -n 's/^ok: //p' | head -1)
-  if [ "$ok" = "yes" ]; then
-    return 0
-  fi
-  # A refusal is an answer: report it rather than editing the files behind
-  # the daemon's back.
-  echo "$(echo "$answer" | sed -n 's/^message: //p' | head -1)" >&2
-  exit 1
-}
-
 case "$cmd" in
   add)
-    if ! ask_daemon apply; then
+    if run_op apply "$branch"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ $rc -eq 0 ]; then
+      :
+    elif [ $rc -eq 127 ]; then
+      # Nothing to run — do it here. The files and this lock are the
+      # protocol; the bundle is only a faster way to reach the same code.
       take_lock
       add_line "$candidates" "$branch"
       add_line "$applied" "$branch"
       drop_line "$dir/focus-excluded" "$branch"
       drop_lock
+      echo "$branch is in the preview"
+    else
+      exit 1
     fi
-    echo "$branch is in the preview"
     ;;
   remove)
-    if ! ask_daemon remove; then
+    if run_op remove "$branch"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ $rc -eq 0 ]; then
+      :
+    elif [ $rc -eq 127 ]; then
       take_lock
       drop_line "$applied" "$branch"
       drop_line "$candidates" "$branch"
@@ -329,8 +265,10 @@ case "$cmd" in
       # row straight back.
       add_line "$dir/focus-excluded" "$branch"
       drop_lock
+      echo "$branch is out of the preview"
+    else
+      exit 1
     fi
-    echo "$branch is out of the preview"
     ;;
   *)
     echo "usage: gw-lane <status|check|rebuild|refresh|owner|add|remove> [branch]" >&2

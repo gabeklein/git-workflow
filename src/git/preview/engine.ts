@@ -10,9 +10,9 @@ import {
   type Preview,
   WIP_SUBJECT,
 } from './config';
+import { acquireLaneLock, readLockOwner, releaseLaneLock } from './laneLock';
 import {
   APPLIED_FILE,
-  LOCK_DIR,
   commonDir,
   listAppliedLanes,
   listCandidateLanes,
@@ -219,14 +219,16 @@ async function runRebuild(
 ): Promise<RebuildResult> {
   const previewBranch = preview.branch;
   const common = await commonDir(workingPath);
-  const lock = path.join(common, LOCK_DIR);
-  try {
-    await fs.mkdir(lock);
-  } catch {
+  // The lock now records its holder, so a rebuild that dies leaves
+  // something the next one can sweep and `gw-lane owner` can name.
+  if (!(await acquireLaneLock(common, 'rebuild'))) {
+    const busy = await readLockOwner(common);
     return {
       ok: false,
       code: 'busy',
-      message: 'another rebuild holds the lock (focus-working.lock)',
+      message: busy
+        ? `another writer holds the lock: ${busy.op} (pid ${busy.pid} on ${busy.host})`
+        : 'another rebuild holds the lock (focus-working.lock)',
     };
   }
 
@@ -583,7 +585,7 @@ async function runRebuild(
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, code: 'error', message };
   } finally {
-    await fs.rmdir(lock).catch(() => {});
+    await releaseLaneLock(common);
   }
 }
 

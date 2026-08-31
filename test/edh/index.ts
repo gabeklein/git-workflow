@@ -19,7 +19,7 @@ const ORDER = [
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase
   'conflicts.test.cjs', //   petty-conflict resolver, dead lane prune
-  'daemon.test.cjs', //      single writer: settings, recipe, headless rebuild
+  'shell.test.cjs', //       driving the preview from a shell: settings, recipe, rebuild
   'base-pin.test.cjs', //    frozen base: drift row, branchify, catch up (mutates main)
   'absorb.test.cjs', //      stray-work rescue out of the preview checkout (mutates main — LAST)
 ];

@@ -13,9 +13,9 @@ import { commonDir } from './lanes';
  * `gw-lane` and the commit guard are.
  *
  * The editor remains the only WRITER: it owns the settings UI, so nothing
- * else has an opinion to record. Readers are the daemon (and its vscode
- * shim, which serves these values to the unmodified engine) and anyone
- * diagnosing by eye.
+ * else has an opinion to record. Readers are the one-shot CLI (and its
+ * vscode shim, which serves these values to the unmodified engine) and
+ * anyone diagnosing by eye.
  */
 
 export const CONFIG_FILE = 'focus-config';
@@ -59,7 +59,7 @@ export async function writePreviewSettings(
 }
 
 /**
- * Parse, separately from reading, because the daemon's `vscode` shim needs
+ * Parse, separately from reading, because the CLI's `vscode` shim needs
  * these values SYNCHRONOUSLY inside a config getter. One parser, two
  * readers — the alternative was a second copy of this format living in the
  * shim, which is how the file and its reader drift apart.

@@ -8,7 +8,7 @@ import {
   dropExcludedLane,
   listAppliedLanes,
   listCandidateLanes,
-  withLaneLock,
+  withRepoLock,
 } from './lanes';
 
 /**
@@ -63,7 +63,7 @@ export async function runLaneOp(
     return { ok: false, code: 'no-such-branch', message: `no such branch: ${lane}` };
   }
 
-  const done = await withLaneLock(cwd, async () => {
+  const done = await withRepoLock(cwd, `lane ${op} ${lane}`, async () => {
     const before = [
       ...(await listAppliedLanes(cwd)),
       ...(await listCandidateLanes(cwd)),

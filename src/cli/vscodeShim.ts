@@ -5,10 +5,10 @@
  * workspace settings through `vscode.workspace.getConfiguration`. Rather
  * than fork the engine or thread a config object through twenty call
  * sites — both of which would leave two versions of the rules to keep in
- * step — the daemon bundle substitutes this module for `vscode` at build
+ * step — the CLI bundle substitutes this module for `vscode` at build
  * time and serves the same values from `focus-config` (see settings.ts).
  *
- * So the daemon runs the SAME engine the editor runs, byte for byte. That
+ * So the CLI runs the SAME engine the editor runs, byte for byte. That
  * is the property worth protecting: a preview built headlessly and one
  * built from the sidebar must not be able to differ.
  *
@@ -22,7 +22,7 @@ let resolve: (key: string) => unknown = () => undefined;
 /**
  * Where settings come from. A resolver rather than a snapshot: it is
  * consulted on every read, so the editor rewriting focus-config takes
- * effect immediately instead of at the next daemon start.
+ * effect immediately, with no snapshot to go stale.
  */
 export function resolveConfigurationWith(
   resolver: (key: string) => unknown,

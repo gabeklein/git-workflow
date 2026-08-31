@@ -14,9 +14,8 @@ import { git } from './exec';
  * row that disagrees with the terminal beside it.
  *
  * So this is a deliberate event source: a file whose CONTENT is never read
- * and whose only purpose is to have been written. It is not queued through
- * the daemon — a signal is not a mutation, and spawning a writer to touch
- * a file would be a strange way to ask a question of nobody.
+ * and whose only purpose is to have been written. Nothing answers it — a
+ * signal is not a request, and there is nobody to ask.
  *
  * The extension recognises the stamp rather than merely waking on it: a
  * watch event alone refreshes the views that listen for activity, but the

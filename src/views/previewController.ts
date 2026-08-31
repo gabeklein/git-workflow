@@ -1,8 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { asRebuildResult, submit, writeDaemonCommand } from '../daemon/client';
+import { clearRunnerCommand, writeRunnerCommand } from '../cli/runner';
 import { type LaneOpName, runLaneOp } from '../git/preview/laneOp';
-import { queuePaths } from '../daemon/protocol';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { findPreviewCheckout, orderLaneRows } from './lanesPlan';
 import { git, gitOk } from '../git/exec';
@@ -27,6 +26,7 @@ import {
   isCommitGuardEnabled,
   clearPreviewSettings,
   clearPreviewStatus,
+  commonDir,
   uninstallCommitGuard,
   uninstallLaneCli,
   writePreviewSettings,
@@ -73,8 +73,8 @@ interface PreviewHost {
   /** Override ?? genuine inference for a worktree's base — undefined when
    *  there is no evidence (auto-membership must never enroll on a guess). */
   genuineBaseFor(worktreePath: string): Promise<string | undefined>;
-  /** Where this extension is installed — the daemon bundle ships beside
-   *  it, and the recipe for starting it has to name a real path. */
+  /** Where this extension is installed — the one-shot CLI bundle ships
+   *  beside it, and the recipe has to name a real path. */
   extensionPath?(): string | undefined;
 }
 
@@ -635,18 +635,12 @@ export class PreviewController implements vscode.Disposable {
         await uninstallLaneCli(cwd);
         // A recorded conflict outlasting the preview it described is worse
         // than no record: it reads as a live failure in a repo that has no
-        // preview to fail. The settings go for the same reason — a daemon
-        // started later must refuse rather than rebuild a preview that was
+        // preview to fail. The settings go for the same reason — a CLI
+        // run later must refuse rather than rebuild a preview that was
         // turned off.
         await clearPreviewStatus(cwd);
         await clearPreviewSettings(cwd);
-        // Ask any daemon to go; never start one to tell it to stop.
-        await submit(cwd, {
-          op: 'stop',
-          reason: 'preview off',
-          spawnIfIdle: false,
-          timeoutMs: 2000,
-        }).catch(() => undefined);
+        await clearRunnerCommand(await commonDir(cwd));
         return;
       }
       // The lane CLI is how anything outside VS Code joins the preview, so
@@ -656,10 +650,10 @@ export class PreviewController implements vscode.Disposable {
           `Lane CLI installed: ${await laneCliPath(cwd)}`,
         );
       }
-      // The settings the daemon (and its vscode shim) run on, plus how to
-      // start it. Both are rewritten here rather than at enable time so
-      // they follow a renamed branch, a changed base, and an extension
-      // that moved on disk after an update.
+      // The settings a headless run needs (and its vscode shim serves),
+      // plus how to run it. Both are rewritten here rather than at enable
+      // time so they follow a renamed branch, a changed base, and an
+      // extension that moved on disk after an update.
       await writePreviewSettings(cwd, {
         branch,
         base: previewBaseRef(),
@@ -668,7 +662,7 @@ export class PreviewController implements vscode.Disposable {
           .getConfiguration('worktreeCompare')
           .get<string>('previewAutoResolve'),
       });
-      await this.recordDaemonCommand(cwd);
+      await this.recordRunnerCommand(cwd);
       if (!isCommitGuardEnabled()) {
         await uninstallCommitGuard(cwd);
         return;
@@ -719,62 +713,44 @@ export class PreviewController implements vscode.Disposable {
   }
 
   /**
-   * Record how to start the daemon for this repo.
+   * Record how a shell runs a preview operation in this repo.
    *
-   * Written into the git common dir, next to the state it serves, so a
-   * shell — which has no idea where a VS Code extension lives — can start
-   * one. It names the editor's own node (`process.execPath` run with
-   * ELECTRON_RUN_AS_NODE) because that is frequently the only node on the
-   * machine, and the bundle beside this extension, so an update moves both
-   * together. Rewritten on every reconcile: an extension that updated to a
-   * new version directory would otherwise leave a recipe pointing at a
-   * path that no longer exists.
+   * The editor is not a server and nothing connects to it: `gw-lane` runs
+   * the bundled one-shot CLI itself, taking the same lock this process
+   * takes. All it needs is where to find it — which a shell cannot know,
+   * least of all after an update moves the extension. So the recipe is
+   * written beside the state it operates on, naming the editor's own node
+   * (`process.execPath` under ELECTRON_RUN_AS_NODE, frequently the only
+   * node on the machine) and the bundle shipped alongside. Rewritten on
+   * every reconcile, so a moved install heals itself.
    */
-  private async recordDaemonCommand(cwd: string): Promise<void> {
+  private async recordRunnerCommand(cwd: string): Promise<void> {
     const root = this.host.extensionPath?.();
     if (!root) return;
-    const script = path.join(root, 'dist', 'daemon.js');
     try {
-      await writeDaemonCommand(await queuePaths(cwd), {
+      await writeRunnerCommand(await commonDir(cwd), {
         node: process.execPath,
-        script,
+        script: path.join(root, 'dist', 'gw-op.js'),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.host.output.appendLine(`Daemon command not recorded: ${message}`);
+      this.host.output.appendLine(`Runner command not recorded: ${message}`);
     }
   }
 
   /**
-   * Ask the daemon to rebuild; run it here if there is no daemon to ask.
+   * Rebuild, in this process.
    *
-   * The editor going through the same queue as `gw-lane` is the point of
-   * the daemon — one writer, and no privileged client. The fallback is not
-   * a hedge against that: it is what makes the change adoptable. A repo
-   * whose extension has not written a recipe yet, a machine where spawning
-   * fails, an EDH with no bundle on disk — all of those must still rebuild,
-   * and the engine's own lock (which the daemon takes too) keeps them
-   * correct if a daemon does turn up mid-flight.
+   * The same operation `gw-lane rebuild` runs, differing only in where the
+   * settings come from: the editor's are live, so it passes them rather
+   * than reading back the file it just wrote. Exclusion between the two is
+   * the rebuild lock, which both take and which now records its holder —
+   * that, not a queue, is what makes concurrent writers safe.
    */
   private async rebuildVia(
     workingPath: string,
-    reason: string,
+    _reason: string,
   ): Promise<RebuildResult> {
-    let unreachable: string | undefined;
-    try {
-      const result = await submit(workingPath, { op: 'rebuild', reason });
-      if (result.kind === 'answered') return asRebuildResult(result.response);
-      unreachable = result.message;
-    } catch (err) {
-      unreachable = err instanceof Error ? err.message : String(err);
-    }
-    this.host.output.appendLine(
-      `Preview daemon unavailable (${unreachable}) — rebuilding in-process`,
-    );
-    // The SAME operation the daemon performs, with the editor's live
-    // settings passed in rather than read back from the file it just
-    // wrote. Nothing about the rebuild is reimplemented here: if these two
-    // paths could differ, the preview would depend on who built it.
     const outcome = await rebuildFromSettings(workingPath, {
       branch: previewBranch(),
       base: previewBaseRef(),
@@ -786,36 +762,13 @@ export class PreviewController implements vscode.Disposable {
   }
 
   /**
-   * A membership change, asked for the same way `gw-lane` asks.
-   *
-   * Same shape as rebuildVia and for the same reason: the queue is the
-   * normal path, and running the operation here when no daemon can be
-   * reached is what keeps the change adoptable. Either way it is ONE
-   * implementation (preview/laneOp) — the controller no longer composes
-   * lane-file helpers by hand, which is how its verbs drifted from the
-   * script's in the first place.
+   * A membership change — one implementation (preview/laneOp), shared with
+   * the CLI. The controller no longer composes lane-file helpers by hand,
+   * which is how its verbs drifted from the script's in the first place.
    */
   private async laneOp(op: LaneOpName, lane: string): Promise<void> {
     const cwd = this.previewPath;
     if (!cwd) return;
-    try {
-      const answer = await submit(cwd, {
-        op,
-        lane,
-        reason: `sidebar: ${op}`,
-        timeoutMs: 15_000,
-      });
-      if (answer.kind === 'answered') {
-        if (!answer.response.ok) {
-          this.host.output.appendLine(
-            `Lane ${op} refused: ${answer.response.message ?? answer.response.code}`,
-          );
-        }
-        return;
-      }
-    } catch {
-      // fall through to running it here
-    }
     const result = await runLaneOp(cwd, op, lane);
     if (!result.ok) {
       this.host.output.appendLine(`Lane ${op} refused: ${result.message}`);

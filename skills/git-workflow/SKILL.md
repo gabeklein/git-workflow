@@ -228,17 +228,17 @@ Fix it. That is ordinary work on your own branch, not an intervention:
 3. **Report which you did.** The preview changed either way, and the row will
    not explain itself.
 
-Then rebuild and confirm. `gw-lane rebuild` works with the editor closed —
-preview mutations are performed by a daemon that any client may start, so
-this is the same rebuild the sidebar runs, not an approximation of it. With
-the editor open one also happens on its own: the rebuild watches lane tips,
-so your catch-up commit triggers one.
+Then rebuild and confirm. `gw-lane rebuild` works with the editor closed: it
+runs the same engine the sidebar runs, taking the same lock, so it is the real
+rebuild rather than an approximation of one. With the editor open one also
+happens on its own — the rebuild watches lane tips, so your catch-up commit
+triggers one.
 
 **Verify rather than predict.** `rebuild` waits for the answer and exits 0
-built · 1 the rebuild failed · 2 it could not run at all (no daemon could be
-started, preview is off, the settings are not recorded). Report what came
-back. Only a 2 justifies saying the fix is in and a rebuild is still needed —
-and say which of those it was.
+built · 1 the rebuild failed · 2 it could not run at all (preview is off, the
+settings or the runner are not recorded, another writer holds the lock).
+Report what came back. Only a 2 justifies saying the fix is in and a rebuild
+is still needed — and say which of those it was.
 
 What is NOT yours to fix, whatever the record says:
 
@@ -275,10 +275,8 @@ a moment. What it cannot see is a file written into a checkout — nothing under
 asks for a fresh look. It is a signal with no reply: report what you did, not
 that the UI agrees.
 
-**The preview has one writer.** A daemon performs every mutation, and the
-sidebar asks it through the same request directory `gw-lane` uses — no client
-is privileged. Two consequences worth holding onto: the preview can change
-under you at any moment unless you are the one who asked for the change, and
-`gw-lane owner` is how you find out who is driving. Never hand-edit anything
-under `focus-queue/`; submit through the CLI, which writes and renames so a
-half-written request is never read.
+**One writer at a time, and it may not be you.** Every writer — the sidebar,
+`gw-lane`, a rebuild — takes the same lock, and it records its holder. So the
+preview can change under you at any moment unless you are the one changing it,
+and `gw-lane owner` is how you find out whether something is mid-write. Nothing
+is resident: an operation runs, takes the lock, and exits.

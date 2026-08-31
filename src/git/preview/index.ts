@@ -32,6 +32,7 @@ export {
 
 // lanes
 export {
+  commonDir,
   addAppliedLane,
   addCandidateLane,
   addExcludedLane,
@@ -71,7 +72,7 @@ export {
   rebuildPreview,
 } from './engine';
 
-// rebuildOp — "rebuild this repo's preview", the one the daemon runs too
+// rebuildOp — "rebuild this repo's preview", the one the CLI runs too
 export { type RebuildOutcome, rebuildFromSettings } from './rebuildOp';
 
 // lifecycle
