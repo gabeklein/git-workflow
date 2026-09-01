@@ -577,7 +577,7 @@ export function registerWorktreeCommands(
       'worktreeCompare.refreshPullRequests',
       async () => {
         treeProvider.clearPullRequestCache();
-        await treeProvider.refreshPullRequests();
+        await treeProvider.refreshPullRequests(true);
         void vscode.window.setStatusBarMessage(
           'Git Workflow: refreshed PR status',
           2000,

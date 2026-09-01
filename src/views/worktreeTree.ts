@@ -19,11 +19,9 @@ import {
   type RebuildResult,
 } from '../git/preview';
 import { getWorkingStatus, type WorkingStatus } from '../git/status';
-import {
-  prHasMergeConflicts,
-  resetGithubPrClient,
-  type PullRequestInfo,
-} from '../github/pr';
+import { prHasMergeConflicts, type PullRequestInfo } from '../github/pr';
+import { resetGithubPrClient } from '../github/gh';
+import { PullRequestIndex } from '../github/prIndex';
 import { BaseStatusTracker } from './baseStatusTracker';
 import { GitActivityHub } from './gitActivityHub';
 import { HotFollowPoll } from './hotFollowPoll';
@@ -102,12 +100,16 @@ export class WorktreeTreeProvider
   constructor(
     private readonly output: { appendLine(value: string): void },
     private readonly context: vscode.ExtensionContext,
+    /** Shared with the Branches panel: one repo-wide PR query serves both. */
+    prIndex: PullRequestIndex = new PullRequestIndex(output),
   ) {
     this.poll = new HotFollowPoll(output, (reason) =>
       this.softRefreshSelected(reason),
     );
-    this.prs = new PullRequestCache(output, () =>
-      this._onDidChangeTreeData.fire(),
+    this.prs = new PullRequestCache(
+      output,
+      () => this._onDidChangeTreeData.fire(),
+      prIndex,
     );
     this.preview = new PreviewController({
       output,
@@ -159,6 +161,12 @@ export class WorktreeTreeProvider
         void this.activity.restart();
         this.refresh();
       }),
+      // Nothing is asked of GitHub while nobody is looking (see
+      // PullRequestIndex), so coming back to the window is when a stale
+      // badge gets to catch up.
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused) void this.refreshPullRequests();
+      }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('worktreeCompare')) {
           if (e.affectsConfiguration('worktreeCompare.watchFolders'))
@@ -167,7 +175,7 @@ export class WorktreeTreeProvider
           if (e.affectsConfiguration('worktreeCompare.githubPullRequests')) {
             resetGithubPrClient();
             this.prs.clear();
-            void this.refreshPullRequests();
+            void this.refreshPullRequests(true);
           }
           if (
             e.affectsConfiguration('worktreeCompare.watchFolders') ||
@@ -384,8 +392,17 @@ export class WorktreeTreeProvider
     this.prs.clear();
   }
 
-  refreshPullRequests(): Promise<void> {
-    return this.prs.refresh(this.worktrees);
+  /**
+   * Associate PRs with the discovered checkouts.
+   *
+   * Called on every discovery load, most of which are triggered by things
+   * that cannot have changed a PR — a file appearing under `.worktrees`, a
+   * ref moving. So the default is a *request*, which the index answers from
+   * its last query unless the window has lapsed; `force` is the explicit
+   * Refresh Pull Requests command, which always asks.
+   */
+  refreshPullRequests(force = false): Promise<void> {
+    return this.prs.refresh(this.worktrees, this.getRepoCwd(), force);
   }
 
   // ---- hot-follow compare (selected worktree) ------------------------------
