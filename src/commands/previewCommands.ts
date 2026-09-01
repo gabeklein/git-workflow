@@ -120,8 +120,16 @@ export function registerPreviewCommands(
           );
           await context.workspaceState.update(PREVIEW_RETURN_KEY, undefined);
           log.appendLine(
-            `Preview mode off: ${preview.path} switched back to ${returned}`,
+            `Preview mode off: ${preview.path} switched back to ${returned.branch}`,
           );
+          // The local base sat still for the whole session while the
+          // preview tracked origin; say so, since the tree just changed.
+          if (returned.fastForwarded) {
+            const ff = returned.fastForwarded;
+            log.appendLine(
+              `Fast-forwarded ${ff.branch} to origin/${ff.branch} (${ff.from.slice(0, 7)} → ${ff.to.slice(0, 7)})`,
+            );
+          }
           // Branch is derived state — delete so nothing straggles. The
           // checkout survives the switch-away, so it is a valid cwd.
           const cwd = preview.path;
