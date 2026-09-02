@@ -1,9 +1,6 @@
 import type { DiscoveredWorktree } from '../git/discovery';
-import {
-  findPullRequestForBranch,
-  isGithubPrIntegrationEnabled,
-  type PullRequestInfo,
-} from '../github/pr';
+import { isGithubPrIntegrationEnabled, type PullRequestInfo } from '../github/pr';
+import type { PullRequestIndex } from '../github/prIndex';
 
 /** One entry per checkout, keyed by path + branch. */
 function key(worktreePath: string, branch: string): string {
@@ -13,15 +10,19 @@ function key(worktreePath: string, branch: string): string {
 /**
  * The PR (if any) behind each checkout, remembered between renders.
  *
- * Every lookup is a `gh` subprocess against the network, and rows are
- * rebuilt on every tree refresh — so the answer has to be cached or the
- * panel would spawn a process per row per keystroke. A miss and a known
- * "no PR" are stored distinctly (`null`), because re-asking for branches
- * that have no PR is most of the cost.
+ * Rows are rebuilt on every tree refresh, so the answer has to be
+ * remembered or the panel would look one up per row per keystroke. A miss
+ * and a known "no PR" are stored distinctly (`null`), because re-asking for
+ * branches that have no PR was most of the old cost.
+ *
+ * It no longer asks per branch. One repo-wide query in PullRequestIndex
+ * answers every checkout at once — see there for why that is the whole
+ * point — and this class is the projection of that answer onto the rows,
+ * which is a map lookup and no network at all.
  *
  * Refreshes are GENERATIONAL: a refresh that starts while another is in
- * flight abandons the older one mid-queue rather than letting two runs
- * interleave writes. Whoever asked last is the one who wants an answer.
+ * flight abandons the older one rather than letting two runs interleave
+ * writes. Whoever asked last is the one who wants an answer.
  */
 export class PullRequestCache {
   private readonly entries = new Map<string, PullRequestInfo | null>();
@@ -31,19 +32,28 @@ export class PullRequestCache {
     private readonly output: { appendLine(value: string): void },
     /** Rows carry PR state, so a changed cache means a changed tree. */
     private readonly onChange: () => void,
+    private readonly index: PullRequestIndex,
   ) {}
 
   get(worktreePath: string, branch: string): PullRequestInfo | undefined {
     return this.entries.get(key(worktreePath, branch)) ?? undefined;
   }
 
-  /** Drop everything so the next refresh re-queries `gh`. */
+  /** Drop everything so the next refresh re-queries GitHub. */
   clear(): void {
     this.entries.clear();
+    this.index.clear();
   }
 
-  /** Re-query GitHub (via `gh`) for PRs associated with each branch. */
-  async refresh(worktrees: DiscoveredWorktree[]): Promise<void> {
+  /**
+   * Re-associate each checkout with its PR. `force` is an explicit user
+   * refresh — it goes to the network even inside the query window.
+   */
+  async refresh(
+    worktrees: DiscoveredWorktree[],
+    repoCwd: string | undefined,
+    force = false,
+  ): Promise<void> {
     if (!isGithubPrIntegrationEnabled()) {
       if (this.entries.size > 0) {
         this.entries.clear();
@@ -51,43 +61,38 @@ export class PullRequestCache {
       }
       return;
     }
-    if (worktrees.length === 0) return;
+    if (worktrees.length === 0 || !repoCwd) return;
     const generation = ++this.generation;
-    const t0 = Date.now();
-    let found = 0;
     try {
-      // Bounded concurrency so many worktrees don't spawn a gh storm
-      const queue = worktrees.slice();
-      const workers = Array.from(
-        { length: Math.min(3, queue.length) },
-        async () => {
-          while (queue.length > 0) {
-            if (generation !== this.generation) return;
-            const wt = queue.shift();
-            if (!wt) return;
-            try {
-              const pr = await findPullRequestForBranch(
-                wt.path,
-                wt.branch,
-                wt.detached,
-              );
-              if (generation !== this.generation) return;
-              this.entries.set(key(wt.path, wt.branch), pr ?? null);
-              if (pr) found += 1;
-            } catch (err) {
-              const message = err instanceof Error ? err.message : String(err);
-              this.output.appendLine(
-                `PR lookup failed for ${wt.branch}: ${message}`,
-              );
-              this.entries.set(key(wt.path, wt.branch), null);
-            }
-          }
-        },
-      );
-      await Promise.all(workers);
+      await this.index.ensureOpen(repoCwd, force);
       if (generation !== this.generation) return;
+
+      // A pushed branch with no open PR may have landed — that is the only
+      // case worth a second query, and only for branches that could have
+      // one. A local-only branch has never been on GitHub, so no answer
+      // about it exists to fetch.
+      const missing = worktrees.filter(
+        (wt) =>
+          !wt.detached &&
+          wt.branch &&
+          wt.branch !== 'HEAD' &&
+          wt.publishState !== 'local' &&
+          !this.index.openByHead.has(wt.branch),
+      );
+      if (missing.length > 0) {
+        await this.index.ensureClosed(repoCwd, force);
+        if (generation !== this.generation) return;
+      }
+
+      let found = 0;
+      for (const wt of worktrees) {
+        if (wt.detached || !wt.branch || wt.branch === 'HEAD') continue;
+        const pr = this.index.get(wt.branch);
+        this.entries.set(key(wt.path, wt.branch), pr ?? null);
+        if (pr) found += 1;
+      }
       this.output.appendLine(
-        `GitHub PR lookup: ${found}/${worktrees.length} branch(es) have a PR (${Date.now() - t0}ms)`,
+        `GitHub PR lookup: ${found}/${worktrees.length} branch(es) have a PR`,
       );
       this.onChange();
     } catch (err) {

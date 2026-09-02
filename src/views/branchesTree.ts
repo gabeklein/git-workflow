@@ -14,15 +14,10 @@ import {
   type LandedBlocker,
 } from '../git/landedWorktrees';
 import { findLandedBranches } from '../git/pruneLanded';
-import {
-  isGithubPrIntegrationEnabled,
-  resetGithubPrClient,
-} from '../github/pr';
-import {
-  listOpenRemotePullRequests,
-  listRemotePrFiles,
-  type RemotePullRequest,
-} from '../github/remotePrs';
+import { isGithubPrIntegrationEnabled } from '../github/pr';
+import { resetGithubPrClient } from '../github/gh';
+import { PullRequestIndex, type RemotePullRequest } from '../github/prIndex';
+import { listRemotePrFiles } from '../github/remotePrs';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { MessageItem, type TreeNode } from './nodes';
 import { isPathInside } from './paths';
@@ -85,7 +80,11 @@ export class BranchesTreeProvider
   >();
   private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly output: { appendLine(value: string): void }) {
+  constructor(
+    private readonly output: { appendLine(value: string): void },
+    /** Shared with the Worktrees panel: one repo-wide PR query serves both. */
+    private readonly prIndex: PullRequestIndex = new PullRequestIndex(output),
+  ) {
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.refresh();
@@ -97,6 +96,7 @@ export class BranchesTreeProvider
         ) {
           resetGithubPrClient();
           this.filesCache.clear();
+          this.prIndex.clear();
           this.refresh();
         }
       }),
@@ -202,7 +202,14 @@ export class BranchesTreeProvider
     }
   }
 
-  private async loadPrs(): Promise<void> {
+  /**
+   * Tag rows with their open PR.
+   *
+   * The list comes from the shared index, so the panel costs no GitHub
+   * request of its own: whichever panel asks first inside the query window
+   * pays, and both read the same answer.
+   */
+  private async loadPrs(force = false): Promise<void> {
     if (!isGithubPrIntegrationEnabled()) {
       if (this.prsByHead.size > 0) {
         this.prsByHead.clear();
@@ -213,15 +220,9 @@ export class BranchesTreeProvider
     const cwd = this.getRepoCwd();
     if (!cwd) return;
     this.loading = true;
-    const t0 = Date.now();
     try {
-      const list = await listOpenRemotePullRequests(cwd);
-      this.prsByHead = new Map(
-        list.filter((pr) => pr.headRefName).map((pr) => [pr.headRefName, pr]),
-      );
-      this.output.appendLine(
-        `Branches panel: ${this.prsByHead.size} open PR(s) associated (${Date.now() - t0}ms)`,
-      );
+      await this.prIndex.ensureOpen(cwd, force);
+      this.prsByHead = new Map(this.prIndex.openByHead);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`PR association failed: ${message}`);

@@ -16,6 +16,7 @@ import { ChangesTreeProvider } from './views/changesTree';
 import { FilesTreeProvider } from './views/filesTree';
 import { LaneDragAndDropController } from './views/laneDragAndDrop';
 import { WorktreeTreeProvider } from './views/worktreeTree';
+import { PullRequestIndex } from './github/prIndex';
 
 export function activate(context: vscode.ExtensionContext): unknown {
   const output = vscode.window.createOutputChannel('Git Workflow');
@@ -33,10 +34,15 @@ export function activate(context: vscode.ExtensionContext): unknown {
     ),
   );
 
-  const treeProvider = new WorktreeTreeProvider(log, context);
+  // Both panels ask the same question of GitHub — which PRs exist and what
+  // state they are in — so they ask it ONCE, through one index. Per-branch
+  // lookups spent the hourly API budget on a repo with a handful of lanes.
+  const prIndex = new PullRequestIndex(log);
+
+  const treeProvider = new WorktreeTreeProvider(log, context, prIndex);
   context.subscriptions.push(treeProvider);
 
-  const branchesProvider = new BranchesTreeProvider(log);
+  const branchesProvider = new BranchesTreeProvider(log, prIndex);
   context.subscriptions.push(branchesProvider);
   // Keep branch rows in sync with discovered worktrees and git activity.
   // One panel means one Refresh: rediscovering worktrees reloads the branch

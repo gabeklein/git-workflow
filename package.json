@@ -193,12 +193,18 @@
           "default": true,
           "description": "Automatically rebuild the preview when the base or an applied lane tip moves (checked on the worktree-list poll). Off = rebuild only via the Rebuild Preview command or external hooks."
         },
+        "worktreeCompare.githubPrRefreshMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 0,
+          "description": "Least time between GitHub PR queries. One repo-wide query answers every branch, and it is shared by both panels \u2014 refreshes inside this window read the last answer. Lower it for fresher badges at the cost of API requests (the hourly budget is shared with your own `gh`); the Refresh PR Status command always asks now."
+        },
         "worktreeCompare.remotePrLimit": {
           "type": "number",
           "default": 30,
           "minimum": 1,
           "maximum": 100,
-          "description": "Max open pull requests fetched for the Branches panel's PR tags."
+          "description": "Max pull requests fetched per repo-wide PR query (open, and closed/merged for landed-branch badges)."
         }
       }
     },

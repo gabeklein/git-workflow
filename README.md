@@ -74,6 +74,7 @@ The local install **always unpacks the VSIX it just built**. Neither of the alte
 - **Cursor:** if `code` is missing, ensure `cursor` is on PATH, or set `VSCODE_CLI=/path/to/cursor`.
 - Env overrides: `SKIP_CODE_CLI=1`, `SKIP_SERVER=1`.
 - **PR features** need authenticated `gh` (`gh auth login`). Without it, worktree compare and the Branches panel still work; PR tags/badges stay empty.
+- **PR status costs API requests, and the budget is yours.** GitHub allows 5000 an hour per account, shared with your own `gh` and everything else using that token — so the extension asks **one repo-wide question** (`gh pr list`, no `--head`), both panels read the same answer, and it is re-asked at most once per `githubPrRefreshMs` (default 2 min), never while the window is unfocused, and immediately when you run **Refresh PR Status**. If GitHub does refuse for rate limit, PR lookups pause for ten minutes and the badges you had stay put rather than blinking out — the Output channel says so. Badges for *old* landed branches depend on their PR still being within `remotePrLimit` of the closed list; raise it if you keep long-lived landed lanes around.
 - **Dev vs installed:** F5 EDH overrides the installed copy **only in the debug window**. Daily use = installed VSIX.
 
 ### Manual alternative
@@ -139,7 +140,8 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.contentRefreshActiveIntervalMs` | `2500` | Faster poll after a change (only if poll enabled) |
 | `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
 | `worktreeCompare.githubPullRequests` | `auto` | `auto` / `off` — PR tags on worktrees & branches, needs `gh` |
-| `worktreeCompare.remotePrLimit` | `30` | Max open PRs fetched for Branches-panel tags |
+| `worktreeCompare.githubPrRefreshMs` | `120000` | Least time between GitHub PR queries — refreshes inside the window reuse the last answer |
+| `worktreeCompare.remotePrLimit` | `30` | Max PRs per repo-wide query (open, and closed/merged for landed badges) |
 | `worktreeCompare.previewBranch` | `preview/{base}` | Branch the root checkout switches to for preview mode ({base} = short base name; `focus/working` for script interop) |
 | `worktreeCompare.previewAutoRebuild` | `true` | Rebuild the preview tree when base / lane tips move |
 | `worktreeCompare.previewFetchIntervalMs` | `300000` | Fetch `origin/<base>` this often while preview is on (`0` = off); landed lanes retire automatically |
