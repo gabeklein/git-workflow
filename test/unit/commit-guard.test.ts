@@ -8,6 +8,7 @@ import {
   installCommitGuard,
   uninstallCommitGuard,
 } from '../../src/git/preview/commitGuard';
+import { writePreviewSettings } from '../../src/git/preview/settings';
 import { git, makeRepo, type ScratchRepo } from './helpers';
 
 /**
@@ -103,6 +104,41 @@ describe('preview commit guard', () => {
     // the preview off, which is why the message says so.
     expect(said).toContain('Absorb Preview Edits');
     expect(said).toContain('git worktree add');
+  });
+
+  /**
+   * A hotfix to the base is the one intent this refusal used to have no
+   * answer for: the fix does not belong to a lane, so "commit in the
+   * lane's worktree" is wrong, and the only move aimed at the base ran in
+   * the sidebar. An agent reading a refusal with no applicable exit takes
+   * the one that is left, which is --no-verify. So the refusal names the
+   * shell command, and names the branch the work will land on — nobody
+   * should have to agree to "the base".
+   */
+  it('names the hotfix exit, with the branch it lands on', async () => {
+    await writePreviewSettings(scratch.repo, {
+      branch: 'preview/main',
+      base: 'origin/main',
+      checkout: scratch.repo,
+    });
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
+    const said = refusalText(scratch.repo, 'stray');
+    expect(said).toContain('gw-lane" absorb');
+    expect(said).toContain('origin/main');
+    // Absorb is offered for the base, and explicitly NOT for a lane —
+    // aiming it at one is the mistake the guard exists to prevent.
+    expect(said).toContain('Absorb cannot aim at a lane');
+  });
+
+  /**
+   * With no settings recorded there is no branch name to promise, and
+   * inventing one would send work somewhere nobody agreed to.
+   */
+  it('falls back to naming no branch rather than guessing one', async () => {
+    await installCommitGuard(scratch.repo, 'preview/main');
+    git(scratch.repo, ['checkout', '-q', 'preview/main']);
+    expect(refusalText(scratch.repo, 'stray')).toContain('the base branch');
   });
 
   it('lets --no-verify through — the deliberate case still works', async () => {

@@ -39,6 +39,7 @@ ${SENTINEL}
 #   gw-lane rebuild          rebuild the preview now, here
 #   gw-lane owner            who holds the preview lock, if anyone
 #   gw-lane refresh          ask any editor watching to catch up now
+#   gw-lane absorb           move work made HERE onto the base branch
 #   gw-lane add <branch>     include <branch> in the preview
 #   gw-lane remove <branch>  take it out, and keep it out
 #
@@ -166,6 +167,28 @@ if [ "$cmd" = "rebuild" ]; then
   exit $rc
 fi
 
+# Work made in the preview checkout belongs on a real branch. Absorb is
+# the one move aimed at the BASE — the wrong destination for lane work,
+# and the right one for a fix to the base itself found while reading the
+# preview. The delta is taken against the merged tree, so lane content
+# stays behind even in a file a lane also touched.
+if [ "$cmd" = "absorb" ]; then
+  case "$branch" in
+    ""|--allow-added) ;;
+    *) echo "usage: gw-lane absorb [--allow-added]" >&2; exit 2 ;;
+  esac
+  if run_op absorb "$branch"; then
+    exit 0
+  else
+    rc=$?
+  fi
+  if [ $rc -eq 127 ]; then
+    echo "no way to absorb here (focus-runner missing) — is preview on, and has the editor opened this repo?" >&2
+    exit 2
+  fi
+  exit $rc
+fi
+
 if [ "$cmd" = "status" ]; then
   if [ -f "$owner" ]; then
     echo "writer: $(value "$owner" op) (pid $(value "$owner" pid) on $(value "$owner" host))"
@@ -276,7 +299,7 @@ case "$cmd" in
     fi
     ;;
   *)
-    echo "usage: gw-lane <status|check|rebuild|refresh|owner|add|remove> [branch]" >&2
+    echo "usage: gw-lane <status|check|rebuild|absorb|refresh|owner|add|remove> [branch]" >&2
     exit 2
     ;;
 esac

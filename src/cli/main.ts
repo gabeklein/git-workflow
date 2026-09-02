@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isLaneOp, runLaneOp } from '../git/preview/laneOp';
+import { absorbFromSettings } from '../git/preview/absorbOp';
 import { rebuildFromSettings } from '../git/preview/rebuildOp';
 import { CONFIG_FILE, parsePreviewSettings } from '../git/preview/settings';
 import { resolveConfigurationWith } from './vscodeShim';
@@ -27,6 +28,14 @@ import { resolveConfigurationWith } from './vscodeShim';
  * dir sitting in first position, where the operation should be, and the
  * CLI dutifully reported the path as an unknown operation.
  */
+/**
+ * Flags that take no value. Without this the parser eats whatever follows
+ * a boolean flag, so `absorb --allow-added` works and
+ * `--allow-added absorb` silently loses the operation — an argument order
+ * nobody should have to know.
+ */
+const BOOLEAN_FLAGS = new Set(['allow-added']);
+
 function parseArgv(argv: string[]): {
   flags: Map<string, string>;
   positional: string[];
@@ -36,7 +45,8 @@ function parseArgv(argv: string[]): {
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i] ?? '';
     if (token.startsWith('--')) {
-      flags.set(token.slice(2), argv[++i] ?? '');
+      const name = token.slice(2);
+      flags.set(name, BOOLEAN_FLAGS.has(name) ? 'true' : (argv[++i] ?? ''));
     } else {
       positional.push(token);
     }
@@ -104,6 +114,33 @@ async function main(): Promise<number> {
     // 'busy' is not a broken preview — somebody else is mid-write.
     return fail(
       `rebuild failed: ${result.code}${result.message ? ` — ${result.message}` : ''}`,
+      result.code === 'busy' ? 2 : 1,
+    );
+  }
+
+  if (op === 'absorb') {
+    const outcome = await absorbFromSettings(common, {
+      allowAdded: flags.has('allow-added'),
+    });
+    // 'unconfigured' and 'busy' are both "could not run" — exit 2, never
+    // 1, so a caller gating on this cannot read "nothing happened" as
+    // "the work moved".
+    if (outcome.kind !== 'ran') return fail(outcome.message, 2);
+    const result = outcome.result;
+    if (result.ok) {
+      out(
+        result.uncommitted
+          ? `absorbed uncommitted preview edits into ${result.target}`
+          : `absorbed ${result.commits} commit(s) into ${result.target}`,
+      );
+      return 0;
+    }
+    if (result.code === 'nothing') {
+      out('nothing to absorb — the preview checkout is clean');
+      return 0;
+    }
+    return fail(
+      `absorb failed: ${result.code} — ${result.message}`,
       result.code === 'busy' ? 2 : 1,
     );
   }

@@ -241,4 +241,141 @@ describe('preview CLI', () => {
       expect(out).toContain('busy');
     });
   });
+  /**
+   * Absorb from a terminal.
+   *
+   * The preview checkout is the only place a hotfix to the base can be
+   * WRITTEN while the merged lanes are visible, and absorb is the only
+   * move aimed at the base — but until it had a CLI it ran from the
+   * sidebar alone, so an agent that hit the commit guard had nowhere to
+   * go but `--no-verify`. Every case here runs in the shipped layout:
+   * the root switched onto the preview branch in place, which leaves the
+   * base with NO worktree, so the transplant lands on the ref.
+   */
+  describe('absorb', () => {
+    /** A commit made directly on the preview checkout. */
+    const strayCommit = (file: string, body: string, message: string) => {
+      fs.writeFileSync(path.join(repo, file), body);
+      git(repo, ['add', '-A']);
+      git(repo, ['commit', '-qm', message]);
+    };
+
+    it('moves a stray commit onto the base ref, and rewinds the preview', () => {
+      run('add', 'feat/a');
+      run('rebuild');
+      const before = git(repo, ['rev-parse', 'main']).trim();
+      strayCommit('app.txt', 'line1\nline2 fixed\nline3\n', 'hotfix');
+      expect(run('absorb')).toContain('absorbed 1 commit(s) into main');
+      // The base moved, and it carries the fix
+      expect(git(repo, ['rev-parse', 'main']).trim()).not.toBe(before);
+      expect(git(repo, ['show', 'main:app.txt'])).toContain('line2 fixed');
+      // …and the lane's content did NOT ride along: the delta was taken
+      // against the merged tree, so a.txt stays on feat/a alone.
+      expect(git(repo, ['ls-tree', '--name-only', 'main']).split('\n')).not
+        .toContain('a.txt');
+      // The preview checkout is back to the derived tree — no stray left
+      expect(
+        git(repo, ['log', '--oneline', 'main..preview/main']).trim(),
+      ).toBe('');
+    });
+
+    /**
+     * The property that makes absorb usable as a hotfix at all: the delta
+     * is taken against the MERGED tree, so a fix written in a file a lane
+     * has also edited lands on the base carrying the fix and not the lane.
+     */
+    it('carries only the stray delta out of a file a lane also touched', () => {
+      git(repo, ['checkout', '-q', '-b', 'feat/shared', 'main']);
+      fs.writeFileSync(path.join(repo, 'app.txt'), 'lane line\nline2\nline3\n');
+      git(repo, ['add', '-A']);
+      git(repo, ['commit', '-qm', 'lane edits app.txt']);
+      git(repo, ['checkout', '-q', 'preview/main']);
+      run('add', 'feat/shared');
+      run('rebuild');
+      // Written on top of the MERGED tree, so line1 already reads "lane
+      // line" here — only the line3 edit is the stray.
+      fs.writeFileSync(path.join(repo, 'app.txt'), 'lane line\nline2\nline3 fixed\n');
+      git(repo, ['add', '-A']);
+      git(repo, ['commit', '-qm', 'hotfix on top of the lane']);
+      run('absorb');
+      const landed = git(repo, ['show', 'main:app.txt']);
+      expect(landed).toContain('line3 fixed');
+      expect(landed).not.toContain('lane line');
+    });
+
+    it('absorbs uncommitted edits when the base has a checkout', () => {
+      const baseTree = path.join(scratch.root, 'base-checkout');
+      git(repo, ['worktree', 'add', '-q', baseTree, 'main']);
+      fs.writeFileSync(path.join(repo, 'hotfix.txt'), 'uncommitted\n');
+      expect(run('absorb')).toContain('absorbed uncommitted preview edits');
+      // Uncommitted in, uncommitted out — absorbing must not decide the
+      // work is finished.
+      expect(fs.readFileSync(path.join(baseTree, 'hotfix.txt'), 'utf8')).toBe(
+        'uncommitted\n',
+      );
+      expect(fs.existsSync(path.join(repo, 'hotfix.txt'))).toBe(false);
+    });
+
+    /**
+     * The shipped layout's real answer, and the one the commit guard's
+     * refusal now names: with the base unchecked-out there is nowhere for
+     * uncommitted work to land, so the way through is to commit first.
+     */
+    it('says to commit first when the base has no worktree', () => {
+      fs.writeFileSync(path.join(repo, 'hotfix.txt'), 'uncommitted\n');
+      const { status, out } = runFails('absorb');
+      expect(status).toBe(1);
+      expect(out).toContain('no worktree');
+      expect(out).toContain('Commit them here');
+    });
+
+    it('a clean preview is nothing to do, not a failure', () => {
+      expect(run('absorb')).toContain('nothing to absorb');
+    });
+
+    /**
+     * An ADDED file carries no diff context, so it applies to the base
+     * cleanly even when its contents depend on lane code. The editor asks;
+     * a terminal has to be told up front.
+     */
+    it('refuses to absorb an added file behind applied lanes, until told', () => {
+      run('add', 'feat/a');
+      run('rebuild');
+      strayCommit('new.txt', 'depends on the lane\n', 'add a file');
+
+      const { status, out } = runFails('absorb');
+      expect(status).toBe(1);
+      expect(out).toContain('needs-confirmation');
+      expect(out).toContain('new.txt');
+      expect(out).toContain('--allow-added');
+      // Nothing moved
+      expect(git(repo, ['ls-tree', '--name-only', 'main']).split('\n')).not
+        .toContain('new.txt');
+
+      expect(run('absorb', '--allow-added')).toContain('absorbed 1 commit(s)');
+      expect(git(repo, ['ls-tree', '--name-only', 'main']).split('\n')).toContain(
+        'new.txt',
+      );
+    });
+
+    /** With no lanes merged in, the preview tree IS the base — nothing to
+     *  depend on, so an added file needs no ceremony. */
+    it('does not ask about an added file when no lane is applied', () => {
+      strayCommit('new.txt', 'plain\n', 'add a file');
+      expect(run('absorb')).toContain('absorbed 1 commit(s) into main');
+    });
+
+    it('refuses without settings, and does not guess a base', () => {
+      fs.rmSync(path.join(common, 'focus-config'));
+      const { status, out } = runFails('absorb');
+      expect(status).toBe(2);
+      expect(out).toContain('no preview settings recorded');
+    });
+
+    it('rejects an argument it does not understand', () => {
+      const { status, out } = runFails('absorb', 'feat/a');
+      expect(status).toBe(2);
+      expect(out).toContain('usage: gw-lane absorb');
+    });
+  });
 });

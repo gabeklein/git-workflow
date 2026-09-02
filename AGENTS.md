@@ -12,7 +12,8 @@ The three that cost the most to learn by accident: pick the worktree **before
 you write** (with preview on the root checkout IS the preview, rebuilt with
 `reset --hard`; with it off the root sits on the base, so writing there moves
 the branch every other lane is measured against), never commit on the preview
-branch and never `--no-verify` past the guard, and never hand-edit `focus-*` —
+branch and never `--no-verify` past the guard (a deliberate hotfix is
+`gw-lane absorb`, not a bypass), and never hand-edit `focus-*` —
 use `gw-lane`.
 
 ## Shipping a feature
@@ -134,6 +135,7 @@ To opt in, once the work is worth previewing:
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 "$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown
 "$(git rev-parse --git-common-dir)/gw-lane" rebuild      # rebuild, and wait for it
+"$(git rev-parse --git-common-dir)/gw-lane" absorb       # preview work → the base
 "$(git rev-parse --git-common-dir)/gw-lane" owner        # who is writing right now
 "$(git rev-parse --git-common-dir)/gw-lane" refresh      # tell the sidebar to look again
 ```
@@ -144,6 +146,16 @@ it. Fix your lane and then rebuild to *verify* it, rather than reporting
 that a rebuild is needed. Nothing stays resident — exclusion is the
 rebuild lock, which names its holder, so `owner` says whether anything is
 writing right now.
+
+`absorb` is the one move aimed at the **base**, which makes it wrong for lane
+work and right for a hotfix to the base found while reading the preview — the
+delta is taken against the merged tree, so a fix in a file a lane also touched
+lands carrying the fix and not the lane. Run it *instead of* committing;
+uncommitted edits absorb too, and then the guard never comes up. In this
+repo's layout the base has no checkout, so uncommitted edits have nowhere to
+land and absorb says to commit first — that is the one time `--no-verify` past
+the guard is the intended path. Skill §4 has the conditions; the short version
+is that if the work belongs to a feature it is a lane, not a hotfix.
 
 `refresh` is for the changes the editor cannot see: anything you do with
 refs reaches the sidebar on its own (it watches the git dir), but a file
