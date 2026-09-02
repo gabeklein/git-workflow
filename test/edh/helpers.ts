@@ -152,6 +152,44 @@ export async function poll(
 export const sleep = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Run the lane CLI, waiting out a rebuild lock somebody else holds.
+ *
+ * The editor is a competing writer, and in CI it is a busy one: discovery,
+ * an auto-rebuild and this command can all want the lock inside the same
+ * second. Exit 2 with "busy" is the CLI answering CORRECTLY — the lock is
+ * doing its job — so a scenario that lets it throw is asserting a
+ * quiescence CI does not owe us. The sibling case in shell.test.ts learned
+ * this for `owner` and polls; every other call learned it the hard way, as
+ * a run that failed on a lane the editor happened to be rebuilding.
+ *
+ * Anything else still throws on the first try: a real refusal is not
+ * something to wait out.
+ */
+export async function lane(
+  args: string[],
+  timeoutMs = 30_000,
+): Promise<string> {
+  const cli = path.join(repo, '.git', 'gw-lane');
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      return execFileSync(cli, args, { cwd: repo, encoding: 'utf8' });
+    } catch (err) {
+      const e = err as {
+        status?: number;
+        stdout?: string;
+        stderr?: string;
+        message?: string;
+      };
+      const said = `${e.stdout ?? ''}${e.stderr ?? ''}${e.message ?? ''}`;
+      const busy = e.status === 2 && /rebuild lock held/.test(said);
+      if (!busy || Date.now() - t0 > timeoutMs) throw err;
+      await sleep(400);
+    }
+  }
+}
+
 /** Commands ending in a push OFFER await a notification nothing dismisses
  *  in a headless workbench — fire without awaiting and poll git state. */
 export function fire(command: string, arg?: unknown): void {

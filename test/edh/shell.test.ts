@@ -15,6 +15,7 @@ import {
   applied,
   getApi,
   git,
+  lane,
   poll,
   previewRoot,
   repo,
@@ -69,10 +70,10 @@ describe('preview from a shell', () => {
     fs.writeFileSync(path.join(wt, 'shell.txt'), 'from the shell lane\n');
     git(wt, ['add', '-A']);
     git(wt, ['commit', '-qm', 'shell lane']);
-    execFileSync(cli, ['add', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    await lane(['add', 'feat/shell']);
     assert.ok(applied().includes('feat/shell'), 'gw-lane add applied it');
 
-    const out = execFileSync(cli, ['rebuild'], { cwd: repo, encoding: 'utf8' });
+    const out = await lane(['rebuild']);
     assert.match(out, /^rebuilt: /, `rebuild reported success: ${out}`);
     assert.ok(
       fs.existsSync(path.join(previewRoot, 'shell.txt')),
@@ -147,7 +148,7 @@ describe('preview from a shell', () => {
     assert.match(last, /nobody is writing the preview/);
 
     // Leaving the lane out again keeps later scenarios on the state they expect
-    execFileSync(cli, ['remove', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    await lane(['remove', 'feat/shell']);
     git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-shell']);
     git(repo, ['branch', '-D', 'feat/shell']);
   });
