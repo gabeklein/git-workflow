@@ -77,8 +77,10 @@ export { type RebuildOutcome, rebuildFromSettings } from './rebuildOp';
 
 // lifecycle
 export {
+  type SwitchAwayResult,
   alignPreviewBranchName,
   deletePreviewBranch,
+  fastForwardBaseBranch,
   switchAwayFromPreview,
   switchToPreviewBranch,
 } from './lifecycle';
