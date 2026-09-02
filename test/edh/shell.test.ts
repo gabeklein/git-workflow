@@ -11,6 +11,7 @@ import * as assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import {
   applied,
   getApi,
@@ -28,8 +29,38 @@ describe('preview from a shell', () => {
   const read = (file: string) =>
     fs.readFileSync(path.join(common, file), 'utf8');
 
+  /**
+   * Stand the editor's auto-rebuild down for these scenarios.
+   *
+   * The lock is exclusion, not a queue: whoever calls mkdir first wins, so
+   * a writer that re-takes it the moment it lets go can starve one that is
+   * waiting. The engine waits a full minute (LOCK_WAIT_MS) and CI still
+   * came back "busy" — the fixture has seven worktrees, and every
+   * discovery pass can trigger another rebuild, so the editor was never
+   * quiet for as long as `gw-lane add` needed.
+   *
+   * What is under test here is that a SHELL drives the real preview, not
+   * who wins a race for the lock; contention has its own scenario below.
+   * So remove the competitor rather than hoping to outrun it — and leave
+   * `lane()`'s retry in place for the ordinary brief overlap.
+   */
+  const config = () => vscode.workspace.getConfiguration('worktreeCompare');
+
   before(async () => {
     api = await getApi();
+    await config().update(
+      'previewAutoRebuild',
+      false,
+      vscode.ConfigurationTarget.Workspace,
+    );
+  });
+
+  after(async () => {
+    await config().update(
+      'previewAutoRebuild',
+      undefined,
+      vscode.ConfigurationTarget.Workspace,
+    );
   });
 
   it('records the settings and the recipe a shell needs', async () => {
