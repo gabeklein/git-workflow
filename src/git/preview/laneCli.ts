@@ -248,7 +248,10 @@ case "$cmd" in
       drop_lock
       echo "$branch is in the preview"
     else
-      exit 1
+      # The engine's own code, not a flat 1: 2 means it never ran (the
+      # lock is held, the settings are missing) and is worth retrying,
+      # which is exactly what a caller cannot tell from "it refused".
+      exit $rc
     fi
     ;;
   remove)
@@ -269,7 +272,7 @@ case "$cmd" in
       drop_lock
       echo "$branch is out of the preview"
     else
-      exit 1
+      exit $rc
     fi
     ;;
   *)

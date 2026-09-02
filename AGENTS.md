@@ -129,7 +129,7 @@ To opt in, once the work is worth previewing:
 
 ```sh
 # works with VS Code closed; installed while preview is on
-"$(git rev-parse --git-common-dir)/gw-lane" add          # current branch
+"$(git rev-parse --git-common-dir)/gw-lane" add          # current branch · 2 = busy, retry
 "$(git rev-parse --git-common-dir)/gw-lane" status       # how it built, then what is in it
 "$(git rev-parse --git-common-dir)/gw-lane" remove       # take it back out
 "$(git rev-parse --git-common-dir)/gw-lane" check        # 0 ok · 1 failed · 2 unknown

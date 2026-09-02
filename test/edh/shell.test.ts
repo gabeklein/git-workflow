@@ -11,10 +11,12 @@ import * as assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as vscode from 'vscode';
 import {
   applied,
   getApi,
   git,
+  lane,
   poll,
   previewRoot,
   repo,
@@ -27,8 +29,38 @@ describe('preview from a shell', () => {
   const read = (file: string) =>
     fs.readFileSync(path.join(common, file), 'utf8');
 
+  /**
+   * Stand the editor's auto-rebuild down for these scenarios.
+   *
+   * The lock is exclusion, not a queue: whoever calls mkdir first wins, so
+   * a writer that re-takes it the moment it lets go can starve one that is
+   * waiting. The engine waits a full minute (LOCK_WAIT_MS) and CI still
+   * came back "busy" — the fixture has seven worktrees, and every
+   * discovery pass can trigger another rebuild, so the editor was never
+   * quiet for as long as `gw-lane add` needed.
+   *
+   * What is under test here is that a SHELL drives the real preview, not
+   * who wins a race for the lock; contention has its own scenario below.
+   * So remove the competitor rather than hoping to outrun it — and leave
+   * `lane()`'s retry in place for the ordinary brief overlap.
+   */
+  const config = () => vscode.workspace.getConfiguration('worktreeCompare');
+
   before(async () => {
     api = await getApi();
+    await config().update(
+      'previewAutoRebuild',
+      false,
+      vscode.ConfigurationTarget.Workspace,
+    );
+  });
+
+  after(async () => {
+    await config().update(
+      'previewAutoRebuild',
+      undefined,
+      vscode.ConfigurationTarget.Workspace,
+    );
   });
 
   it('records the settings and the recipe a shell needs', async () => {
@@ -69,10 +101,10 @@ describe('preview from a shell', () => {
     fs.writeFileSync(path.join(wt, 'shell.txt'), 'from the shell lane\n');
     git(wt, ['add', '-A']);
     git(wt, ['commit', '-qm', 'shell lane']);
-    execFileSync(cli, ['add', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    await lane(['add', 'feat/shell']);
     assert.ok(applied().includes('feat/shell'), 'gw-lane add applied it');
 
-    const out = execFileSync(cli, ['rebuild'], { cwd: repo, encoding: 'utf8' });
+    const out = await lane(['rebuild']);
     assert.match(out, /^rebuilt: /, `rebuild reported success: ${out}`);
     assert.ok(
       fs.existsSync(path.join(previewRoot, 'shell.txt')),
@@ -147,7 +179,7 @@ describe('preview from a shell', () => {
     assert.match(last, /nobody is writing the preview/);
 
     // Leaving the lane out again keeps later scenarios on the state they expect
-    execFileSync(cli, ['remove', 'feat/shell'], { cwd: repo, encoding: 'utf8' });
+    await lane(['remove', 'feat/shell']);
     git(repo, ['worktree', 'remove', '--force', '.worktrees/feat-shell']);
     git(repo, ['branch', '-D', 'feat/shell']);
   });

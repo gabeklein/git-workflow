@@ -132,6 +132,51 @@ describe('preview CLI', () => {
   });
 
   /**
+   * `add` and `remove` carry the same distinction `rebuild` does: 2 means
+   * the operation never ran — somebody else holds the lock — and 1 means
+   * it ran and refused. The shell wrapper used to flatten both to 1, which
+   * makes "try again in a moment" indistinguishable from "no", and that is
+   * precisely the difference a caller retries on. It cost a CI flake that
+   * looked like a broken branch on whichever PR happened to race a rebuild.
+   */
+  describe('membership ops propagate the engine\'s exit code', () => {
+    /** An engine that only reports; the shell's job is to pass it on. */
+    const fakeEngine = async (code: number, says: string) => {
+      const fake = path.join(os.tmpdir(), `gw-fake-engine-${process.pid}.cjs`);
+      fs.writeFileSync(
+        fake,
+        `console.error(${JSON.stringify(says)}); process.exit(${code});\n`,
+      );
+      await writeRunnerCommand(common, { node: process.execPath, script: fake });
+      return fake;
+    };
+
+    it('busy is 2 — the operation never ran, so it is worth retrying', async () => {
+      await fakeEngine(
+        2,
+        'the preview is busy (rebuild lock held) — try again in a moment',
+      );
+      const { status, out } = runFails('add', 'feat/a');
+      expect(status).toBe(2);
+      expect(out).toContain('rebuild lock held');
+    });
+
+    it('a genuine refusal stays 1 — waiting would not help', async () => {
+      await fakeEngine(1, 'apply failed: no such lane');
+      const { status } = runFails('add', 'feat/a');
+      expect(status).toBe(1);
+    });
+
+    it('remove propagates it too', async () => {
+      await fakeEngine(
+        2,
+        'the preview is busy (rebuild lock held) — try again in a moment',
+      );
+      expect(runFails('remove', 'feat/a').status).toBe(2);
+    });
+  });
+
+  /**
    * The bundle is a faster way to reach the same code, not the only way:
    * with no runner recorded, membership still works from the shell alone.
    */
