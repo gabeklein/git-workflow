@@ -183,8 +183,12 @@ export async function lane(
         message?: string;
       };
       const said = `${e.stdout ?? ''}${e.stderr ?? ''}${e.message ?? ''}`;
-      const busy = e.status === 2 && /rebuild lock held/.test(said);
-      if (!busy || Date.now() - t0 > timeoutMs) throw err;
+      // Keyed on what it SAID, not on the exit code. The code is the
+      // right signal in principle and was flattened to 1 by the shell
+      // wrapper in practice, which silently disabled this retry; the
+      // message is the part that cannot drift without someone noticing.
+      if (!/rebuild lock held/.test(said) || Date.now() - t0 > timeoutMs)
+        throw err;
       await sleep(400);
     }
   }

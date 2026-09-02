@@ -122,6 +122,11 @@ nothing merges into anyone's preview until applied. A shared base says two lanes
 "$dir/gw-lane" remove     # out, and persistently kept out
 ```
 
+Both answer in exit codes, and the two failures are not alike: **1** it ran
+and refused, **2** it never ran — another writer holds the lock (§8), or
+preview is off. A 2 is worth **retrying in a moment**; a 1 is not, and
+neither is worth reporting as "the preview rejected my lane".
+
 Works with the editor closed, taking the same lock the rebuild does; in-editor
 this is **Add to Preview** (`worktreeCompare.addToPreview`).
 
