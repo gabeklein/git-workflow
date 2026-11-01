@@ -247,3 +247,67 @@ describe('landed probe memo', () => {
     expect(await landedVia(scratch.repo, lane, after)).toBeTruthy();
   });
 });
+
+/**
+ * GitHub's word that a PR merged, at exactly the branch's tip. It covers
+ * what the git probes cannot place — a stack merged as a batch (seen on a
+ * real repo: every middle branch missed while its merged PR's head matched
+ * the local tip exactly). Here the trunk never got the work at all, so the
+ * probes are guaranteed to abstain and only the PR can speak.
+ */
+describe('landed by merged PR', () => {
+  let scratch: ScratchRepo;
+  const write = (file: string, body: string, msg: string) => {
+    fs.writeFileSync(path.join(scratch.repo, file), body);
+    git(scratch.repo, ['add', '-A']);
+    git(scratch.repo, ['commit', '-qm', msg]);
+  };
+
+  beforeEach(() => {
+    forgetLandedProbe();
+    scratch = makeRepo();
+    git(scratch.repo, ['checkout', '-q', '-b', 'feat/b', 'main']);
+    write('f.txt', 'one\n', 'b adds f');
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    write('other.txt', 'x\n', 'unrelated');
+  });
+  afterEach(() => {
+    forgetLandedProbe();
+    scratch.cleanup();
+  });
+
+  const scan = async (merged: Record<string, string> = {}) =>
+    (await findLandedBranches(scratch.repo, 'main', [], new Map(Object.entries(merged)))).landed
+      .map((b) => `${b.name}:${b.via}`)
+      .sort();
+  const tip = (b: string) => git(scratch.repo, ['rev-parse', b]);
+
+  it('without it, the probes keep the branch', async () => {
+    expect(await scan()).toEqual([]);
+  });
+
+  it('a merged PR at exactly the tip lands it', async () => {
+    expect(await scan({ 'feat/b': tip('feat/b') })).toEqual(['feat/b:pr']);
+  });
+
+  it('a tip that moved past the merged head is not landed', async () => {
+    const merged = tip('feat/b');
+    git(scratch.repo, ['checkout', '-q', 'feat/b']);
+    write('late.txt', 'late\n', 'pushed after the merge');
+    git(scratch.repo, ['checkout', '-q', 'main']);
+    expect(await scan({ 'feat/b': merged })).toEqual([]);
+  });
+
+  it('prune deletes it given the same evidence, and refuses without', async () => {
+    const without = await pruneLandedBranches(scratch.repo, 'main', ['feat/b']);
+    expect(without.deleted).toEqual([]);
+    const withPr = await pruneLandedBranches(
+      scratch.repo,
+      'main',
+      ['feat/b'],
+      [],
+      new Map([['feat/b', tip('feat/b')]]),
+    );
+    expect(withPr.deleted).toEqual(['feat/b']);
+  });
+});

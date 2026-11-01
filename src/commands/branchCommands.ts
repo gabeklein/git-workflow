@@ -137,7 +137,12 @@ export function registerBranchCommands(
         const protect = [previewBranch()];
         let scan: Awaited<ReturnType<typeof findLandedBranches>>;
         try {
-          scan = await findLandedBranches(repoCwd, baseRef, protect);
+          scan = await findLandedBranches(
+            repoCwd,
+            baseRef,
+            protect,
+            branchesProvider.getMergedHeads(),
+          );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Prune landed branches failed: ${message}`);
@@ -184,6 +189,7 @@ export function registerBranchCommands(
             baseRef,
             chosen.filter((b) => !blocked.has(b)),
             protect,
+            branchesProvider.getMergedHeads(),
           );
           for (const [name, why] of outcome.failed) {
             log.appendLine(`Prune kept ${name}: ${why}`);
@@ -200,7 +206,11 @@ export function registerBranchCommands(
         }
         const describe = (b: LandedBranch): string => {
           const bits = [
-            b.via === 'ancestor' ? 'merged' : 'squashed or rebased in',
+            b.via === 'ancestor'
+              ? 'merged'
+              : b.via === 'pr'
+                ? 'its PR merged'
+                : 'squashed or rebased in',
           ];
           if (b.hasRemote) bits.push('origin still has it');
           if (b.worktree) bits.push('removes its checkout too');
@@ -247,6 +257,7 @@ export function registerBranchCommands(
           baseRef,
           chosen.filter((b) => !blocked.has(b)),
           protect,
+          branchesProvider.getMergedHeads(),
         );
         for (const [name, why] of outcome.failed) {
           log.appendLine(`Prune kept ${name}: ${why}`);

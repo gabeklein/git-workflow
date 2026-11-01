@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setConfig, setWindowFocused } from './vscode-stub';
 import { isRateLimitRefusal } from '../../src/github/gh';
-import { newlyPublished, PullRequestIndex } from '../../src/github/prIndex';
+import { newlyPublished, PullRequestIndex, remoteMoved } from '../../src/github/prIndex';
 import { PullRequestCache } from '../../src/views/pullRequestCache';
 import type { DiscoveredWorktree } from '../../src/git/discovery';
 
@@ -300,5 +300,40 @@ describe('newlyPublished', () => {
   it('names none on the first listing, or when nothing new appeared', () => {
     expect(newlyPublished(undefined, ['feat/a'])).toEqual([]);
     expect(newlyPublished(new Set(['feat/a', 'feat/b']), ['feat/a'])).toEqual([]);
+  });
+});
+
+describe('remoteMoved', () => {
+  const at = (trunk: string, ...published: string[]) => ({ trunk, published: new Set(published) });
+
+  it('is a merge signal when the trunk moves or a remote branch goes away', () => {
+    expect(remoteMoved(at('t1', 'a'), at('t2', 'a'))).toBe(true);
+    expect(remoteMoved(at('t1', 'a', 'b'), at('t1', 'a'))).toBe(true);
+  });
+
+  it('is not one on the first look, a new branch, or no change', () => {
+    expect(remoteMoved(undefined, at('t1', 'a'))).toBe(false);
+    expect(remoteMoved(at('t1', 'a'), at('t1', 'a', 'b'))).toBe(false);
+    expect(remoteMoved(at('t1', 'a'), at('t1', 'a'))).toBe(false);
+  });
+});
+
+describe('mergedHeads', () => {
+  it('maps a merged PR\'s branch to its head, unless an open PR has taken it back', async () => {
+    const pr = (n: number, head: string, state: string, sha: string) => ({
+      ...row(n, head),
+      state,
+      headRefOid: sha,
+    });
+    const index = new PullRequestIndex(silent, {
+      ghPresent: present,
+      ghJson: async <T>(_c: string, args: string[]) =>
+        (args.includes('closed')
+          ? [pr(1, 'feat/landed', 'MERGED', 'aaa'), pr(2, 'feat/back', 'MERGED', 'bbb'), pr(3, 'feat/dropped', 'CLOSED', 'ccc')]
+          : [pr(4, 'feat/back', 'OPEN', 'ddd')]) as T,
+    });
+    await index.ensureOpen('/repo');
+    await index.ensureClosed('/repo');
+    expect([...index.mergedHeads()]).toEqual([['feat/landed', 'aaa']]);
   });
 });

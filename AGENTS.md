@@ -107,6 +107,14 @@ There are two layers — pick by what the code needs, not by convenience:
   from the repo root, so committing it replaces the one real install with a
   link into the parent directory (#51 removed exactly that).
 
+## Running git from the extension
+
+Every git the extension runs goes through `git()` in `src/git/exec.ts`,
+which sets `gc.auto=0` and `maintenance.auto=false` through `GIT_CONFIG_*`
+env, children included. A background fetch must never start git's
+automatic repack in the user's repo: one did, racing something else, and
+deleted every reachable object (Nov 2026). Do not spawn `git` any other way.
+
 ## Git & PRs
 
 - Do not add AI attribution trailers (`Co-authored-by`, sign-offs) to

@@ -12,12 +12,14 @@ import {
   sweepLandedWorktrees,
   type LandedBlocker,
 } from '../git/landedWorktrees';
+import { git } from '../git/exec';
 import { findLandedBranches } from '../git/pruneLanded';
 import { isGithubPrIntegrationEnabled } from '../github/pr';
 import { resetGithubPrClient } from '../github/gh';
 import {
   newlyPublished,
   PUBLISH_PROBE_DELAYS_MS,
+  remoteMoved,
   PullRequestIndex,
   type RemotePullRequest,
 } from '../github/prIndex';
@@ -74,7 +76,10 @@ export class BranchesTreeProvider
   private prsByHead = new Map<string, RemotePullRequest>();
   /** Branch names with a remote, as of the last listing. */
   private published: Set<string> | undefined;
+  /** origin's trunk as of the last listing. */
+  private trunkSha: string | undefined;
   private publishProbes: NodeJS.Timeout[] = [];
+  private mergedFingerprint = '';
   private worktrees: DiscoveredWorktree[] = [];
   private worktreeByBranch = new Map<string, string>();
   private loading = false;
@@ -182,9 +187,23 @@ export class BranchesTreeProvider
         .join('\n');
       this.error = undefined;
       const published = new Set(list.filter((b) => b.hasRemote).map((b) => b.name));
+      const trunk = await git(cwd, [
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        `refs/remotes/origin/${previewBaseRef().replace(/^origin\//, '')}`,
+      ]).then((s) => s.trim(), () => undefined);
+      const before = this.published
+        ? { trunk: this.trunkSha, published: this.published }
+        : undefined;
       const fresh = newlyPublished(this.published, published);
       this.published = published;
+      this.trunkSha = trunk;
       if (fresh.length) this.probeForNewPrs(fresh);
+      if (remoteMoved(before, { trunk, published })) {
+        this.output.appendLine('Trunk moved or a remote branch went away — asking GitHub what merged');
+        void this.loadPrs(true);
+      }
       if (fp !== this.branchesFingerprint) {
         this.branchesFingerprint = fp;
         this.branches = list;
@@ -235,8 +254,18 @@ export class BranchesTreeProvider
     if (!cwd) return;
     this.loading = true;
     try {
-      await this.prIndex.ensureOpen(cwd, force);
+      // Closed too: a merged PR is how a stack merged as a batch is known
+      // to have landed (see findLandedBranches). Its own, longer window.
+      await Promise.all([
+        this.prIndex.ensureOpen(cwd, force),
+        this.prIndex.ensureClosed(cwd, force),
+      ]);
       this.prsByHead = new Map(this.prIndex.openByHead);
+      const merged = describeHeads(this.prIndex.mergedHeads());
+      if (merged !== this.mergedFingerprint) {
+        this.mergedFingerprint = merged;
+        void this.refreshLanded(cwd);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.output.appendLine(`PR association failed: ${message}`);
@@ -306,6 +335,11 @@ export class BranchesTreeProvider
     return rows;
   }
 
+  /** Branch → head of its merged PR (landing evidence). */
+  getMergedHeads(): ReadonlyMap<string, string> {
+    return this.prIndex.mergedHeads();
+  }
+
   /** Branches confirmed landed in the base, for the Landed group. */
   getLanded(): ReadonlySet<string> {
     return this.landed;
@@ -319,9 +353,12 @@ export class BranchesTreeProvider
    */
   private async refreshLanded(cwd: string): Promise<void> {
     try {
-      const scan = await findLandedBranches(cwd, previewBaseRef(), [
-        previewBranch(),
-      ]);
+      const scan = await findLandedBranches(
+        cwd,
+        previewBaseRef(),
+        [previewBranch()],
+        this.prIndex.mergedHeads(),
+      );
       const next = new Set(scan.landed.map((b) => b.name));
       const same =
         next.size === this.landed.size &&
@@ -414,6 +451,10 @@ export class BranchesTreeProvider
     }
     this._onDidChangeTreeData.dispose();
   }
+}
+
+function describeHeads(heads: ReadonlyMap<string, string>): string {
+  return [...heads].map(([b, sha]) => `${b}\0${sha}`).sort().join('\n');
 }
 
 /** Stable summary of the badge set, to fire the event only on a change. */

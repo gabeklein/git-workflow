@@ -3,6 +3,29 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Config every git the extension runs carries, children included (env, not
+ * `-c`, so a fetch's own subprocesses inherit it). A background fetch or
+ * commit must never start git's automatic gc/maintenance in someone's repo:
+ * nobody asked for it, it races whatever else is running, and a repack that
+ * goes wrong deletes objects. The user's own git still maintains as usual.
+ */
+export const BACKGROUND_GIT_CONFIG: ReadonlyArray<[string, string]> = [
+  ['gc.auto', '0'],
+  ['maintenance.auto', 'false'],
+];
+
+function configEnv(): Record<string, string> {
+  const env: Record<string, string> = {
+    GIT_CONFIG_COUNT: String(BACKGROUND_GIT_CONFIG.length),
+  };
+  BACKGROUND_GIT_CONFIG.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = key;
+    env[`GIT_CONFIG_VALUE_${i}`] = value;
+  });
+  return env;
+}
+
 export class GitError extends Error {
   constructor(
     message: string,
@@ -30,6 +53,7 @@ export async function git(
         // Stable, script-friendly output
         GIT_TERMINAL_PROMPT: '0',
         LANG: 'C',
+        ...configEnv(),
         ...extraEnv,
       },
     });

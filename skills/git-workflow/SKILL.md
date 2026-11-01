@@ -197,8 +197,9 @@ base its open PR targets first (`gh pr view --json baseRefName`), then
 
 `git branch -d` judges merged by ancestry, so it refuses squash-merged branches;
 `-D` deletes unmerged work just as happily. **Never reach for `-D` to clean up.**
-**Prune Landed Branches** proves landing three ways (ancestry, content,
-reproducing the squash it landed as) and is revert-aware — ask for it. Without
+**Prune Landed Branches** proves landing four ways (ancestry, content,
+reproducing the squash it landed as, a merged PR whose head is exactly the
+tip) and is revert-aware for all but the last — ask for it. Without
 the extension the reasoning holds but the tool does not: say a branch *looks*
 landed and let the user decide.
 

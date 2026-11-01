@@ -20,7 +20,7 @@ export interface RemotePullRequest extends PullRequestInfo {
  * that made a repo-wide answer look impossible.
  */
 const PR_FIELDS =
-  'number,title,state,url,isDraft,headRefName,baseRefName,author,additions,deletions,changedFiles,mergeable,mergeStateStatus';
+  'number,title,state,url,isDraft,headRefName,headRefOid,baseRefName,author,additions,deletions,changedFiles,mergeable,mergeStateStatus';
 
 /**
  * After a branch is first published, when to ask GitHub again. A PR is
@@ -29,6 +29,23 @@ const PR_FIELDS =
  * it; asking twice catches both without polling.
  */
 export const PUBLISH_PROBE_DELAYS_MS = [8_000, 45_000];
+
+/**
+ * What a merge looks like from a clone: the trunk moved, or a branch's
+ * remote went away (deleted by the merge). Either is the moment a PR
+ * changed state, so the PR lists are asked again then rather than when
+ * their window lapses — or the panel shows a landed stack as open PRs
+ * still waiting to restack. The first look names nothing.
+ */
+export function remoteMoved(
+  before: { trunk?: string; published: ReadonlySet<string> } | undefined,
+  after: { trunk?: string; published: ReadonlySet<string> },
+): boolean {
+  if (!before) return false;
+  if (before.trunk !== after.trunk) return true;
+  for (const name of before.published) if (!after.published.has(name)) return true;
+  return false;
+}
 
 /**
  * Branches that have a remote now and did not last time — a push, or a
@@ -53,6 +70,7 @@ interface GhPrRow {
   url?: string;
   isDraft?: boolean;
   headRefName?: string;
+  headRefOid?: string;
   baseRefName?: string;
   author?: { login?: string };
   additions?: number;
@@ -76,6 +94,7 @@ function normalize(row: GhPrRow): RemotePullRequest | undefined {
     isDraft: Boolean(row.isDraft),
     url: row.url,
     headRefName: row.headRefName ?? '',
+    headSha: row.headRefOid || undefined,
     baseRefName: row.baseRefName,
     authorLogin: row.author?.login,
     additions: row.additions,
@@ -181,6 +200,19 @@ export class PullRequestIndex {
   /** Open PRs by head branch, newest answer held. */
   get openByHead(): ReadonlyMap<string, RemotePullRequest> {
     return this.open;
+  }
+
+  /**
+   * Branch → head commit of its merged PR, for branches with no open PR
+   * (one reopened as a new PR is live again, whatever merged before).
+   */
+  mergedHeads(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const [head, pr] of this.closed) {
+      if (pr.state === 'merged' && pr.headSha && !this.open.has(head))
+        out.set(head, pr.headSha);
+    }
+    return out;
   }
 
   /** The PR behind a head branch — open if there is one, else closed/merged. */

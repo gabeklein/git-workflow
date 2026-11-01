@@ -15,6 +15,8 @@ export interface PullRequestInfo {
   mergeStateStatus?: string;
   /** PR base branch name (e.g. staging) when known */
   baseRefName?: string;
+  /** The head commit — for a merged PR, exactly what landed. */
+  headSha?: string;
 }
 
 /**

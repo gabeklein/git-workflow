@@ -25,7 +25,7 @@ import { listWorktreeAdmin } from './worktreeAdmin';
 export interface LandedBranch {
   name: string;
   /** How it landed — worth showing, they mean different things. */
-  via: 'ancestor' | 'content' | 'squash' | 'replayed';
+  via: 'ancestor' | 'content' | 'squash' | 'replayed' | 'pr';
   /** Checkout holding it, if any: git refuses to delete a checked-out branch. */
   worktree?: string;
   /** Still published — deleting locally does not delete origin's copy. */
@@ -49,6 +49,13 @@ export async function findLandedBranches(
   repoCwd: string,
   baseRef: string,
   protect: string[] = [],
+  /**
+   * Branch → head of its MERGED PR. GitHub's word that exactly this commit
+   * landed — the one proof that survives a stack merged as a batch, where
+   * a later PR rewrites an earlier one's lines (so `content` misses) and
+   * each branch's diff carries its parent's commits (so `squash` misses).
+   */
+  mergedHeads: ReadonlyMap<string, string> = new Map(),
 ): Promise<LandedScan> {
   const baseSha = await resolveBaseSha(repoCwd, baseRef);
   if (!baseSha) return { landed: [], keptCount: 0 };
@@ -91,7 +98,11 @@ export async function findLandedBranches(
     const sha = await revParseCommit(repoCwd, `refs/heads/${name}`);
     if (!sha || sha === baseSha) continue;
     // Every probe is sound and any may abstain, so a miss means "keep it".
-    const via = await landedVia(repoCwd, sha, baseSha).catch(() => undefined);
+    const via =
+      (await landedVia(repoCwd, sha, baseSha).catch(() => undefined)) ??
+      // Only an exact match: a tip past the merged head has work GitHub
+      // never saw, and one behind it is a different question.
+      (mergedHeads.get(name) === sha ? ('pr' as const) : undefined);
     if (!via) {
       keptCount += 1;
       continue;
@@ -127,11 +138,12 @@ export async function pruneLandedBranches(
   baseRef: string,
   names: string[],
   protect: string[] = [],
+  mergedHeads: ReadonlyMap<string, string> = new Map(),
 ): Promise<PruneOutcome> {
   const deleted: string[] = [];
   const failed = new Map<string, string>();
   if (names.length === 0) return { deleted, failed };
-  const fresh = await findLandedBranches(repoCwd, baseRef, protect);
+  const fresh = await findLandedBranches(repoCwd, baseRef, protect, mergedHeads);
   const stillLanded = new Map(fresh.landed.map((b) => [b.name, b]));
   for (const name of names) {
     const branch = stillLanded.get(name);
