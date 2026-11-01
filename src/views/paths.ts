@@ -123,3 +123,19 @@ export function childrenAtPrefix<T extends { path: string }>(
 export function joinPrefix(prefix: string, name: string): string {
   return prefix ? `${prefix}/${name}` : name;
 }
+
+/**
+ * Whether a tree-layout folder should start open: it has at most `max`
+ * direct children (subfolders + files). Small folders are cheaper to show
+ * than to click through, and a chain of single-child folders (`src/a/b`)
+ * unfolds all the way down to the files. `max <= 0` turns it off.
+ */
+export function folderAutoExpands<T extends { path: string }>(
+  files: T[],
+  folderPath: string,
+  max: number,
+): boolean {
+  if (!(max > 0)) return false;
+  const level = childrenAtPrefix(files, folderPath);
+  return level.dirs.length + level.files.length <= max;
+}

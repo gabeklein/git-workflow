@@ -136,6 +136,7 @@ The EDH window loads the project via `--extensionDevelopmentPath` and **override
 | `worktreeCompare.watchFolders` | `[".worktrees"]` | Where new worktrees are created (auto-added to `.git/info/exclude`); discovery uses `git worktree list` |
 | `worktreeCompare.defaultBaseRef` | `main` | Fallback when fork point cannot be inferred |
 | `worktreeCompare.squashLayout` | `list` | Full Diff files: `list` or `tree` |
+| `worktreeCompare.treeAutoExpandMaxChildren` | `9` | Tree layout: folders with at most this many direct children (subfolders + files) start expanded; `0` = all collapsed |
 | `worktreeCompare.contentRefreshIntervalMs` | `0` | Idle poll (`0` = off, events only) |
 | `worktreeCompare.contentRefreshActiveIntervalMs` | `2500` | Faster poll after a change (only if poll enabled) |
 | `worktreeCompare.contentRefreshIdleAfterMs` | `20000` | Quiet time before poll relaxes (only if poll enabled) |
@@ -162,7 +163,7 @@ Disabling also **deletes the preview branch** — it is derived state, and the l
 
 The preview checkout is rebuilt as **base + a merge of each applied lane**, so you can run/test any combination of feature branches together while each branch stays clean. Only **landed commits** are merged — a dirty feature worktree never leaks into the preview tree.
 
-- Membership is **automatic by base**: every worktree whose own base — manual override or *genuine* inference (branch config / reflog / upstream), never a guessed fallback — matches the preview base appears as a row under **Preview**, each with a **checkbox**: checked = its branch is merged in. Stacked lanes (based on a parent branch) and worktrees whose base can't be inferred stay out. **Candidacy is automatic; inclusion never is** — a base match says two lanes *can* merge, not that they belong in the same preview, so joining is always somebody's decision. An unchecked candidate row is the visible evidence that a lane exists and is out, which is what keeps opt-in from failing silently. An empty lane cut from a stale base is re-pointed to the current base so its first commit starts from the right place — moving a lane is not enrolling it. **Add to Preview** remains for branches on a different or unknown base, and **Remove from Preview** works on every row — removing an auto member records a persistent exclusion (`focus-excluded`) so it stays gone until added back.
+- Membership is **automatic by base**: every worktree whose own base — manual override or *genuine* inference (open PR base / branch config / reflog / upstream), never a guessed fallback — matches the preview base appears as a row under **Preview**, each with a **checkbox**: checked = its branch is merged in. Stacked lanes (based on a parent branch) and worktrees whose base can't be inferred stay out. **Candidacy is automatic; inclusion never is** — a base match says two lanes *can* merge, not that they belong in the same preview, so joining is always somebody's decision. An unchecked candidate row is the visible evidence that a lane exists and is out, which is what keeps opt-in from failing silently. An empty lane cut from a stale base is re-pointed to the current base so its first commit starts from the right place — moving a lane is not enrolling it. **Add to Preview** remains for branches on a different or unknown base, and **Remove from Preview** works on every row — removing an auto member records a persistent exclusion (`focus-excluded`) so it stays gone until added back.
 - The row description shows the **base** (`→ main`) every rebuild starts from — current base tip + lanes is exactly what landing those PRs would produce. Its context menu has **Rebuild**, **Change Preview Base…** (sets workspace-scoped `previewBaseRef`; empty = `defaultBaseRef`), and **Disable Preview Mode…**.
 - The merge chain is computed **off-tree** (`git merge-tree --write-tree` + `commit-tree`, git ≥ 2.38; older git falls back to in-tree merges) and applied with a single `reset --hard`. A conflicting lane fails the rebuild **without touching the checkout** — the lane shows `conflict`, and unchecking it (or landing a fix on it) recovers. Files that didn't change aren't rewritten, so a running dev server sees one small burst, not lane-by-lane churn.
 - **Frozen base & drift**: enabling preview **pins** the base (`<git-common-dir>/focus-base`). The effective base follows `origin/<base>` whenever that is a descendant of the pin — published movement is always legit — and otherwise holds the pin, so commits made directly on the local base branch (by accident, or before thinking about preview) never silently retarget the preview or churn every lane's badges. When the local base moves past the frozen base, its unpushed commits appear under Preview as a **lane**: `main · +N unpushed`, with a checkbox — **checked by default**, so deliberate work in a main checkout shows up in the preview immediately, visibly, without ever becoming the floor. Unchecking excludes it and **persists** across future commits. The row's context menu offers **Move New Base Commits to a Branch…** (they become a real feature branch and the base branch returns to the frozen point — never over uncommitted changes) and **Catch Up Preview Base** (advance the pin deliberately); pushing the base lands the segment and the row disappears. `origin/<base>` is fetched periodically while preview is on (`previewFetchIntervalMs`, non-blocking; manual Rebuild fetches first). A lane is **landed** by the same probe the branch prune uses (ancestry, a content check, and — for a landing the base has since moved past — reproducing the squash), which makes the check *revert-safe*: a merged-then-reverted lane is not landed and re-applies as a real merge. Sharing that probe matters: retirement used to run a weaker check of its own, so a lane that landed and then watched other PRs merge on top would conflict against the base, never read as landed, never retire, and sit in the preview reporting a conflict indefinitely. Landed lanes retire automatically (unapplied under the rebuild lock, row stays with a green `landed` tag).
@@ -227,16 +228,19 @@ Applied preview lanes that conflict with the base are re-probed on every refresh
 
 When you expand a worktree, the compare base is resolved in order:
 
-1. Manual override (Change Base Ref)
-2. `branch.<name>.vscode-merge-base` (and similar config keys)
-3. Reflog `Created from <ref>` / `checkout: moving from <ref>` (e.g. `origin/staging`)
-4. `@{upstream}` only when it is **not** the same feature branch on a remote
-5. Closest ancestor among `main` / `staging` / `develop` / … (prefers `origin/*`)
-6. Configured default
+1. Manual override (Change Base Ref) — on a lane with an open PR it lasts only while you stay on that lane; focusing another one drops it, so coming back finds the PR's base again. Without a PR it holds until reload
+2. The base of the branch's **open pull request** (`origin/<base>` when that ref exists here; skipped when it does not)
+3. `branch.<name>.vscode-merge-base` (and similar config keys)
+4. Reflog `Created from <ref>` / `checkout: moving from <ref>` (e.g. `origin/staging`) — never a PR head fetched for review (`refs/remotes/pr/<n>`), which is the branch's own tip
+5. `@{upstream}` only when it is **not** the same feature branch on a remote
+6. Closest ancestor among `main` / `staging` / `develop` / … (prefers `origin/*`)
+7. Configured default
 
-Picking a bare local name like `staging` upgrades to `origin/staging` when that remote-tracking ref exists (local preview branches are often stale).
+The PR outranks everything but an override because it says where the branch is *going*, which is what a review diff is measured against — a stale `vscode-merge-base` or the reflog only say where it started. Retargeting the PR on GitHub moves the base on the next PR refresh, with no reload; the branch config is left as it was.
 
-While preview mode is active, step 6's configured default is the **preview base** — lanes land there, so when inference has nothing better, Commits/Full Diff compare against the same base the preview tree is built from.
+Picking a local name like `staging` or `release/2.0` upgrades to `origin/staging` / `origin/release/2.0` when that remote-tracking ref exists (local preview branches are often stale). Names that already are remote-tracking refs are left alone.
+
+While preview mode is active, step 7's configured default is the **preview base** — lanes land there, so when inference has nothing better, Commits/Full Diff compare against the same base the preview tree is built from.
 
 Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
@@ -246,13 +250,40 @@ Check **Output → Git Workflow** for lines like `Inferred base for …`.
 
 (Order and split are both **defaults for a first show**. VS Code remembers your own arrangement, so an existing window keeps whatever you dragged it into — **Reset View Locations** picks up the new ones.)
 
-**Lanes** panel (selector — header shows the checkout count):
+**Lanes** panel, stacks layout (the default — `worktreeCompare.lanesLayout`):
+
+```
+◉ preview/main  → main · 2 lanes      select: what the preview built
+  origin/main                         select: browse the trunk's history
+  feat/foo  📌 #100 ●          ☑      pinned stacks first
+  ↳ feat/bar  #101 draft       ☑      a linear stack: each on the row above
+  ↳ feat/baz                   ☐
+  fix/new-init  #538                  several branches on one parent:
+  ├ feat/run  #540                      siblings step in
+  │ ↳ feat/run-docs  #541               a stack inside a fork keeps ↳
+  └ spike/get-thenable
+  fix/thing  ⚠ restack         ☐      then live work, most recent first
+  ⌀ spike                             a detached checkout
+▶ Older  12 · quiet for 14d+          local branches nothing has happened to lately
+▶ Remote  19 · not local              only on the remote — fetch one locally to promote it
+▶ Landed  3                           refs to prune
+```
+
+Every row is a **leaf**: selecting it is how you look inside, in Focus, so the list stays a list. A row says what you act on — its PR, a dirty checkout, a needed restack; commit counts and ahead/behind are in its tooltip. Focus follows what it shows without a refresh: a commit in the focused checkout, on the focused branch, or on any branch of a combined selection redraws it (the combination is rebuilt from its parts).
+
+**What you are working on leads.** Pinned stacks come first, in the order you pinned them (the pin on a row's hover, or its context menu); then live stacks, most recent first — live meaning a checkout, in the preview, or a local branch with a tip newer than `worktreeCompare.activeDays` (14); then **Older** for quiet local stacks, and **Remote** for stacks with no local branch at all. Keeping a branch local is a lighter form of pinning: recency never promotes a remote-only branch, however fresh — it is someone's push (often an agent's) until you fetch it into a branch of your own. A stack moves as a unit and is as live as its liveliest branch. **Filter Branches…** in the title bar narrows the list to names containing some text, older branches included, until cleared; typing in the focused tree also highlights matches among the visible rows.
+
+It is built around **branches, not checkouts**. A branch's parent is the base of its open PR, else the branch it recorded as its base when created, else the nearest branch whose tip it contains, else the trunk (a recorded base of the trunk itself is usually just the default a checkout was cut with, so a branch the history proves it sits on outranks it). A push makes the panel ask GitHub for PRs again shortly after — the window between queries would otherwise hide a just-opened stack's PRs, and with them where each branch belongs — and it lists only the commits its parent lacks, so a stack never shows one twice. Stacked branches are listed flat after their parent: a linear stack is drawn with `↳` (each branch on the one above) and keeps one indent however tall it grows, while siblings — several branches on one parent — step in with `├` `└`, a `│` carrying an open fork past anything nested under it. A checkout is a badge on its branch: a repo icon, `●` while it has uncommitted changes (Focus shows them). The checkbox is preview membership, on any local branch. Shown: your local branches, plus remote-only branches whose tip is by you (`user.email`, or `worktreeCompare.authorEmails` for agents that commit as someone else) or whose open PR is yours — so an agent's pushed branch appears without being fetched into a checkout first.
+
+**Selection drives Focus**: a branch shows its commits and files against its parent (its checkout, when it has one), `origin/main` shows its history — newest first, ten at a time, each commit opening into its files — the preview row shows what the last rebuild produced, and **shift-selecting several branches shows them combined** — merged with `git merge-tree` against their common ancestor, nothing checked out, clashing files listed first. Commits and Files both start open.
+
+**Lanes** panel, groups layout (`"worktreeCompare.lanesLayout": "groups"` — header shows the checkout count):
 
 ```
 ▼ Preview        the derived preview, expanding to its lanes
 ▼ Working        has a checkout, root first then tip recency  ← click to focus
-▼ Local          has a local ref, no checkout — ↑ahead ↓behind vs origin
-▶ Remote         no local ref (hidden when there are none)
+▼ Local          has a local ref, no checkout — ↑ahead ↓behind vs origin   ← click to explore
+▶ Remote         no local ref (hidden when there are none)                  ← click to explore
 ▶ Landed         in the base, ref only (hidden when empty) — Prune lives here
 ```
 
@@ -270,7 +301,7 @@ The groups are a **ladder**, not four categories: each rung is what falls throug
 
 So **Landed** is refs waiting to be pruned, and a `landed · …` row under Working is exactly the set that needs you. Ignored files are singled out because they are the one thing removal could actually destroy: `git worktree remove` takes a local `.env` or build output without complaint, and the dirty probe cannot see them.
 
-Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the preview. Create a worktree from any branch row (inline action); PR rows expand into read-only file diffs.
+Rows are tagged with `worktree` / `PR #N` / `conflicts` / `T ago`, and carry a `●` badge when the branch is in the preview. Create a worktree from any branch row (inline action). **Clicking** a branch row with no checkout — Local, Remote or Landed — explores it in **Focus**, read-only (below); rows no longer expand into a flat file list.
 
 Every row's context menu also offers **Copy Branch Name** — the thing you paste into `gw-lane add`, `git worktree add`, or a PR description, and the one identifier the panel shows that was previously unselectable — and a checkout's menu offers **Open Terminal Here**, which starts an integrated terminal in that worktree named after its branch. VS Code's own "Open in Integrated Terminal" reaches worktrees only through the Explorer, and a lane's shell is where `gw-lane` and the test commands are run from.
 
@@ -287,6 +318,8 @@ Every row's context menu also offers **Copy Branch Name** — the thing you past
 The row's description says **where that checkout is**, in the shortest form that is true: `.` for the workspace root, `x` inside it, `../x` beside it (the usual worktree layout), `~/x` under home, absolute otherwise. Shortest rather than a fixed order, because a preference gets it wrong both ways — `../../Users/you/Projects/thing` is not "beside" anything and is plainly worse than `~/Projects/thing`, while a real sibling reads better as `../other` than as either. **Copy Path** is on the section row (the checkout root) and on any file or folder in it.
 
 The **Directory** section browses and opens the worktree's files as **real editable buffers**, not diffs. It is *Directory* and not *Files* because under a panel called Changes, "Files" reads as the changed files — the one thing it is not. The listing is git-driven (tracked + untracked, `.gitignore` respected — no `node_modules` noise) and follows focus; `New File…` / `Delete` sit on the section row and the context menus, and it refreshes on git activity and file events. It exists because the built-in Explorer can only reveal paths inside a workspace folder — a sibling worktree is outside every one of them — and converting the window to multi-root restarts the extension host.
+
+**A branch with no checkout** focuses by its ref instead, and the header says so — `feat-x (remote)`, `feat-x (no worktree)`, or `feat-x (PR #12)` for a fork PR reachable only as `pull/12/head`. The panel shows only **Commits** and **Full Diff**: there is no working tree, so nothing is staged, unstaged, or browsable under Directory, and nothing in it can be committed. Full Diff is `base...ref` — what the PR shows — and every file opens as a read-only diff between the fork point and the branch tip. The base is the PR's own base when the branch has an open PR, otherwise the default base, and **Change Base Ref** on the Commits row overrides it as it does for a checkout. A ref that is not here yet is **fetched** first (`origin/<branch>`, or `refs/remotes/pr/<n>` for a fork PR) — only fetched, no local branch is created; one that *is* here is shown as of the last fetch, and the panel recompares on its own when a later fetch moves it. **Create Worktree…** in the panel's title bar turns the focused branch into a checkout and focuses that instead. If the ref disappears — deleted on the remote and pruned — focus falls back to a checkout.
 
 Selection is persisted per workspace. Compare defaults to merge-base of the preview tip (not “must rebase” when main moves).
 

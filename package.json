@@ -45,6 +45,31 @@
           "default": "main",
           "description": "Fallback base ref when a worktree's fork point cannot be inferred (reflog / merge-base / upstream)."
         },
+        "worktreeCompare.lanesLayout": {
+          "type": "string",
+          "enum": [
+            "stacks",
+            "groups"
+          ],
+          "default": "stacks",
+          "enumDescriptions": [
+            "Branches leading into the trunk, stacked on their parents; a checkout is a badge on its branch. Select a branch or commit to focus it, shift-select several to see them combined.",
+            "The ladder of Working / Local / Remote / Landed, where a checkout is what a row stands for."
+          ],
+          "description": "How the Lanes panel lists your work."
+        },
+        "worktreeCompare.activeDays": {
+          "type": "number",
+          "default": 14,
+          "minimum": 0,
+          "description": "Lanes (stacks layout): a local branch whose tip is older than this many days folds into the Older group, unless it is pinned, has a checkout, or is in the preview. A stack moves as a unit and is as recent as its newest branch. Remote-only stacks are never promoted by recency; they fold into Remote."
+        },
+        "worktreeCompare.authorEmails": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Author emails that count as yours besides git's user.email, for agents that commit under their own identity. A branch that exists only on the remote shows in Lanes (stacks layout) when its tip commit is by one of these, or its open PR is yours."
+        },
         "worktreeCompare.squashLayout": {
           "type": "string",
           "enum": [
@@ -53,6 +78,12 @@
           ],
           "default": "list",
           "description": "How to show files under Full Diff: flat list or nested directory tree."
+        },
+        "worktreeCompare.treeAutoExpandMaxChildren": {
+          "type": "number",
+          "default": 9,
+          "minimum": 0,
+          "description": "Full Diff tree layout: a folder starts expanded when it has at most this many direct children (subfolders + files). 0 = every folder starts collapsed. Applies whenever Focus changes subject, or the layout or this setting changes; a folder you collapse or expand yourself keeps that state across refreshes."
         },
         "worktreeCompare.contentRefreshIntervalMs": {
           "type": "number",
@@ -234,6 +265,35 @@
     },
     "commands": [
       {
+        "command": "worktreeCompare.pinBranch",
+        "title": "Pin",
+        "icon": "$(pin)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.unpinBranch",
+        "title": "Unpin",
+        "icon": "$(pinned)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.filterLanes",
+        "title": "Filter Branches…",
+        "icon": "$(filter)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.clearLanesFilter",
+        "title": "Clear Branch Filter",
+        "icon": "$(filter-filled)",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.loadMoreTrunk",
+        "title": "Load More Trunk History",
+        "category": "Git Workflow"
+      },
+      {
         "command": "worktreeCompare.refresh",
         "title": "Refresh",
         "icon": "$(refresh)",
@@ -248,6 +308,11 @@
       {
         "command": "worktreeCompare.focusWorktree",
         "title": "Focus Worktree",
+        "category": "Git Workflow"
+      },
+      {
+        "command": "worktreeCompare.focusBranch",
+        "title": "Focus Branch",
         "category": "Git Workflow"
       },
       {
@@ -347,11 +412,6 @@
         "command": "worktreeCompare.refreshBranches",
         "title": "Refresh Branches",
         "icon": "$(refresh)",
-        "category": "Git Workflow"
-      },
-      {
-        "command": "worktreeCompare.openRemotePrFile",
-        "title": "Open Read-only PR Diff",
         "category": "Git Workflow"
       },
       {
@@ -524,9 +584,24 @@
     "menus": {
       "view/title": [
         {
+          "command": "worktreeCompare.filterLanes",
+          "when": "view == worktreeCompare.lanes && config.worktreeCompare.lanesLayout != groups && !worktreeCompare.lanesFiltered",
+          "group": "navigation@0"
+        },
+        {
+          "command": "worktreeCompare.clearLanesFilter",
+          "when": "view == worktreeCompare.lanes && worktreeCompare.lanesFiltered",
+          "group": "navigation@0"
+        },
+        {
           "command": "worktreeCompare.selectWorktree",
           "when": "view == worktreeCompare.lanes",
           "group": "navigation@1"
+        },
+        {
+          "command": "worktreeCompare.createWorktreeFromBranch",
+          "when": "view == worktreeCompare.focused && worktreeCompare.refFocused",
+          "group": "navigation@0"
         },
         {
           "command": "worktreeCompare.toggleSquashLayout",
@@ -545,6 +620,31 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "worktreeCompare.pinBranch",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /StackUnpinned/",
+          "group": "inline@9"
+        },
+        {
+          "command": "worktreeCompare.unpinBranch",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /StackPinned/",
+          "group": "inline@9"
+        },
+        {
+          "command": "worktreeCompare.pinBranch",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /StackUnpinned/",
+          "group": "0_pin@1"
+        },
+        {
+          "command": "worktreeCompare.unpinBranch",
+          "when": "view == worktreeCompare.lanes && viewItem =~ /StackPinned/",
+          "group": "0_pin@1"
+        },
+        {
+          "command": "worktreeCompare.changeBaseRef",
+          "when": "view == worktreeCompare.focused && viewItem == section:squash",
+          "group": "0_compare@1"
+        },
         {
           "command": "worktreeCompare.openPullRequest",
           "when": "view == worktreeCompare.focused && viewItem == conflictWarning",

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setConfig, setWindowFocused } from './vscode-stub';
 import { isRateLimitRefusal } from '../../src/github/gh';
-import { PullRequestIndex } from '../../src/github/prIndex';
+import { newlyPublished, PullRequestIndex } from '../../src/github/prIndex';
 import { PullRequestCache } from '../../src/views/pullRequestCache';
 import type { DiscoveredWorktree } from '../../src/git/discovery';
 
@@ -203,6 +203,33 @@ describe('PullRequestIndex', () => {
     expect(gh.calls).toHaveLength(2);
   });
 
+  it('keeps the NEWEST PR for a head that has several', async () => {
+    const gh = recorder((args) =>
+      args.includes('closed')
+        ? // gh answers newest first; the index must not let the oldest win
+          [row(12, 'feat-a', 'CLOSED'), row(4, 'feat-a', 'MERGED')]
+        : [],
+    );
+    const index = new PullRequestIndex(silent, { ghJson: gh.ghJson, ghPresent: present });
+
+    await index.ensureClosed('/repo');
+    expect(index.get('feat-a')?.number).toBe(12);
+  });
+
+  it('an open PR beats a newer closed one for the same head', async () => {
+    const gh = recorder((args) =>
+      args.includes('closed')
+        ? [row(20, 'feat-a', 'CLOSED')]
+        : [row(15, 'feat-a'), row(3, 'feat-a')],
+    );
+    const index = new PullRequestIndex(silent, { ghJson: gh.ghJson, ghPresent: present });
+
+    await index.ensureOpen('/repo');
+    await index.ensureClosed('/repo');
+    expect(index.get('feat-a')?.number).toBe(15);
+    expect(index.get('feat-a')?.state).toBe('open');
+  });
+
   it('asks nothing when gh is not installed', async () => {
     const gh = recorder(() => []);
     const index = new PullRequestIndex(silent, {
@@ -259,5 +286,19 @@ describe('rate-limit refusals', () => {
       isRateLimitRefusal('You have exceeded a secondary rate limit'),
     ).toBe(true);
     expect(isRateLimitRefusal('could not resolve to a Repository')).toBe(false);
+  });
+});
+
+describe('newlyPublished', () => {
+  // A push is the moment a PR becomes possible, so it is what makes the
+  // panel ask GitHub again inside its window (see BranchesTreeProvider).
+  it('names branches that gained a remote since the last listing', () => {
+    const before = new Set(['feat/a', 'feat/b']);
+    expect(newlyPublished(before, ['feat/a', 'feat/b', 'feat/c'])).toEqual(['feat/c']);
+  });
+
+  it('names none on the first listing, or when nothing new appeared', () => {
+    expect(newlyPublished(undefined, ['feat/a'])).toEqual([]);
+    expect(newlyPublished(new Set(['feat/a', 'feat/b']), ['feat/a'])).toEqual([]);
   });
 });

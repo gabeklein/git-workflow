@@ -17,6 +17,9 @@ import { FilesTreeProvider } from './views/filesTree';
 import { LaneDragAndDropController } from './views/laneDragAndDrop';
 import { WorktreeTreeProvider } from './views/worktreeTree';
 import { PullRequestIndex } from './github/prIndex';
+import { describeRefFocus } from './git/refFocus';
+import { registerStackFocus } from './views/stackFocus';
+import type { StackRowInfo } from './views/nodes/stacks';
 
 export function activate(context: vscode.ExtensionContext): unknown {
   const output = vscode.window.createOutputChannel('Git Workflow');
@@ -61,11 +64,17 @@ export function activate(context: vscode.ExtensionContext): unknown {
   // One panel for checkouts AND branches: a worktree is an activity status
   // of a branch, so they belong in one ordered list rather than two views
   // that show the same branch twice.
-  const lanesProvider = new LanesTreeProvider(treeProvider, branchesProvider);
+  const lanesProvider = new LanesTreeProvider(
+    treeProvider,
+    branchesProvider,
+    context.workspaceState,
+  );
   context.subscriptions.push(lanesProvider);
   const treeView = vscode.window.createTreeView('worktreeCompare.lanes', {
     treeDataProvider: lanesProvider,
     showCollapseAll: true,
+    // Shift-select branches to see them combined (stacks layout)
+    canSelectMany: true,
     // Lanes live under Preview here now; dragging one states which lane
     // wins a conflict, which is only meaningful because merge order is the
     // order YOU set rather than alphabetical (#35).
@@ -74,6 +83,9 @@ export function activate(context: vscode.ExtensionContext): unknown {
     ),
   });
   context.subscriptions.push(treeView);
+  context.subscriptions.push(
+    ...registerStackFocus(treeView, treeProvider, lanesProvider, log),
+  );
 
   const filesProvider = new FilesTreeProvider(treeProvider);
   context.subscriptions.push(filesProvider);
@@ -96,9 +108,18 @@ export function activate(context: vscode.ExtensionContext): unknown {
     treeView.description =
       listed > 0 ? `${listed} worktree${listed === 1 ? '' : 's'}` : undefined;
     const selected = treeProvider.getSelected();
-    changesView.description = selected
-      ? selected.branch + (selected.detached ? ' (detached)' : '')
-      : undefined;
+    const ref = treeProvider.getFocusedRef();
+    changesView.description = ref
+      ? describeRefFocus(ref)
+      : selected
+        ? selected.branch + (selected.detached ? ' (detached)' : '')
+        : undefined;
+    // Title-bar Create Worktree: offered only while the subject has none
+    void vscode.commands.executeCommand(
+      'setContext',
+      'worktreeCompare.refFocused',
+      Boolean(ref),
+    );
   };
   updateSplitViewDescriptions();
   context.subscriptions.push(
@@ -148,6 +169,16 @@ export function activate(context: vscode.ExtensionContext): unknown {
           );
           continue;
         }
+        // A branch row under the stacks layout: membership is its checkbox
+        const stack = (item as { stack?: StackRowInfo }).stack;
+        if (stack?.checkable) {
+          const on = state === vscode.TreeItemCheckboxState.Checked;
+          const result = on
+            ? await treeProvider.applyToPreview(stack.branch)
+            : await treeProvider.hideFromPreview(stack.branch);
+          reportPreviewResult(result, on ? `applied ${stack.branch}` : `hid ${stack.branch}`);
+          continue;
+        }
         if (item.kind !== 'previewLane') continue;
         const result =
           state === vscode.TreeItemCheckboxState.Checked
@@ -179,10 +210,32 @@ export function activate(context: vscode.ExtensionContext): unknown {
       test: {
         worktrees: () => treeProvider.getWorktrees(),
         selectedPath: () => treeProvider.getSelectedPath(),
+        focusedRef: () => treeProvider.getFocusedRef(),
         preview: () => treeProvider.getPreview(),
         baseStatus: (worktreePath: string) =>
           treeProvider.getBaseStatus(worktreePath),
         refreshBaseStatuses: () => treeProvider.refreshBaseStatuses(),
+        // Change Base Ref without its quick pick
+        setBaseRef: (worktreePath: string, baseRef: string) =>
+          treeProvider.setBaseRef(worktreePath, baseRef),
+        // The fixture has no GitHub: this stands in for gh's open-PR answer
+        // and runs the same association a real answer would.
+        seedPullRequests: (
+          prs: { number: number; head: string; base: string }[],
+        ) => {
+          prIndex.seedOpen(
+            prs.map((pr) => ({
+              number: pr.number,
+              title: `PR ${pr.number}`,
+              state: 'open' as const,
+              isDraft: false,
+              url: `https://example.invalid/pull/${pr.number}`,
+              headRefName: pr.head,
+              baseRefName: pr.base,
+            })),
+          );
+          return treeProvider.refreshPullRequests();
+        },
         setBaseDriftIncluded: (included: boolean) =>
           treeProvider.setBaseDriftIncluded(included),
         // RENDERED Preview rows — the exact TreeItems VS Code paints
@@ -204,12 +257,56 @@ export function activate(context: vscode.ExtensionContext): unknown {
             path: n.resourceUri?.fsPath,
           }));
         },
+        /**
+         * Full Diff rows (pass a folder's relative path to descend, tree
+         * layout). `expanded` is the state the row asks VS Code to start in.
+         */
+        fullDiffRows: async (folderRelPath?: string) => {
+          let parent = (await changesProvider.getChildren()).find(
+            (n) => n.kind === 'section' && n.section === 'squash',
+          );
+          let prefix = '';
+          for (const seg of folderRelPath ? folderRelPath.split('/') : []) {
+            if (!parent) break;
+            prefix = prefix ? `${prefix}/${seg}` : seg;
+            parent = (await changesProvider.getChildren(parent)).find(
+              (n) => n.kind === 'folder' && n.folderPath === prefix,
+            );
+          }
+          const rows = parent ? await changesProvider.getChildren(parent) : [];
+          return rows.map((n) => ({
+            kind: n.kind,
+            label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
+            id: n.id,
+            expanded:
+              n.collapsibleState === vscode.TreeItemCollapsibleState.Expanded,
+          }));
+        },
         /** Top-level Changes rows, in render order. */
         changesRows: async () =>
           (await changesProvider.getChildren()).map((n) => ({
             kind: n.kind,
             label: typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
           })),
+        /** Children of the top-level Changes row whose label starts with
+         *  `label` (e.g. 'Commits', 'Full Diff'), as rendered. */
+        changesChildren: async (label: string) => {
+          const parent = (await changesProvider.getChildren()).find((n) =>
+            (typeof n.label === 'string'
+              ? n.label
+              : (n.label?.label ?? '')
+            ).startsWith(label),
+          );
+          const rows = parent ? await changesProvider.getChildren(parent) : [];
+          return rows.map((n) => ({
+            kind: n.kind,
+            label:
+              typeof n.label === 'string' ? n.label : (n.label?.label ?? ''),
+            description:
+              typeof n.description === 'string' ? n.description : '',
+            contextValue: n.contextValue,
+          }));
+        },
         focusRows: async (
           group?: 'working' | 'local' | 'remote' | 'landed',
         ) => {

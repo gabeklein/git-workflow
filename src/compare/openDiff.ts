@@ -121,10 +121,10 @@ export async function openCommitFileDiff(
 }
 
 /**
- * Fully virtual, read-only PR review diff (no worktree checkout).
- * Both sides use the content provider.
+ * Fully virtual, read-only diff between two refs — a focused branch with
+ * no checkout. Both sides use the content provider.
  */
-export async function openRemotePrFileDiff(
+export async function openRefFileDiff(
   repoCwd: string,
   baseRef: string,
   headRef: string,

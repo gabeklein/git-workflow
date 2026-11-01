@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 /** Command registrations — split by domain; wired from extension.ts. */
-import { openRemotePrFileDiff } from '../compare/openDiff';
 import { createWorktreeForBranch, suggestWorktreePath } from '../git/branches';
+import {
+  ensureRefFocusFetched,
+  refExists,
+  refFocusForBranch,
+  type BranchRowInfo,
+} from '../git/refFocus';
 import { syncBranchWithRemote } from '../git/syncRemote';
 import {
   classifyIgnored,
@@ -21,7 +26,6 @@ import {
   type LandedBranch,
 } from '../git/pruneLanded';
 import { createWorktreeForPr } from '../github/remotePrs';
-import type { BranchItem, RemotePrFileItem } from '../views/nodes/branches';
 import type { BranchesTreeProvider } from '../views/branchesTree';
 import type { WorktreeTreeProvider } from '../views/worktreeTree';
 
@@ -67,6 +71,34 @@ async function releaseHoldingWorktree(
         : ''),
   );
   return { ok: true };
+}
+
+/** What Create Worktree reads off a branch row — or off the focused ref. */
+interface WorktreeSource {
+  branch: string;
+  repoCwd: string;
+  hasLocalRef: boolean;
+  hasRemote: boolean;
+  worktreePath?: string;
+  pr?: { number: number; headRefName: string };
+}
+
+/** The focused ref, in the shape Create Worktree reads off a branch row. */
+function focusedRefAsRow(
+  treeProvider: WorktreeTreeProvider,
+): WorktreeSource | undefined {
+  const focus = treeProvider.getFocusedRef();
+  const repoCwd = treeProvider.getRepoCwd();
+  if (!focus || !repoCwd) return undefined;
+  return {
+    branch: focus.branch,
+    repoCwd,
+    hasLocalRef: focus.source === 'local',
+    hasRemote: focus.source === 'remote',
+    pr: focus.pr
+      ? { number: focus.pr.number, headRefName: focus.branch }
+      : undefined,
+  };
 }
 
 export function registerBranchCommands(
@@ -309,29 +341,47 @@ export function registerBranchCommands(
       },
     ),
     vscode.commands.registerCommand(
-      'worktreeCompare.openRemotePrFile',
-      async (item?: RemotePrFileItem) => {
-        if (!item) return;
+      'worktreeCompare.focusBranch',
+      // A row with a checkout focuses the checkout; anything else focuses
+      // its ref, read-only — fetched first when it is not here yet.
+      async (
+        item?: BranchRowInfo & { worktreePath?: string; repoCwd?: string },
+      ) => {
+        if (!item?.branch) return;
+        if (item.worktreePath) {
+          await treeProvider.setSelectedPath(item.worktreePath);
+          return;
+        }
+        const repoCwd = item.repoCwd ?? treeProvider.getRepoCwd();
+        if (!repoCwd) return;
+        const focus = refFocusForBranch(item);
         try {
-          await openRemotePrFileDiff(
-            item.repoCwd,
-            item.baseRef,
-            item.headRef,
-            item.file,
-            `PR #${item.pr.number}`,
-          );
+          if (!(await refExists(repoCwd, focus.ref))) {
+            await vscode.window.withProgress(
+              {
+                location: vscode.ProgressLocation.Notification,
+                title: `Git Workflow: fetching ${focus.branch}…`,
+              },
+              () => ensureRefFocusFetched(repoCwd, focus),
+            );
+            log.appendLine(`Fetched ${focus.ref} to focus it`);
+            branchesProvider.refreshLocal();
+          }
+          await treeProvider.focusRef(focus);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.appendLine(`Open remote PR file failed: ${message}`);
+          log.appendLine(`Focus branch ${item.branch} failed: ${message}`);
           void vscode.window.showErrorMessage(
-            `Git Workflow: could not open PR file — ${message}`,
+            `Git Workflow: could not open ${item.branch} — ${message}`,
           );
         }
       },
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.createWorktreeFromBranch',
-      async (item?: BranchItem) => {
+      async (arg?: WorktreeSource) => {
+        // From the Focus title bar: the branch being explored read-only
+        const item = arg ?? focusedRefAsRow(treeProvider);
         if (!item?.branch) return;
         const repoCwd = item.repoCwd;
         if (item.worktreePath) {

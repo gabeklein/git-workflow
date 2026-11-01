@@ -26,6 +26,8 @@ interface BaseStatusHost {
   listedWorktrees(): DiscoveredWorktree[];
   /** Inference fallback (preview base while preview is on). */
   fallbackBaseRef(): string;
+  /** baseRefName of the branch's OPEN pull request, when one is known. */
+  pullRequestBaseFor(worktreePath: string, branch: string): string | undefined;
   fireTreeData(): void;
 }
 
@@ -41,8 +43,14 @@ interface WorktreeBaseState {
   baseRef: string;
 }
 
+/** A cached inference, and the PR base it was computed under. */
+interface Inferred {
+  prBase: string;
+  ref: string;
+}
+
 /**
- * THE per-worktree base (override → cached inference → inference) plus the
+ * THE per-worktree base (override → open PR's base → inference) plus the
  * row badges computed against it. Compare snapshots and badges both read
  * baseFor(), so the diff you read and the badge you see agree by
  * construction.
@@ -50,10 +58,12 @@ interface WorktreeBaseState {
 export class BaseStatusTracker {
   /** Manual Change Base Ref overrides, by worktree path. */
   private readonly overrides = new Map<string, string>();
-  /** Inferred per-worktree base (path\0branch → ref). */
-  private readonly inferred = new Map<string, string>();
+  /** Inferred per-worktree base (path\0branch → ref). Each entry carries
+   *  the PR base it saw, so a PR retargeted on GitHub — or opened, or
+   *  closed — re-resolves on the next read without waiting for a refresh. */
+  private readonly inferred = new Map<string, Inferred>();
   /** Genuine-inference results only (path\0branch → ref | ''=none). */
-  private readonly genuine = new Map<string, string>();
+  private readonly genuine = new Map<string, Inferred>();
   /** Row badges: path → status vs its base. */
   private readonly statuses = new Map<string, WorktreeBaseState>();
   /** Conflict-probe memo keyed refSha:baseSha (owned by baseStatusFor). */
@@ -77,6 +87,23 @@ export class BaseStatusTracker {
     return preferred;
   }
 
+  /**
+   * Leaving a lane ends a manual base set on it — when its open PR says
+   * what the base is. The override is a look at the lane from somewhere
+   * else, not a new answer to where it lands; coming back finds the PR's
+   * base again. A lane with no PR keeps its override: there is nothing to
+   * revert to but inference, which may be exactly what it corrected.
+   * Returns whether one was dropped.
+   */
+  dropOverrideOnLeave(worktreePath: string): boolean {
+    if (!this.overrides.has(worktreePath)) return false;
+    if (!this.lookup(worktreePath).prBase) return false;
+    this.overrides.delete(worktreePath);
+    this.invalidate(worktreePath);
+    void this.refresh();
+    return true;
+  }
+
   /** Drop cached inference for one worktree (all branches). */
   invalidate(worktreePath: string): void {
     for (const map of [this.inferred, this.genuine]) {
@@ -95,35 +122,43 @@ export class BaseStatusTracker {
   async baseFor(worktreePath: string): Promise<string> {
     const override = this.overrides.get(worktreePath);
     if (override) return override;
-    const branch =
-      this.host.getWorktrees().find((w) => w.path === worktreePath)?.branch ??
-      '';
-    const key = `${worktreePath}\0${branch}`;
+    const { key, prBase } = this.lookup(worktreePath);
     const cached = this.inferred.get(key);
-    if (cached) return cached;
-    const base = await resolveBaseRef(worktreePath, this.host.fallbackBaseRef());
-    this.inferred.set(key, base);
-    return base;
+    if (cached && cached.prBase === prBase) return cached.ref;
+    const ref = await resolveBaseRef(
+      worktreePath,
+      this.host.fallbackBaseRef(),
+      prBase || undefined,
+    );
+    this.inferred.set(key, { prBase, ref });
+    return ref;
   }
 
   /**
-   * Override ?? GENUINE inference (branch config / reflog / upstream) —
-   * never the configured fallback, which equals the preview base while
-   * preview is on. undefined = no evidence; auto flows (membership
-   * derivation in particular) must not enroll on a guess.
+   * Override ?? GENUINE inference (open PR base / branch config / reflog /
+   * upstream) — never the configured fallback, which equals the preview
+   * base while preview is on. undefined = no evidence; auto flows
+   * (membership derivation in particular) must not enroll on a guess.
    */
   async genuineBaseFor(worktreePath: string): Promise<string | undefined> {
     const override = this.overrides.get(worktreePath);
     if (override) return override;
+    const { key, prBase } = this.lookup(worktreePath);
+    const cached = this.genuine.get(key);
+    if (cached && cached.prBase === prBase) return cached.ref || undefined;
+    const ref = await inferBaseRef(worktreePath, prBase || undefined);
+    this.genuine.set(key, { prBase, ref: ref ?? '' });
+    return ref;
+  }
+
+  private lookup(worktreePath: string): { key: string; prBase: string } {
     const branch =
       this.host.getWorktrees().find((w) => w.path === worktreePath)?.branch ??
       '';
-    const key = `${worktreePath}\0${branch}`;
-    const cached = this.genuine.get(key);
-    if (cached !== undefined) return cached || undefined;
-    const base = await inferBaseRef(worktreePath);
-    this.genuine.set(key, base ?? '');
-    return base;
+    return {
+      key: `${worktreePath}\0${branch}`,
+      prBase: this.host.pullRequestBaseFor(worktreePath, branch) ?? '',
+    };
   }
 
   /** Row badge for a worktree (undefined = up to date / unknown). */

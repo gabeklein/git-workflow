@@ -1,13 +1,15 @@
-import * as path from 'node:path';
 import * as vscode from 'vscode';
-import type { FileChange } from '../../git/compare';
 import { prThemeIcon } from '../../github/pr';
 import type { RemotePullRequest } from '../../github/remotePrs';
 import { branchResourceUri } from '../worktreeDecorations';
 
 /**
- * One branch in the Branches panel — local, remote, or PR-only, with
- * recency and status tags. Rows with a PR expand into read-only PR files.
+ * One branch in the Lanes panel — local, remote, or PR-only, with recency
+ * and status tags. A row is a leaf: clicking it focuses the branch in the
+ * Focus panel — its checkout when it has one, otherwise the ref itself,
+ * read-only. PR rows used to expand into a flat file list here instead,
+ * which answered "what does it change" with no commits, no tree layout and
+ * no base you could change; Focus already does all three.
  */
 export class BranchItem extends vscode.TreeItem {
   readonly kind = 'branch' as const;
@@ -23,12 +25,7 @@ export class BranchItem extends vscode.TreeItem {
     /** Divergence from its upstream, when it has one. */
     sync?: { ahead?: number; behind?: number },
   ) {
-    super(
-      branch,
-      pr
-        ? vscode.TreeItemCollapsibleState.Collapsed
-        : vscode.TreeItemCollapsibleState.None,
-    );
+    super(branch, vscode.TreeItemCollapsibleState.None);
     const flags = [
       worktreePath ? 'HasWorktree' : 'NoWorktree',
       pr ? 'WithPr' : '',
@@ -77,7 +74,9 @@ export class BranchItem extends vscode.TreeItem {
 
     this.tooltip = [
       branch,
-      worktreePath ? `Worktree: ${worktreePath}` : 'No worktree — create one via context menu',
+      worktreePath
+        ? `Worktree: ${worktreePath}`
+        : 'No worktree — click to explore it read-only, or create one via the context menu',
       pr ? `PR #${pr.number}: ${pr.title}` : undefined,
       pr?.authorLogin ? `Author: ${pr.authorLogin}` : undefined,
       conflicting ? 'GitHub reports merge conflicts with the PR base.' : undefined,
@@ -88,39 +87,16 @@ export class BranchItem extends vscode.TreeItem {
       .filter((x): x is string => Boolean(x))
       .join('\n');
 
-    if (worktreePath) {
-      this.command = {
-        command: 'worktreeCompare.focusWorktree',
-        title: 'Focus Worktree',
-        arguments: [worktreePath],
-      };
-    }
-  }
-}
-
-/** Read-only file under a remote PR (virtual diff). */
-export class RemotePrFileItem extends vscode.TreeItem {
-  readonly kind = 'remotePrFile' as const;
-
-  constructor(
-    readonly repoCwd: string,
-    readonly pr: RemotePullRequest,
-    readonly baseRef: string,
-    readonly headRef: string,
-    readonly file: FileChange,
-  ) {
-    const basename = path.posix.basename(file.path);
-    const dir = path.posix.dirname(file.path);
-    super(basename, vscode.TreeItemCollapsibleState.None);
-    this.contextValue = 'remotePrFile';
-    this.description =
-      dir === '.' ? file.status : `${dir}  ${file.status}`;
-    this.iconPath = vscode.ThemeIcon.File;
-    this.tooltip = `${file.status}  ${file.path}\nRead-only (PR #${pr.number})`;
-    this.command = {
-      command: 'worktreeCompare.openRemotePrFile',
-      title: 'Open Read-only Diff',
-      arguments: [this],
-    };
+    this.command = worktreePath
+      ? {
+          command: 'worktreeCompare.focusWorktree',
+          title: 'Focus Worktree',
+          arguments: [worktreePath],
+        }
+      : {
+          command: 'worktreeCompare.focusBranch',
+          title: 'Focus Branch',
+          arguments: [this],
+        };
   }
 }

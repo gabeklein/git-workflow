@@ -65,7 +65,8 @@ export class ChangesTreeProvider
     if (element) return this.worktrees.getChangesChildren(element);
     const changes = await this.worktrees.getChangesChildren();
     // No selection: the diff half already says so — a second "select a
-    // worktree" under a Directory header is the same sentence twice.
+    // worktree" under a Directory header is the same sentence twice. A
+    // branch focused by its ref lands here too: it has no folder to browse.
     if (!this.worktrees.getSelectedPath()) return changes;
     const root = this.worktrees.getSelectedPath();
     // Warnings stay at the very top, above Directory. They are banners

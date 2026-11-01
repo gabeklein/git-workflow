@@ -13,13 +13,14 @@ import { getApi } from './helpers';
 
 const ORDER = [
   'overlay.test.cjs', //     activation, enroll/apply, selection, wip overlay
-  'files.test.cjs', //       Directory section of Focus (cleans up after itself)
+  'files.test.cjs', //       Directory section + Full Diff tree (cleans up after itself)
   'lanes.test.cjs', //       Lanes panel: the ladder, groups, no duplicates
   'landing.test.cjs', //     landed lifecycle, base badges
   'catch-up.test.cjs', //    manual rebase/merge catch-up flows
   'membership.test.cjs', //  auto membership, auto rebase
   'conflicts.test.cjs', //   petty-conflict resolver, dead lane prune
   'shell.test.cjs', //       driving the preview from a shell: settings, recipe, rebuild
+  'pr-base.test.cjs', //     compare base follows the open PR's base (self-cleaning)
   'base-pin.test.cjs', //    frozen base: drift row, branchify, catch up (mutates main)
   'absorb.test.cjs', //      stray-work rescue out of the preview checkout (mutates main — LAST)
 ];

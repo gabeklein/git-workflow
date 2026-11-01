@@ -76,6 +76,10 @@ There are two layers — pick by what the code needs, not by convenience:
 - The fixture (sample repo + bare origin + `landing` clone standing in
   for the GitHub side) is built by `test/edh/run.mjs`; assert against
   real git state plus the `GW_TEST_HOOKS` view state, not internals.
+- The fixture pins `worktreeCompare.lanesLayout` to `groups`: the
+  scenarios assert the Working / Local / Remote / Landed ladder. The
+  stacks layout's logic is pure (`src/git/stacks.ts`,
+  `src/git/combined.ts`) and covered in the unit layer.
 
 ### Running tests as an agent
 

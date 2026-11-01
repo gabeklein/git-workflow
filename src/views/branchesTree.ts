@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { listBranches, type BranchInfo } from '../git/branches';
-import type { FileChange } from '../git/compare';
 import {
   expendableIgnoredPatterns,
   isAutoRemoveLandedEnabled,
@@ -16,12 +15,16 @@ import {
 import { findLandedBranches } from '../git/pruneLanded';
 import { isGithubPrIntegrationEnabled } from '../github/pr';
 import { resetGithubPrClient } from '../github/gh';
-import { PullRequestIndex, type RemotePullRequest } from '../github/prIndex';
-import { listRemotePrFiles } from '../github/remotePrs';
+import {
+  newlyPublished,
+  PUBLISH_PROBE_DELAYS_MS,
+  PullRequestIndex,
+  type RemotePullRequest,
+} from '../github/prIndex';
 import type { DiscoveredWorktree } from '../git/discovery';
 import { MessageItem, type TreeNode } from './nodes';
 import { isPathInside } from './paths';
-import { BranchItem, RemotePrFileItem } from './nodes/branches';
+import { BranchItem } from './nodes/branches';
 
 const MAX_ROWS = 50;
 /**
@@ -33,7 +36,7 @@ const PRUNE_THROTTLE_MS = 60_000;
 /**
  * Branches panel: every branch of the repo — local, remote, and PR-only
  * heads — newest first, tagged with worktree / PR / conflict status.
- * Create worktrees from any row; PR rows expand into read-only files.
+ * Create worktrees from any row; a row with no checkout focuses its ref.
  *
  * Local list is one git call, reloaded on git activity. PR association
  * (via gh) refreshes on demand and on config/workspace changes.
@@ -69,15 +72,14 @@ export class BranchesTreeProvider
   private sweeping = false;
   private lastPruneAt = 0;
   private prsByHead = new Map<string, RemotePullRequest>();
+  /** Branch names with a remote, as of the last listing. */
+  private published: Set<string> | undefined;
+  private publishProbes: NodeJS.Timeout[] = [];
   private worktrees: DiscoveredWorktree[] = [];
   private worktreeByBranch = new Map<string, string>();
   private loading = false;
   private error: string | undefined;
   private repoCwd: string | undefined;
-  private readonly filesCache = new Map<
-    number,
-    { baseRef: string; headRef: string; files: FileChange[] }
-  >();
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -95,7 +97,6 @@ export class BranchesTreeProvider
           e.affectsConfiguration('worktreeCompare.remotePrLimit')
         ) {
           resetGithubPrClient();
-          this.filesCache.clear();
           this.prIndex.clear();
           this.refresh();
         }
@@ -141,11 +142,6 @@ export class BranchesTreeProvider
     return this.prsByHead.get(branch);
   }
 
-  /** Read-only file rows under a PR branch. */
-  getPrFileRows(cwd: string, pr: RemotePullRequest): Promise<TreeNode[]> {
-    return this.getPrFiles(cwd, pr);
-  }
-
   isLoading(): boolean {
     return this.loading;
   }
@@ -185,6 +181,10 @@ export class BranchesTreeProvider
         .map((b) => `${b.name}\0${b.committerDate}\0${b.hasLocalRef}\0${b.hasRemote}`)
         .join('\n');
       this.error = undefined;
+      const published = new Set(list.filter((b) => b.hasRemote).map((b) => b.name));
+      const fresh = newlyPublished(this.published, published);
+      this.published = published;
+      if (fresh.length) this.probeForNewPrs(fresh);
       if (fp !== this.branchesFingerprint) {
         this.branchesFingerprint = fp;
         this.branches = list;
@@ -200,6 +200,20 @@ export class BranchesTreeProvider
       this.output.appendLine(`Branch list failed: ${message}`);
       this._onDidChangeTreeData.fire();
     }
+  }
+
+  /**
+   * A newly published branch is about to get a PR, and the query window
+   * would otherwise hide it for minutes — long enough for a stack to look
+   * unstacked, since a PR's base is what places a branch. A later push
+   * restarts the schedule rather than adding to it.
+   */
+  private probeForNewPrs(branches: string[]): void {
+    this.output.appendLine(`Newly published: ${branches.join(', ')} — will ask GitHub for their PRs`);
+    for (const t of this.publishProbes) clearTimeout(t);
+    this.publishProbes = PUBLISH_PROBE_DELAYS_MS.map((ms) =>
+      setTimeout(() => void this.loadPrs(true), ms),
+    );
   }
 
   /**
@@ -239,8 +253,6 @@ export class BranchesTreeProvider
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     try {
       if (!element) return this.getRootChildren();
-      if (element.kind === 'branch' && element.pr)
-        return await this.getPrFiles(element.repoCwd, element.pr);
       return [];
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -292,31 +304,6 @@ export class BranchesTreeProvider
       );
     }
     return rows;
-  }
-
-  private async getPrFiles(
-    cwd: string,
-    pr: RemotePullRequest,
-  ): Promise<TreeNode[]> {
-    try {
-      let cached = this.filesCache.get(pr.number);
-      if (!cached) {
-        this.output.appendLine(
-          `Fetching PR #${pr.number} head for read-only review…`,
-        );
-        cached = await listRemotePrFiles(cwd, pr);
-        this.filesCache.set(pr.number, cached);
-      }
-      if (cached.files.length === 0)
-        return [new MessageItem('No file changes', pr.baseRefName)];
-      return cached.files.map(
-        (f) => new RemotePrFileItem(cwd, pr, cached!.baseRef, cached!.headRef, f),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.output.appendLine(`PR #${pr.number} files failed: ${message}`);
-      return [new MessageItem('Could not load PR files', message, 'error')];
-    }
   }
 
   /** Branches confirmed landed in the base, for the Landed group. */
@@ -421,6 +408,7 @@ export class BranchesTreeProvider
   }
 
   dispose(): void {
+    for (const t of this.publishProbes) clearTimeout(t);
     for (const d of this.disposables) {
       d.dispose();
     }

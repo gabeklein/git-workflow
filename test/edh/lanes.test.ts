@@ -5,7 +5,18 @@
  * if it has a checkout, otherwise under Local.
  */
 import * as assert from 'node:assert/strict';
-import { getApi, git, poll, repo, run, type TestApi } from './helpers';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import {
+  getApi,
+  git,
+  gitOk,
+  landing,
+  poll,
+  repo,
+  run,
+  type TestApi,
+} from './helpers';
 
 describe('focus panel', () => {
   let api: TestApi;
@@ -165,5 +176,93 @@ describe('focus panel', () => {
       [],
       'the preview is the leading row, never a row in a group',
     );
+  });
+});
+
+/**
+ * A branch with no checkout is explored IN Focus, read-only, from its ref
+ * — fetched first when it is not here yet. Runs after the Lanes checks
+ * that assert there is no Remote group, and removes its branch again so
+ * nothing later inherits one.
+ */
+describe('focusing a branch with no checkout', () => {
+  let api: TestApi;
+  let before_: string | undefined;
+  const branch = 'feat/remote-only';
+  before(async () => {
+    api = await getApi();
+    before_ = api.selectedPath();
+    // Published from the "GitHub side" and NOT fetched here: focusing it
+    // has to fetch it.
+    git(landing, ['fetch', '-q', 'origin']);
+    git(landing, ['checkout', '-q', '-b', branch, 'origin/main']);
+    fs.writeFileSync(path.join(landing, 'remote.txt'), 'only on the remote\n');
+    git(landing, ['add', 'remote.txt']);
+    git(landing, ['commit', '-qm', 'remote only work']);
+    git(landing, ['push', '-q', 'origin', branch]);
+    git(landing, ['checkout', '-q', 'main']);
+  });
+  after(async () => {
+    if (gitOk(landing, ['ls-remote', '--exit-code', 'origin', branch]))
+      git(landing, ['push', '-q', 'origin', '--delete', branch]);
+    git(repo, ['fetch', '-q', '--prune', 'origin']);
+    if (before_) await run('worktreeCompare.focusWorktree', before_);
+  });
+
+  it('fetches the ref and shows its commits and Full Diff, read-only', async () => {
+    assert.ok(
+      !gitOk(repo, ['rev-parse', '--verify', `origin/${branch}`]),
+      'the branch is not fetched yet',
+    );
+    await run('worktreeCompare.focusBranch', {
+      branch,
+      hasLocalRef: false,
+      hasRemote: true,
+    });
+    assert.equal(api.focusedRef()?.ref, `origin/${branch}`);
+    assert.equal(
+      api.selectedPath(),
+      undefined,
+      'no checkout is selected while a ref is focused',
+    );
+    assert.ok(
+      !gitOk(repo, ['rev-parse', '--verify', `refs/heads/${branch}`]),
+      'focusing creates no local branch',
+    );
+
+    await poll('Focus renders the ref', 30000, async () =>
+      (await api.changesRows()).some((r) => r.label.startsWith('Commits')),
+    );
+    const labels = (await api.changesRows()).map((r) => r.label);
+    // No working tree: nothing staged, unstaged, or to browse
+    assert.deepEqual(labels, ['Commits · 1', 'Full Diff']);
+
+    const commits = await api.changesChildren('Commits');
+    assert.deepEqual(
+      commits.map((c) => c.label),
+      ['remote only work'],
+    );
+    const files = await api.changesChildren('Full Diff');
+    assert.deepEqual(
+      files.map((f) => [f.label, f.contextValue]),
+      [['remote.txt', 'refFile']],
+      'files diff ref ↔ ref, with no write actions',
+    );
+  });
+
+  it('lists the fetched branch under Remote', async () => {
+    await poll('the branch appears under Remote', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return (await api.focusRows('remote')).some((r) => r.label === branch);
+    });
+  });
+
+  it('falls back to a checkout when the ref disappears', async () => {
+    git(landing, ['push', '-q', 'origin', '--delete', branch]);
+    git(repo, ['fetch', '-q', '--prune', 'origin']);
+    await poll('focus leaves the deleted ref', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return api.focusedRef() === undefined && Boolean(api.selectedPath());
+    });
   });
 });

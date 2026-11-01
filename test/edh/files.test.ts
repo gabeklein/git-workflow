@@ -104,3 +104,81 @@ describe('directory section', () => {
     );
   });
 });
+
+/**
+ * Full Diff in tree layout: small folders start open. Rides here because it
+ * is the same panel and the same scratch lane, and cleans up the same way.
+ */
+describe('full diff tree auto-expand', () => {
+  let api: TestApi;
+  const config = () => vscode.workspace.getConfiguration('worktreeCompare');
+  const scratch = path.join(laneA, 'gw-tree');
+
+  before(async () => {
+    api = await getApi();
+    // Untracked files are part of Full Diff, so nothing needs committing:
+    // `small` has 2 children (opens at the default 8), `big` has 10.
+    fs.mkdirSync(path.join(scratch, 'small'), { recursive: true });
+    fs.mkdirSync(path.join(scratch, 'big'), { recursive: true });
+    for (const f of ['s1.txt', 's2.txt']) {
+      fs.writeFileSync(path.join(scratch, 'small', f), 'x\n');
+    }
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(path.join(scratch, 'big', `f${i}.txt`), 'x\n');
+    }
+    await config().update(
+      'squashLayout',
+      'tree',
+      vscode.ConfigurationTarget.Workspace,
+    );
+    await run('worktreeCompare.focusWorktree', laneA);
+  });
+
+  after(async () => {
+    for (const key of ['squashLayout', 'treeAutoExpandMaxChildren']) {
+      await config().update(
+        key,
+        undefined,
+        vscode.ConfigurationTarget.Workspace,
+      );
+    }
+    fs.rmSync(scratch, { recursive: true, force: true });
+    await run('worktreeCompare.refresh');
+  });
+
+  const folder = async (parent: string | undefined, label: string) =>
+    (await api.fullDiffRows(parent)).find(
+      (r) => r.kind === 'folder' && r.label === label,
+    );
+
+  it('opens folders with few children and leaves big ones shut', async () => {
+    await poll('Full Diff shows the scratch folder', 30000, async () => {
+      await run('worktreeCompare.refresh');
+      return !!(await folder(undefined, 'gw-tree'));
+    });
+    assert.equal((await folder(undefined, 'gw-tree'))?.expanded, true);
+    assert.equal((await folder('gw-tree', 'small'))?.expanded, true);
+    assert.equal(
+      (await folder('gw-tree', 'big'))?.expanded,
+      false,
+      '10 children is over the default limit of 9',
+    );
+  });
+
+  it('0 turns it off, under a fresh id so the new state applies', async () => {
+    const before = await folder(undefined, 'gw-tree');
+    await config().update(
+      'treeAutoExpandMaxChildren',
+      0,
+      vscode.ConfigurationTarget.Workspace,
+    );
+    await poll('the folder starts collapsed', 15000, async () => {
+      const row = await folder(undefined, 'gw-tree');
+      return row?.expanded === false;
+    });
+    const after = await folder(undefined, 'gw-tree');
+    // VS Code keeps expansion per id and ignores the initial state of an id
+    // it has seen; an unchanged id would render as it was left.
+    assert.notEqual(after?.id, before?.id, 'setting change mints a new id');
+  });
+});

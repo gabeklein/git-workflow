@@ -58,6 +58,8 @@ export class WorktreeRowDecorationProvider
   implements vscode.FileDecorationProvider, vscode.Disposable
 {
   private selectedPath: string | undefined;
+  /** A branch focused by its ref (no checkout) — tinted like a checkout. */
+  private selectedBranch: string | undefined;
   private appliedPaths = new Set<string>();
   private appliedBranches = new Set<string>();
   private readonly _onDidChangeFileDecorations = new vscode.EventEmitter<
@@ -78,6 +80,16 @@ export class WorktreeRowDecorationProvider
     const uris: vscode.Uri[] = [];
     if (prev) uris.push(worktreeResourceUri(prev));
     if (fsPath) uris.push(worktreeResourceUri(fsPath));
+    this._onDidChangeFileDecorations.fire(uris.length > 0 ? uris : undefined);
+  }
+
+  setSelectedBranch(branch: string | undefined): void {
+    if (this.selectedBranch === branch) return;
+    const prev = this.selectedBranch;
+    this.selectedBranch = branch;
+    const uris: vscode.Uri[] = [];
+    if (prev) uris.push(branchResourceUri(prev));
+    if (branch) uris.push(branchResourceUri(branch));
     this._onDidChangeFileDecorations.fire(uris.length > 0 ? uris : undefined);
   }
 
@@ -113,9 +125,20 @@ export class WorktreeRowDecorationProvider
     uri: vscode.Uri,
   ): vscode.ProviderResult<vscode.FileDecoration> {
     if (uri.scheme === BRANCH_URI_SCHEME) {
-      return this.appliedBranches.has(branchFromUri(uri))
-        ? { badge: '●', tooltip: 'In the preview preview' }
-        : undefined;
+      const branch = branchFromUri(uri);
+      const applied = this.appliedBranches.has(branch);
+      const selected = branch === this.selectedBranch;
+      if (!applied && !selected) return undefined;
+      return {
+        badge: applied ? '●' : undefined,
+        tooltip: [
+          applied ? 'In the preview preview' : undefined,
+          selected ? 'Focused branch' : undefined,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        color: selected ? new vscode.ThemeColor('charts.blue') : undefined,
+      };
     }
     if (uri.scheme !== WORKTREE_URI_SCHEME) return undefined;
     const rowPath = fsPathFromWorktreeUri(uri);

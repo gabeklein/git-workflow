@@ -179,7 +179,8 @@ and the row will not explain itself.
 
 ## 6. Staying current with the base
 
-Staleness is measured against the *lane's own* base, not `main` by habit — read
+Staleness is measured against the *lane's own* base, not `main` by habit — the
+base its open PR targets first (`gh pr view --json baseRefName`), then
 `branch.<name>.vscode-merge-base`, the reflog, or ask.
 
 - **Rebase unpushed, merge the base into pushed** — the `auto` strategy; avoids

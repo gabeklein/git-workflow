@@ -3,7 +3,11 @@ import * as vscode from 'vscode';
 import type { FileChange } from '../../git/compare';
 import { worktreeFileUri } from '../worktreeDecorations';
 
-type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'remotePr';
+/**
+ * `ref` is a file of a focused branch with no checkout: both sides are
+ * refs, so the diff is virtual and read-only.
+ */
+type FileDiffKind = 'vsBase' | 'vsHead' | 'commit' | 'ref';
 
 /** Directory node under Full Diff tree layout. */
 export class FolderItem extends vscode.TreeItem {
@@ -14,9 +18,19 @@ export class FolderItem extends vscode.TreeItem {
     readonly baseRef: string,
     /** Posix path from worktree root */
     readonly folderPath: string,
+    opts: {
+      state?: vscode.TreeItemCollapsibleState;
+      /**
+       * Folded into the id. VS Code remembers expansion per id and ignores
+       * `state` for one it has seen, so a new generation is what lets the
+       * initial state apply again (see WorktreeTreeProvider.layoutGeneration).
+       */
+      generation?: number;
+    } = {},
   ) {
     const name = path.posix.basename(folderPath);
-    super(name, vscode.TreeItemCollapsibleState.Collapsed);
+    super(name, opts.state ?? vscode.TreeItemCollapsibleState.Collapsed);
+    this.id = `squashFolder:${opts.generation ?? 0}:${worktreePath}:${folderPath}`;
     this.contextValue = 'squashFolder';
     this.iconPath = vscode.ThemeIcon.Folder;
     this.resourceUri = worktreeFileUri(
@@ -31,6 +45,8 @@ export class FileItem extends vscode.TreeItem {
   readonly diffKind: FileDiffKind;
   readonly commitHash?: string;
   readonly statusSide?: 'staged' | 'unstaged';
+  /** The two sides of a `ref` diff: fork point ↔ branch tip. */
+  readonly refs?: { left: string; right: string };
 
   constructor(
     readonly worktreePath: string,
@@ -40,6 +56,7 @@ export class FileItem extends vscode.TreeItem {
       diffKind: FileDiffKind;
       commitHash?: string;
       statusSide?: 'staged' | 'unstaged';
+      refs?: { left: string; right: string };
       /** Tree layout: status letter only (path is in folder hierarchy) */
       treeLayout?: boolean;
     },
@@ -50,16 +67,19 @@ export class FileItem extends vscode.TreeItem {
     this.diffKind = opts.diffKind;
     this.commitHash = opts.commitHash;
     this.statusSide = opts.statusSide;
+    this.refs = opts.refs;
     this.contextValue =
       opts.diffKind === 'commit'
         ? 'commitFile'
-        : opts.diffKind === 'vsBase'
-          ? 'squashFile'
-          : opts.statusSide === 'staged'
-            ? 'stagedFile'
-            : opts.statusSide === 'unstaged'
-              ? 'unstagedFile'
-              : 'workingFile';
+        : opts.diffKind === 'ref'
+          ? 'refFile'
+          : opts.diffKind === 'vsBase'
+            ? 'squashFile'
+            : opts.statusSide === 'staged'
+              ? 'stagedFile'
+              : opts.statusSide === 'unstaged'
+                ? 'unstagedFile'
+                : 'workingFile';
 
     // Icon theme keys off the path; fake scheme avoids git/GitLens repo-open
     this.resourceUri = worktreeFileUri(

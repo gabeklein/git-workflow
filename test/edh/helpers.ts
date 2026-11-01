@@ -50,8 +50,23 @@ export interface TestApi {
     label: string;
     path?: string;
   }[]>;
+  /** Full Diff rows for the focused worktree (pass a folder's relative
+   *  path to descend, tree layout). `expanded` = the row's initial state. */
+  fullDiffRows(folderRelPath?: string): Promise<{
+    kind: string;
+    label: string;
+    id?: string;
+    expanded: boolean;
+  }[]>;
   /** Top-level Changes rows, in render order. */
   changesRows(): Promise<{ kind: string; label: string }[]>;
+  /** Rendered children of the top-level Changes row whose label starts
+   *  with `label` ('Commits', 'Full Diff'). */
+  changesChildren(label: string): Promise<
+    { kind: string; label: string; description: string; contextValue?: string }[]
+  >;
+  /** The branch Focus shows by its ref (no checkout), if any. */
+  focusedRef(): { ref: string; branch: string; source: string } | undefined;
   /** The RENDERED Lanes panel rows; pass a group to list its children. */
   focusRows(group?: 'working' | 'local' | 'remote' | 'landed'): Promise<
     {
@@ -83,11 +98,18 @@ export interface TestApi {
   worktrees(): { path: string; branch: string; isDirty?: boolean }[];
   baseStatus(worktreePath: string): {
     behind: number;
+    ahead: number;
     conflicts: boolean;
     rebasing?: boolean;
     merging?: boolean;
+    baseRef: string;
   } | undefined;
   refreshBaseStatuses(): Promise<void>;
+  /** Stand in for gh's open-PR list (the fixture has no GitHub). */
+  setBaseRef(worktreePath: string, baseRef: string): Promise<void>;
+  seedPullRequests(
+    prs: { number: number; head: string; base: string }[],
+  ): Promise<void>;
   logFile(): string;
 }
 

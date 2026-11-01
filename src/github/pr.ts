@@ -17,6 +17,17 @@ export interface PullRequestInfo {
   baseRefName?: string;
 }
 
+/**
+ * The base an open PR targets — the one PR fact that outranks compare-base
+ * inference. A closed or merged PR says where the branch went, not where
+ * it is going, so it answers nothing here.
+ */
+export function openPullRequestBase(
+  pr: PullRequestInfo | undefined,
+): string | undefined {
+  return pr?.state === 'open' ? pr.baseRefName || undefined : undefined;
+}
+
 type GithubPrMode = 'off' | 'auto';
 
 function getMode(): GithubPrMode {

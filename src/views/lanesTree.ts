@@ -6,6 +6,8 @@ import { BaseDriftItem, PreviewItem, PreviewLaneItem } from './nodes/lanes';
 import { planLaneRows, type LandedLane } from './lanesPlan';
 import type { BranchesTreeProvider } from './branchesTree';
 import type { WorktreeTreeProvider } from './worktreeTree';
+import { lanesLayout } from './lanesLayout';
+import { StackLanes } from './stackLanes';
 
 /**
  * Lanes panel: every line of work in the repo, grouped by how live it is.
@@ -32,12 +34,19 @@ export class LanesTreeProvider
   >();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly stacks: StackLanes;
 
   constructor(
     private readonly worktrees: WorktreeTreeProvider,
     private readonly branches: BranchesTreeProvider,
+    state: vscode.Memento,
   ) {
+    this.stacks = new StackLanes(worktrees, branches, state);
     this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('worktreeCompare.lanesLayout'))
+          this._onDidChangeTreeData.fire();
+      }),
       worktrees.onDidChangeTreeData(() => this._onDidChangeTreeData.fire()),
       worktrees.onDidChangeWorktrees(() => this._onDidChangeTreeData.fire()),
       branches.onDidChangeTreeData(() => this._onDidChangeTreeData.fire()),
@@ -48,15 +57,47 @@ export class LanesTreeProvider
     this._onDidChangeTreeData.fire();
   }
 
+  /** The ref the stacks layout leads into. */
+  trunk(cwd: string): Promise<string> {
+    return this.stacks.trunk(cwd);
+  }
+
+  /** Pins, and the filter, of the stacks layout. */
+  getStacks(): StackLanes {
+    return this.stacks;
+  }
+
+
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
   }
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     const cwd = this.branches.getRepoCwd();
-    // PR rows still nest — their files ARE children of the PR.
-    if (element?.kind === 'branch' && element.pr)
-      return this.branches.getPrFileRows(element.repoCwd, element.pr);
+    if (lanesLayout() === 'stacks' && cwd && element?.kind !== 'group') {
+      try {
+        if (element) return this.stacks.children(element);
+        const error = this.branches.getError();
+        if (error)
+          return [new MessageItem('Could not list branches', error, 'error')];
+        const rows = await this.stacks.rows(cwd, this.previewRow());
+        // Landed stays a group at the foot for now: it is where Prune lives.
+        const landed = this.plan().landed;
+        if (landed.length > 0)
+          rows.push(
+            new GroupItem(
+              'Landed',
+              'landed',
+              vscode.TreeItemCollapsibleState.Collapsed,
+              String(landed.length),
+            ),
+          );
+        return rows;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return [new MessageItem('Could not list branches', message, 'error')];
+      }
+    }
     if (element?.kind === 'group') {
       if (!cwd) return [];
       const plan = this.plan();
@@ -160,12 +201,19 @@ export class LanesTreeProvider
       };
       return row;
     }
-    return new PreviewItem(preview.branch, previewBaseRef(), {
+    const row = new PreviewItem(preview.branch, previewBaseRef(), {
       laneCount: preview.lanes.length,
       wip: preview.wip.some((l) => preview.lanes.includes(l)),
       error: preview.error,
       mergePaused: preview.mergePaused,
     });
+    // Under stacks membership is a checkbox on each branch row, so the
+    // preview has nothing to expand into: selecting it focuses what it built.
+    if (lanesLayout() === 'stacks') {
+      row.collapsibleState = vscode.TreeItemCollapsibleState.None;
+      row.id = 'stack:preview';
+    }
+    return row;
   }
 
   /**

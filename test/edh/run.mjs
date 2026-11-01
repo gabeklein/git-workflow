@@ -95,7 +95,16 @@ function buildFixture() {
   mkdirSync(path.join(repo, '.vscode'), { recursive: true });
   writeFileSync(
     path.join(repo, '.vscode', 'settings.json'),
-    `${JSON.stringify({ 'worktreeCompare.autoRemoveLandedWorktrees': false }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        'worktreeCompare.autoRemoveLandedWorktrees': false,
+        // The scenarios assert the Working / Local / Remote / Landed ladder;
+        // the stacks layout is covered by its own unit tests.
+        'worktreeCompare.lanesLayout': 'groups',
+      },
+      null,
+      2,
+    )}\n`,
   );
   return { root, repo };
 }

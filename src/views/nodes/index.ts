@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import type { BranchItem, RemotePrFileItem } from './branches';
+import type { BranchItem } from './branches';
 import type { FileItem, FolderItem } from './files';
 import type { BaseDriftItem, PreviewLaneItem, PreviewItem } from './lanes';
+import type { LoadMoreItem, StackGroupItem, TrunkItem } from './stacks';
 import type {
   CommitItem,
   ConflictWarningItem,
@@ -29,7 +30,9 @@ export type TreeNode =
   | FolderItem
   | FileItem
   | BranchItem
-  | RemotePrFileItem
+  | TrunkItem
+  | LoadMoreItem
+  | StackGroupItem
   | MessageItem;
 
 /** Top-level collapsible group (Worktrees list / Commits ahead). */

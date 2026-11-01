@@ -22,6 +22,27 @@ export interface RemotePullRequest extends PullRequestInfo {
 const PR_FIELDS =
   'number,title,state,url,isDraft,headRefName,baseRefName,author,additions,deletions,changedFiles,mergeable,mergeStateStatus';
 
+/**
+ * After a branch is first published, when to ask GitHub again. A PR is
+ * opened just after the push that makes it possible — by an agent seconds
+ * later, by hand within a minute — so asking at the push itself would miss
+ * it; asking twice catches both without polling.
+ */
+export const PUBLISH_PROBE_DELAYS_MS = [8_000, 45_000];
+
+/**
+ * Branches that have a remote now and did not last time — a push, or a
+ * fetch that brought someone's new branch. The first look has nothing to
+ * compare with, so it names none.
+ */
+export function newlyPublished(
+  before: ReadonlySet<string> | undefined,
+  after: Iterable<string>,
+): string[] {
+  if (!before) return [];
+  return [...after].filter((name) => !before.has(name));
+}
+
 /** Closed/merged PRs answer a question about history — they go stale slowly. */
 const CLOSED_TTL_FLOOR_MS = 15 * 60_000;
 
@@ -68,6 +89,22 @@ function normalize(row: GhPrRow): RemotePullRequest | undefined {
         : undefined,
     mergeStateStatus: row.mergeStateStatus?.toUpperCase(),
   };
+}
+
+/** Replace a map's contents with one PR per head branch. */
+function hold(
+  into: Map<string, RemotePullRequest>,
+  prs: RemotePullRequest[],
+): void {
+  into.clear();
+  for (const pr of prs) {
+    if (!pr.headRefName) continue;
+    // One head can carry several PRs (closed, then reopened as a new one).
+    // The newest is the one that speaks for the branch — by number, not
+    // list order, so it holds whatever order gh answers in.
+    const held = into.get(pr.headRefName);
+    if (!held || pr.number > held.number) into.set(pr.headRefName, pr);
+  }
 }
 
 /** Max PRs fetched per list query. */
@@ -151,6 +188,16 @@ export class PullRequestIndex {
     return this.open.get(headRefName) ?? this.closed.get(headRefName);
   }
 
+  /**
+   * Stand in for gh's answer about open PRs (the EDH test hooks: there is no
+   * GitHub behind the fixture). Counts as a fresh answer, so the window
+   * keeps the network out until it lapses.
+   */
+  seedOpen(prs: RemotePullRequest[]): void {
+    hold(this.open, prs);
+    this.openFetchedAt = this.now();
+  }
+
   /** Drop everything so the next ask goes to the network. */
   clear(): void {
     this.open.clear();
@@ -229,11 +276,10 @@ export class PullRequestIndex {
     // a broken remote is not retried on every refresh.
     stamp(this.now());
     if (!rows) return;
-    into.clear();
-    for (const row of rows) {
-      const pr = normalize(row);
-      if (pr?.headRefName) into.set(pr.headRefName, pr);
-    }
+    hold(
+      into,
+      rows.map(normalize).filter((pr): pr is RemotePullRequest => !!pr),
+    );
     this.output.appendLine(
       `GitHub: ${into.size} ${state} PR(s) in one query (${this.now() - t0}ms)`,
     );

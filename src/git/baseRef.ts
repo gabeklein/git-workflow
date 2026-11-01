@@ -16,9 +16,13 @@ async function refResolves(worktreePath: string, ref: string): Promise<boolean> 
   return gitOk(worktreePath, ['rev-parse', '--verify', `${ref}^{commit}`]);
 }
 
+const REMOTES = ['origin', 'upstream'];
+
 /**
  * Prefer the remote-tracking counterpart when the local name may be stale.
- * `staging` → `origin/staging` when that ref exists.
+ * `staging` → `origin/staging`, and `release/2.0` → `origin/release/2.0`,
+ * when that ref exists. A slash does not make a name remote: only a name
+ * that IS a remote-tracking ref (`origin/x`, `refs/...`) is left alone.
  */
 export async function preferRemoteTrackingRef(
   worktreePath: string,
@@ -26,9 +30,14 @@ export async function preferRemoteTrackingRef(
 ): Promise<string> {
   const trimmed = ref.trim();
   if (!trimmed || trimmed === 'HEAD' || trimmed.includes('..')) return trimmed;
-  // Already remote-tracking style or full ref
-  if (trimmed.startsWith('refs/') || trimmed.includes('/')) return trimmed;
-  for (const remote of ['origin', 'upstream']) {
+  if (trimmed.startsWith('refs/')) return trimmed;
+  if (trimmed.includes('/')) {
+    if (REMOTES.includes(trimmed.slice(0, trimmed.indexOf('/'))))
+      return trimmed;
+    if (await refResolves(worktreePath, `refs/remotes/${trimmed}`))
+      return trimmed;
+  }
+  for (const remote of REMOTES) {
     const candidate = `${remote}/${trimmed}`;
     if (await refResolves(worktreePath, candidate)) return candidate;
   }
@@ -59,6 +68,9 @@ async function baseFromReflog(
       return undefined;
     }
     if (source === branch || source.endsWith(`/${branch}`)) return undefined;
+    // A PR head fetched for review (refs/remotes/pr/<n>, refs/pull/<n>/head)
+    // is the branch's own tip, not where it forks — 0 ahead, empty diff.
+    if (isPullHeadRef(source)) return undefined;
     if (await refResolves(worktreePath, source))
       return preferRemoteTrackingRef(worktreePath, source);
     return undefined;
@@ -114,6 +126,10 @@ async function baseFromReflog(
   } catch {
     return undefined;
   }
+}
+
+function isPullHeadRef(ref: string): boolean {
+  return /^(refs\/remotes\/pr\/|refs\/pull\/|pr\/\d+$)/.test(ref);
 }
 
 /** If commit is exactly an preview branch tip, return that ref name. */
@@ -172,6 +188,23 @@ async function baseFromBranchConfig(
 }
 
 /**
+ * The base an OPEN pull request targets is where the branch will land, so it
+ * outranks every guess about where it started — a stale vscode-merge-base,
+ * a reflog naming the PR head, an upstream that is the branch itself.
+ * Resolved to the remote-tracking ref when present; undefined (fall through
+ * to inference) when no such ref exists here yet.
+ */
+export async function baseFromPullRequest(
+  worktreePath: string,
+  prBaseRefName: string | undefined,
+): Promise<string | undefined> {
+  const name = prBaseRefName?.trim();
+  if (!name) return undefined;
+  const preferred = await preferRemoteTrackingRef(worktreePath, name);
+  return (await refResolves(worktreePath, preferred)) ? preferred : undefined;
+}
+
+/**
  * Upstream is only useful as a compare base when it is not just the same
  * feature branch on a remote (origin/my-feature).
  */
@@ -201,8 +234,8 @@ async function baseFromUpstream(
 }
 
 /**
- * GENUINE inference only — evidence about where THIS branch started:
- * branch config (vscode-merge-base, etc.), reflog "Created from <ref>" /
+ * GENUINE inference only — evidence about where THIS branch belongs: the
+ * open PR's base (when the caller knows one), then branch config (vscode-merge-base, etc.), reflog "Created from <ref>" /
  * "checkout: moving from <ref>", or upstream (when it is not the feature
  * branch itself). undefined = no evidence; callers that GUESS (candidate
  * scan, configured default) must not treat their fallback as inference —
@@ -210,7 +243,10 @@ async function baseFromUpstream(
  */
 export async function inferBaseRef(
   worktreePath: string,
+  prBaseRefName?: string,
 ): Promise<string | undefined> {
+  const fromPr = await baseFromPullRequest(worktreePath, prBaseRefName);
+  if (fromPr) return fromPr;
   let branch = '';
   try {
     branch = (
@@ -229,7 +265,8 @@ export async function inferBaseRef(
 
 /**
  * Best-effort base ref for comparison (where the worktree/branch started):
- * 1. genuine inference (branch config / reflog / upstream — inferBaseRef)
+ * 1. genuine inference (open PR base / branch config / reflog / upstream —
+ *    inferBaseRef)
  * 2. closest ancestor among main/staging/develop (+ origin/*)
  * 3. configured default / hard fallbacks
  *
@@ -239,8 +276,9 @@ export async function inferBaseRef(
 export async function resolveBaseRef(
   worktreePath: string,
   defaultBaseRef: string,
+  prBaseRefName?: string,
 ): Promise<string> {
-  const inferred = await inferBaseRef(worktreePath);
+  const inferred = await inferBaseRef(worktreePath, prBaseRefName);
   if (inferred) return inferred;
 
   // Skip closest-ancestor scan by default — it can spawn dozens of git

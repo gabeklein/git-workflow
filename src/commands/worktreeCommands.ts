@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 /** Command registrations — split by domain; wired from extension.ts. */
 import {
   openCommitFileDiff,
+  openRefFileDiff,
   openStagedDiff,
   openUnstagedDiff,
   openWorkingTreeDiff,
@@ -365,16 +366,29 @@ export function registerWorktreeCommands(
     ),
     vscode.commands.registerCommand(
       'worktreeCompare.changeBaseRef',
-      async (item?: { worktreePath?: string; baseRef?: string }) => {
+      async (item?: { worktreePath?: string; baseRef?: string; section?: string }) => {
+        // A Files row under a focused ref carries the repo cwd as its path,
+        // which is the cwd its git runs in, not a checkout to rebase.
         const worktreePath =
-          item?.worktreePath ?? treeProvider.getSelectedPath();
-        if (!worktreePath) return;
+          item?.section && treeProvider.getFocusedRef()
+            ? undefined
+            : (item?.worktreePath ?? treeProvider.getSelectedPath());
+        // No checkout: the Commits row of a focused ref, which carries no
+        // path on purpose — the cwd its rows run in is some other
+        // checkout's, and that checkout's base must not change.
+        const ref = worktreePath ? undefined : treeProvider.getFocusedRef();
+        const cwd = worktreePath ?? (ref && treeProvider.getRepoCwd());
+        if (!cwd) return;
         const current =
-          item?.baseRef ?? treeProvider.getBaseRef(worktreePath);
+          item?.baseRef ??
+          (worktreePath
+            ? treeProvider.getBaseRef(worktreePath)
+            : treeProvider.getFocusedRefBase());
         try {
-          const picked = await pickBaseRef(worktreePath, current);
+          const picked = await pickBaseRef(cwd, current);
           if (!picked) return;
-          await treeProvider.setBaseRef(worktreePath, picked);
+          if (worktreePath) await treeProvider.setBaseRef(worktreePath, picked);
+          else treeProvider.setFocusedRefBase(picked);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.appendLine(`Change base ref failed: ${message}`);
@@ -405,7 +419,8 @@ export function registerWorktreeCommands(
       }) => {
         const fromSelected = item?.worktreePath
           ? treeProvider.getWorktree(item.worktreePath)?.branch
-          : treeProvider.getSelected()?.branch;
+          : (treeProvider.getSelected()?.branch ??
+            treeProvider.getFocusedRef()?.branch);
         const name = branchNameFromItem(item) ?? fromSelected;
         if (!name) return;
         await vscode.env.clipboard.writeText(name);
@@ -421,6 +436,16 @@ export function registerWorktreeCommands(
       async (item?: FileItem) => {
         if (!item) return;
         try {
+          if (item.diffKind === 'ref' && item.refs) {
+            await openRefFileDiff(
+              item.worktreePath,
+              item.refs.left,
+              item.refs.right,
+              item.file,
+              `fork point with ${item.baseRef}`,
+            );
+            return;
+          }
           if (item.diffKind === 'commit' && item.commitHash) {
             await openCommitFileDiff(
               item.worktreePath,

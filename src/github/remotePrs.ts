@@ -1,6 +1,5 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { FileChange } from '../git/compare';
 import { ensureExcludedFromStatus } from '../git/exclude';
 import { git, gitOk } from '../git/exec';
 import type { RemotePullRequest } from './prIndex';
@@ -8,7 +7,7 @@ import type { RemotePullRequest } from './prIndex';
 export type { RemotePullRequest };
 
 /** Tracking ref for a fetched PR head: refs/remotes/pr/<n> */
-function prRemoteRef(prNumber: number): string {
+export function prRemoteRef(prNumber: number): string {
   return `refs/remotes/pr/${prNumber}`;
 }
 
@@ -16,7 +15,7 @@ function prRemoteRef(prNumber: number): string {
  * Fetch PR head into refs/remotes/pr/<n> (object download only — no worktree).
  * Returns the ref name on success.
  */
-async function ensurePrHeadFetched(
+export async function ensurePrHeadFetched(
   repoCwd: string,
   prNumber: number,
 ): Promise<string> {
@@ -32,7 +31,7 @@ async function ensurePrHeadFetched(
 }
 
 /** Prefer origin/<base> when present. */
-async function resolvePrBaseRef(
+export async function resolvePrBaseRef(
   repoCwd: string,
   baseRefName: string | undefined,
 ): Promise<string> {
@@ -52,51 +51,13 @@ async function resolvePrBaseRef(
   return name;
 }
 
-function parseNameStatus(stdout: string): FileChange[] {
-  const files: FileChange[] = [];
-  for (const line of stdout.split('\n')) {
-    if (!line.trim()) continue;
-    const parts = line.split('\t');
-    const statusRaw = parts[0] ?? '';
-    const status = statusRaw.charAt(0) || 'M';
-    if (parts.length >= 3 && (status === 'R' || status === 'C')) {
-      files.push({
-        status,
-        oldPath: parts[1],
-        path: parts[2] ?? parts[1],
-      });
-    } else if (parts.length >= 2) {
-      files.push({ status, path: parts[1] });
-    }
-  }
-  return files;
-}
-
-/**
- * Three-dot file list for a PR (base...head) after fetch — no working tree needed.
- */
-export async function listRemotePrFiles(
-  repoCwd: string,
-  pr: RemotePullRequest,
-): Promise<{ baseRef: string; headRef: string; files: FileChange[] }> {
-  const headRef = await ensurePrHeadFetched(repoCwd, pr.number);
-  const baseRef = await resolvePrBaseRef(repoCwd, pr.baseRefName);
-  const out = await git(repoCwd, [
-    'diff',
-    '--name-status',
-    '--find-renames',
-    `${baseRef}...${headRef}`,
-  ]);
-  return { baseRef, headRef, files: parseNameStatus(out) };
-}
-
 /**
  * Create a linked worktree for a PR under the first watch folder.
  * Does not delete existing folders; throws if destination exists.
  */
 export async function createWorktreeForPr(
   repoCwd: string,
-  pr: RemotePullRequest,
+  pr: Pick<RemotePullRequest, 'number' | 'headRefName'>,
   destDir: string,
 ): Promise<string> {
   await fs.mkdir(path.dirname(destDir), { recursive: true });

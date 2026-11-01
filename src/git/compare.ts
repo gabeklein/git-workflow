@@ -246,6 +246,76 @@ export async function compareWorkingTreeToBase(
   };
 }
 
+/**
+ * Compare a REF to a base tip — the same shape as
+ * {@link compareWorkingTreeToBase}, for a branch nobody has checked out.
+ *
+ * There is no working tree, so there is nothing uncommitted: Full Diff is
+ * exactly `base...ref` (three-dot — what a PR shows), and ahead / behind
+ * are measured from the ref rather than HEAD. Runs from any checkout of
+ * the repo, since refs and objects are shared by all of them.
+ */
+export async function compareRefToBase(
+  repoCwd: string,
+  headRef: string,
+  baseTipRef: string,
+): Promise<CompareResult> {
+  let compareRef = baseTipRef;
+  try {
+    const mb = (
+      await git(repoCwd, ['merge-base', headRef, baseTipRef])
+    ).trim();
+    if (mb) compareRef = mb;
+  } catch {
+    // Unrelated histories — fall back to the tip
+  }
+
+  const [baseHead, baseTipHead, countOut] = await Promise.all([
+    git(repoCwd, ['rev-parse', '--short', compareRef]).then((s) => s.trim()),
+    git(repoCwd, ['rev-parse', '--short', baseTipRef]).then((s) => s.trim()),
+    git(repoCwd, [
+      'rev-list',
+      '--left-right',
+      '--count',
+      `${baseTipRef}...${headRef}`,
+    ]).then((s) => s.trim()),
+  ]);
+  // left = on the base tip only (behind), right = on the ref only (ahead)
+  const [behindStr, aheadStr] = countOut.split(/\s+/);
+  const ahead = Number(aheadStr) || 0;
+
+  const [logOut, diffOut] = await Promise.all([
+    ahead > 0
+      ? git(repoCwd, [
+          'log',
+          '--format=' + COMMIT_FORMAT,
+          `${compareRef}..${headRef}`,
+        ])
+      : Promise.resolve(''),
+    git(repoCwd, [
+      'diff',
+      '--name-status',
+      '--find-renames',
+      compareRef,
+      headRef,
+    ]),
+  ]);
+  const fullPrFiles = parseNameStatus(diffOut);
+  fullPrFiles.sort((a, b) => a.path.localeCompare(b.path));
+
+  return {
+    baseRef: baseTipRef,
+    compareRef,
+    baseHead,
+    baseTipHead,
+    compareIsTip: baseHead === baseTipHead,
+    ahead,
+    tipBehind: Number(behindStr) || 0,
+    commitsAhead: parseCommits(logOut),
+    fullPrFiles,
+  };
+}
+
 export async function listCommitFiles(
   worktreePath: string,
   commitHash: string,
@@ -277,4 +347,15 @@ export async function showFileAtRef(
   } catch {
     return '';
   }
+}
+
+/** The newest `count` commits of `ref`, newest first. */
+export async function listRecentCommits(
+  cwd: string,
+  ref: string,
+  count: number,
+): Promise<CommitInfo[]> {
+  return parseCommits(
+    await git(cwd, ['log', `-n${count}`, '--format=' + COMMIT_FORMAT, ref, '--']),
+  );
 }
