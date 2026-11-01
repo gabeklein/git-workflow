@@ -112,8 +112,9 @@ There are two layers — pick by what the code needs, not by convenience:
 Every git the extension runs goes through `git()` in `src/git/exec.ts`,
 which sets `gc.auto=0` and `maintenance.auto=false` through `GIT_CONFIG_*`
 env, children included. A background fetch must never start git's
-automatic repack in the user's repo: one did, racing something else, and
-deleted every reachable object (Nov 2026). Do not spawn `git` any other way.
+automatic repack in the user's repo. One that followed the extension's own
+`fetch origin main` left only unreachable objects behind (Nov 2026; how it
+lost the rest was never pinned down). Do not spawn `git` any other way.
 
 ## Git & PRs
 
